@@ -13,7 +13,6 @@ export class GeminiService implements IAIService {
     }
 
     private async fetchFiguresChunk(start: number, end: number): Promise<HistoricalFigure[]> {
-        console.log(`[Gemini] Requesting figures chunk for years ${start}-${end}. Prompting for ${HISTORICAL_FIGURES_PER_CENTURY_CHUNK} figures across categories: ${CATEGORY_LIST.filter(c => c !== 'EVENTS').join(', ')}.`);
         const prompt = `
             Generate a list of exactly ${HISTORICAL_FIGURES_PER_CENTURY_CHUNK} distinct and famous historical figures (politicians, rulers, artists, scientists, etc.) 
             who lived primarily between the years ${start} and ${end}.
@@ -71,7 +70,6 @@ export class GeminiService implements IAIService {
     }
 
     private async fetchEventsChunk(start: number, end: number): Promise<HistoricalFigure[]> {
-        console.log(`[Gemini] Requesting events chunk for years ${start}-${end}. Prompting for ${HISTORICAL_EVENTS_PER_CENTURY_CHUNK} major events.`);
         const prompt = `
             Generate a list of exactly ${HISTORICAL_EVENTS_PER_CENTURY_CHUNK} MAJOR historical events (wars, treaties, movements, ages) 
             that occurred between the years ${start} and ${end}.
@@ -129,7 +127,6 @@ export class GeminiService implements IAIService {
     }
 
     async fetchHistoricalFigures(startYear: number, endYear: number): Promise<HistoricalFigure[]> {
-        console.log(`[Gemini] Starting full timeline build for ${startYear}-${endYear}`);
         const model = "gemini-2.5-flash";
         
         // 1. Fetch People (Chunked if > 200 years, else standard)
@@ -143,7 +140,6 @@ export class GeminiService implements IAIService {
             peoplePromise = Promise.all(chunks.map(chunk => this.fetchFiguresChunk(chunk.start, chunk.end)))
                 .then(results => results.flat());
         } else {
-             console.log(`[Gemini] Requesting single batch of figures for ${startYear}-${endYear}. Prompting for ${HISTORICAL_FIGURES_COUNT} figures.`);
              // Standard single prompt
              const peoplePrompt = `
                 Generate a list of exactly ${HISTORICAL_FIGURES_COUNT} distinct and famous historical figures (politicians, rulers, artists, scientists, etc.) 
@@ -197,7 +193,6 @@ export class GeminiService implements IAIService {
         // 2. Fetch Events (Mixed Strategy: Global + Chunked if > 200)
         let eventsPromise: Promise<HistoricalFigure[]>;
         
-        console.log(`[Gemini] Requesting global major events for ${startYear}-${endYear}. Prompting for ${HISTORICAL_EVENTS_COUNT} global events.`);
         // Always fetch global events for continuity
         const globalEventsPrompt = `
             Generate a list of exactly ${HISTORICAL_EVENTS_COUNT} MAJOR historical events (wars, treaties, movements, ages) 
@@ -299,11 +294,8 @@ export class GeminiService implements IAIService {
             const allFigures = [...uniquePeople, ...uniqueEvents].filter((f: HistoricalFigure) => {
                 // For events, ensure both birthYear (startYear) and deathYear (endYear) are valid
                 if (f.category === 'EVENTS') {
-                    // Event must have a valid end year (not null, undefined, or NaN)
-                    const hasValidEndYear = f.deathYear != null && typeof f.deathYear === 'number' && !isNaN(f.deathYear);
                     // Event must span at least 1 year and overlap with timeline range
-                    return hasValidEndYear &&
-                           f.birthYear < f.deathYear &&
+                    return f.birthYear < f.deathYear &&
                            f.deathYear >= startYear &&
                            f.birthYear <= endYear;
                 }
@@ -322,7 +314,6 @@ export class GeminiService implements IAIService {
     }
 
     async fetchRelatedFigures(target: HistoricalFigure, allFigures: HistoricalFigure[]): Promise<string[]> {
-        console.log(`[Gemini] Analyzing relationships for figure: ${target.name} (${target.birthYear}-${target.deathYear})`);
         try {
             // We only send names to save context
             const candidates = allFigures.filter(f => f.id !== target.id).map(f => ({ id: f.id, name: f.name }));
@@ -374,7 +365,6 @@ export class GeminiService implements IAIService {
         startYear: number,
         endYear: number
     ): Promise<HistoricalFigure[]> {
-        console.log(`[Gemini] Discovering NEW figures related to: ${target.name} (Timeline: ${startYear}-${endYear})`);
         try {
             const prompt = `
                 I have a timeline focusing on ${target.name} (${target.birthYear}-${target.deathYear}).
@@ -434,7 +424,6 @@ export class GeminiService implements IAIService {
     }
 
     async fetchRelationshipExplanation(source: HistoricalFigure, target: HistoricalFigure): Promise<RelationshipExplanation | null> {
-        console.log(`[Gemini] Explaining relationship: ${source.name} <---> ${target.name}`);
         try {
             const prompt = `
                 Explain the historical relationship between ${source.name} (${source.birthYear}-${source.deathYear}) and ${target.name} (${target.birthYear}-${target.deathYear}).
@@ -480,7 +469,6 @@ export class GeminiService implements IAIService {
     }
 
     async fetchFigureDeepDive(figure: HistoricalFigure): Promise<DeepDiveData | null> {
-        console.log(`[Gemini] Fetching Deep Dive for: ${figure.name}`);
         try {
             const prompt = `
                 Provide a detailed historical analysis of ${figure.name} (${figure.birthYear}-${figure.deathYear}, ${figure.occupation}).

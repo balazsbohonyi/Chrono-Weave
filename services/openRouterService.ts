@@ -78,7 +78,6 @@ export class OpenRouterService implements IAIService {
     }
 
     private async fetchFiguresChunk(start: number, end: number): Promise<HistoricalFigure[]> {
-        console.log(`[OpenRouter] Requesting figures chunk: ${start}-${end}. Prompting for ${HISTORICAL_FIGURES_PER_CENTURY_CHUNK} figures.`);
         const prompt = `
             Generate a list of exactly ${HISTORICAL_FIGURES_PER_CENTURY_CHUNK} distinct and famous historical figures.
             Range: ${start}-${end}.
@@ -112,7 +111,6 @@ export class OpenRouterService implements IAIService {
     }
 
     private async fetchEventsChunk(start: number, end: number): Promise<HistoricalFigure[]> {
-        console.log(`[OpenRouter] Requesting events chunk: ${start}-${end}. Prompting for ${HISTORICAL_EVENTS_PER_CENTURY_CHUNK} events.`);
         const prompt = `
             Generate a list of exactly ${HISTORICAL_EVENTS_PER_CENTURY_CHUNK} MAJOR historical events.
             Range: ${start}-${end}.
@@ -147,7 +145,6 @@ export class OpenRouterService implements IAIService {
     }
 
     async fetchHistoricalFigures(startYear: number, endYear: number): Promise<HistoricalFigure[]> {
-        console.log(`[OpenRouter] Starting timeline build: ${startYear}-${endYear}`);
         let figures: HistoricalFigure[] = [];
 
         // 1. Fetch People (Chunked if > 200)
@@ -163,7 +160,6 @@ export class OpenRouterService implements IAIService {
                 console.error("Chunk fetch failed", e);
             }
         } else {
-             console.log(`[OpenRouter] Requesting single batch of figures for ${startYear}-${endYear}. Prompting for ${HISTORICAL_FIGURES_COUNT} figures.`);
              const peoplePrompt = `
                 Generate a list of exactly ${HISTORICAL_FIGURES_COUNT} distinct and famous historical figures.
                 Range: ${startYear}-${endYear}.
@@ -192,7 +188,6 @@ export class OpenRouterService implements IAIService {
         }
 
         // 2. Fetch Events
-        console.log(`[OpenRouter] Requesting global events for ${startYear}-${endYear}. Prompting for ${HISTORICAL_EVENTS_COUNT} events.`);
         const globalEventsPrompt = `
             Generate a list of exactly ${HISTORICAL_EVENTS_COUNT} MAJOR historical events.
             Range: ${startYear}-${endYear}.
@@ -286,7 +281,6 @@ export class OpenRouterService implements IAIService {
     }
 
     async fetchRelatedFigures(target: HistoricalFigure, allFigures: HistoricalFigure[]): Promise<string[]> {
-        console.log(`[OpenRouter] Analyzing relationships for: ${target.name}`);
         const candidates = allFigures.filter(f => f.id !== target.id).map(f => ({ id: f.id, name: f.name }));
         if (candidates.length === 0) return [];
 
@@ -307,7 +301,6 @@ export class OpenRouterService implements IAIService {
     }
 
     async discoverRelatedFigures(target: HistoricalFigure, existingNames: string[], startYear: number, endYear: number): Promise<HistoricalFigure[]> {
-        console.log(`[OpenRouter] Discovering NEW figures related to: ${target.name}`);
         const prompt = `
             Timeline focus: ${target.name}.
             Find 5 NEW figures related to target within ${startYear}-${endYear}.
@@ -336,7 +329,6 @@ export class OpenRouterService implements IAIService {
     }
 
     async fetchRelationshipExplanation(source: HistoricalFigure, target: HistoricalFigure): Promise<RelationshipExplanation | null> {
-         console.log(`[OpenRouter] Explaining relationship: ${source.name} <---> ${target.name}`);
          const prompt = `
             Explain relationship between ${source.name} and ${target.name}.
             Return JSON: "summary" (string), "sections" (array of {title, content}).
@@ -350,7 +342,6 @@ export class OpenRouterService implements IAIService {
     }
 
     async fetchFigureDeepDive(figure: HistoricalFigure): Promise<DeepDiveData | null> {
-        console.log(`[OpenRouter] Deep dive for: ${figure.name}`);
         const prompt = `
             Historical analysis of ${figure.name}.
             Return JSON: "summary" (string), "famousQuote" (string), "sections" (array of {title, content}).
