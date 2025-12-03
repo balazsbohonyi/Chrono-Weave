@@ -14,38 +14,60 @@ export class OpenRouterService implements IAIService {
     }
 
     private parseJson(text: string): any {
+        // Trim the text to remove any leading/trailing whitespace
+        const trimmedText = text.trim();
+
+        // First, try parsing the text directly
         try {
-            return JSON.parse(text);
+            return JSON.parse(trimmedText);
         } catch (e) {
-            const match = text.match(/```json([\s\S]*?)```/);
-            if (match && match[1]) {
-                try {
-                    return JSON.parse(match[1]);
-                } catch (e2) {}
-            }
-            const matchNoLang = text.match(/```([\s\S]*?)```/);
-            if (matchNoLang && matchNoLang[1]) {
-                try {
-                    return JSON.parse(matchNoLang[1]);
-                } catch (e3) {}
-            }
-            const startBrace = text.indexOf('{');
-            const endBrace = text.lastIndexOf('}');
-            if (startBrace !== -1 && endBrace !== -1) {
-                try {
-                     return JSON.parse(text.substring(startBrace, endBrace + 1));
-                } catch(e4) {}
-            }
-            const startBracket = text.indexOf('[');
-            const endBracket = text.lastIndexOf(']');
-            if (startBracket !== -1 && endBracket !== -1) {
-                try {
-                     return JSON.parse(text.substring(startBracket, endBracket + 1));
-                } catch(e5) {}
-            }
-            console.error("Failed to parse JSON. Raw text:", text);
-            throw new Error("Failed to parse JSON from OpenRouter response");
+            // If direct parse fails, try cleaning and extracting
         }
+
+        // Try to extract JSON from markdown code blocks (```json ... ``` or ``` ... ```)
+        const markdownMatch = trimmedText.match(/```(?:json)?[\s\n]*([\s\S]*?)```/);
+        if (markdownMatch && markdownMatch[1] && markdownMatch[1].trim().length > 0) {
+            try {
+                const extracted = markdownMatch[1].trim();
+                console.log("[OpenRouter] Markdown extraction found, attempting parse. Length:", extracted.length, "First 50 chars:", extracted.substring(0, 50));
+                return JSON.parse(extracted);
+            } catch (e2) {
+                console.warn("[OpenRouter] Markdown extraction found but parse failed:", (e2 as Error).message);
+                // Continue to next extraction method
+            }
+        }
+
+        // Try to find JSON array [...] first (since arrays are more common in responses)
+        const startBracket = trimmedText.indexOf('[');
+        const endBracket = trimmedText.lastIndexOf(']');
+        console.log("[OpenRouter] Checking array extraction. Start:", startBracket, "End:", endBracket);
+        if (startBracket !== -1 && endBracket !== -1 && endBracket > startBracket) {
+            try {
+                const extracted = trimmedText.substring(startBracket, endBracket + 1);
+                console.log("[OpenRouter] Array extraction found, attempting parse. Length:", extracted.length);
+                return JSON.parse(extracted);
+            } catch(e5) {
+                console.warn("[OpenRouter] Array extraction found but parse failed:", (e5 as Error).message);
+                // Continue to next extraction method
+            }
+        }
+
+        // Try to find JSON object {...}
+        const startBrace = trimmedText.indexOf('{');
+        const endBrace = trimmedText.lastIndexOf('}');
+        console.log("[OpenRouter] Checking object extraction. Start:", startBrace, "End:", endBrace);
+        if (startBrace !== -1 && endBrace !== -1 && endBrace > startBrace) {
+            try {
+                const extracted = trimmedText.substring(startBrace, endBrace + 1);
+                console.log("[OpenRouter] Object extraction found, attempting parse. Length:", extracted.length);
+                return JSON.parse(extracted);
+            } catch(e4) {
+                console.warn("[OpenRouter] Object extraction found but parse failed:", (e4 as Error).message);
+            }
+        }
+
+        console.error("[OpenRouter] Failed to parse JSON. Raw text:", trimmedText);
+        throw new Error("Failed to parse JSON from OpenRouter response");
     }
 
     private async callOpenRouter(prompt: string, systemPrompt?: string): Promise<any> {
