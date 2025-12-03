@@ -4,6 +4,7 @@ import { HistoricalFigure, LayoutData, ViewState, FigureCategory } from '../type
 import ActionBar from './ActionBar';
 import { formatYear } from '../utils/formatters';
 import { CATEGORY_COLORS } from '../constants';
+import { getTextColorForBackground } from '../services/utils';
 
 interface TimelineCanvasProps {
   figures: HistoricalFigure[];
@@ -917,12 +918,9 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
               barBackgroundColor = CATEGORY_COLORS['LEADERS & BADDIES'];
           }
           
-          const useWhiteText = 
-            figure.category === 'LEADERS & BADDIES' || 
-            figure.category === 'SCIENTISTS' || 
-            figure.category === 'WRITERS';
-            
-          let textColorClass = useWhiteText ? 'text-white' : 'text-black';
+          // Calculate text color based on contrast ratio with background
+          const textColor = getTextColorForBackground(barBackgroundColor);
+          let textColorClass = textColor === 'white' ? 'text-white' : 'text-black';
           
           let containerOpacityClass = "opacity-100";
           let animationClass = "";
@@ -936,11 +934,11 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
 
           if (isSearchMode) {
               if (isFocused) {
-                  barBackgroundColor = '#000000'; 
-                  textColorClass = 'text-white';
+                  barBackgroundColor = '#000000';
+                  textColorClass = `text-${getTextColorForBackground(barBackgroundColor)}`;
                   shadowClass = "shadow-2xl z-50";
                   animationClass = "animate-pulse-limited";
-                  containerOpacityClass = "opacity-100 scale-105"; 
+                  containerOpacityClass = "opacity-100 scale-105";
               } else {
                   containerOpacityClass = "opacity-20 grayscale";
               }
@@ -950,16 +948,16 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
               }
 
               if (discoverySourceId === figure.id) {
-                  barBackgroundColor = '#4f46e5'; 
-                  textColorClass = 'text-white';
+                  barBackgroundColor = '#4f46e5';
+                  textColorClass = `text-${getTextColorForBackground(barBackgroundColor)}`;
                   shadowClass = "shadow-xl z-50 ring-4 ring-indigo-200";
               } else if (isTracingTarget) {
                   barBackgroundColor = '#3b82f6';
-                  textColorClass = 'text-white';
+                  textColorClass = `text-${getTextColorForBackground(barBackgroundColor)}`;
                   shadowClass = "shadow-xl z-50";
               } else if (isNew) {
                   barBackgroundColor = '#fbbf24';
-                  textColorClass = 'text-black';
+                  textColorClass = `text-${getTextColorForBackground(barBackgroundColor)}`;
                   shadowClass = "shadow-md z-30";
               }
           }
