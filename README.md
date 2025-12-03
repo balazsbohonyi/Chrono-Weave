@@ -67,7 +67,8 @@ The app leverages Google Gemini or OpenRouter APIs to intelligently generate his
 
 ### 🌍 Figure & Event Management
 - **Custom Year Ranges**: Build timelines for any historical period
-- **Auto-sorted Lists**: Sidebar figures sorted by birth year or visual layout position
+- **Alphabetically Sorted Lists**: Sidebar figures and events sorted alphabetically by name
+- **Preserved Scroll Position**: Separate scroll tracking for figures and events—switch between tabs and your scroll position is remembered
 - **Dual View Mode**: Toggle between figures and events in the sidebar
 - **Category-aware Filtering**: Sidebar respects active category filters
 

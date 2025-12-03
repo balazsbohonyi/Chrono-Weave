@@ -474,19 +474,10 @@ const App: React.FC = () => {
 
   const sortedSidebarFigures = useMemo(() => {
       if (activeSidebarFigures.length === 0) return [];
-      
-      // If we don't have layout levels (or in global view), sort by year
-      if (figureLevels.size === 0) {
-          return [...activeSidebarFigures].sort((a, b) => a.birthYear - b.birthYear);
-      }
-      
-      return [...activeSidebarFigures].sort((a, b) => {
-          const levelA = figureLevels.get(a.id) ?? 9999;
-          const levelB = figureLevels.get(b.id) ?? 9999;
-          if (levelA !== levelB) return levelA - levelB;
-          return a.birthYear - b.birthYear;
-      });
-  }, [activeSidebarFigures, figureLevels]);
+
+      // Sort alphabetically by name - sorting is now handled in Sidebar component
+      return [...activeSidebarFigures];
+  }, [activeSidebarFigures]);
 
   const focusedFigureId = highlightedFigureIds.length > 0 
         ? highlightedFigureIds[currentSearchIndex] 

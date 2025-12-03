@@ -524,6 +524,13 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
   };
 
   const handlePointerDown = (e: React.PointerEvent) => {
+    // Check if clicking on the close button - allow it to propagate normally
+    const target = e.target as HTMLElement;
+    if (target.closest('button[data-close-selection]')) {
+      // Don't prevent default, don't capture, just let the onClick handler work
+      return;
+    }
+
     e.preventDefault();
     wasSearchFocusedOnDown.current = isSearchFocusActive && highlightedFigureIds.length > 0;
 
@@ -536,7 +543,7 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
         const pos = { x: e.clientX, y: e.clientY };
         setLastMousePos(pos);
         dragStartPos.current = pos;
-        
+
         if (containerRef.current) {
             containerRef.current.setPointerCapture(e.pointerId);
         }
@@ -545,16 +552,26 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
 
   const handlePointerUp = (e: React.PointerEvent) => {
     setIsDragging(false);
-    
+
     if (containerRef.current) {
-        containerRef.current.releasePointerCapture(e.pointerId);
+        try {
+            containerRef.current.releasePointerCapture(e.pointerId);
+        } catch (e) {
+            // Pointer capture may not have been set (e.g., on close button click)
+        }
     }
-    
+
     if (isBusy) return;
 
     const dist = Math.hypot(e.clientX - dragStartPos.current.x, e.clientY - dragStartPos.current.y);
-    
+
     if (dist < 5 && e.button === 0) {
+        // Check if we clicked on the close button
+        const hitElement = document.elementFromPoint(e.clientX, e.clientY);
+        if (hitElement?.closest('button[data-close-selection]')) {
+            return;
+        }
+
         if (wasSearchFocusedOnDown.current) {
             wasSearchFocusedOnDown.current = false;
             return;
@@ -563,7 +580,6 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
         // HIT TEST FOR FIGURE
         // Because of pointer capture on container, the e.target will likely be the container.
         // We use elementFromPoint to find what is visually under the cursor.
-        const hitElement = document.elementFromPoint(e.clientX, e.clientY);
         const figureId = hitElement?.closest('[data-figure-id]')?.getAttribute('data-figure-id');
         
         if (figureId) {
@@ -754,132 +770,123 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
             ))}
         </div>
 
-      {/* LAYER 1.5: Connector Lines (Screen Space for sharpness) */}
-      <svg className="absolute inset-0 pointer-events-none z-10 w-full h-full overflow-visible">
-          {layoutData.map(item => {
-              const { figure, level, labelLevel, labelYearOffset } = item;
-              const duration = figure.deathYear - figure.birthYear;
-              const isEvent = figure.category === 'EVENTS';
-              
-              // Filter matches the logic in the main rendering loop
-              if (!isEvent || duration >= 15 || isSearchMode || focusedFigureId === figure.id) return null;
+      {/* LAYER 1: Red Ghost Line (Behind Everything) */}
+      {selectedYearScreenX !== null && (
+          <div
+              className="absolute top-0 bottom-0 w-[2px] bg-red-500 z-0 pointer-events-none"
+              style={{ left: selectedYearScreenX }}
+          />
+      )}
 
-              // If filtering categories, also hide the route
-              if (selectedCategories.size > 0 && !selectedCategories.has(figure.category)) {
-                  return null;
-              }
+      {/* Red Label - Above Selection Rectangles */}
+      {selectedYearScreenX !== null && (
+          <div
+              className="absolute bg-red-600 text-white text-xs font-mono py-1 rounded shadow-lg z-[50] flex items-center"
+              style={{ left: selectedYearScreenX + 12, bottom: '35px', paddingLeft: '8px', paddingRight: '4px', gap: '8px' }}
+          >
+              {formatYear(Math.floor(selectedYear!))}
+              <button
+                data-close-selection
+                onMouseDown={(e: React.MouseEvent) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+                onMouseUp={(e: React.MouseEvent) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onEmptyClick();
+                }}
+                className="p-0.5 hover:bg-red-700/50 rounded transition-colors cursor-pointer flex-shrink-0"
+                type="button"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+          </div>
+      )}
 
-              // --- Calculation Logic (Matches Main Loop) ---
-              const width = Math.max(duration * BASE_PIXELS_PER_YEAR, 4);
-              const left = (figure.birthYear - startYear) * BASE_PIXELS_PER_YEAR;
-              const top = level * ROW_HEIGHT + 60;
+      {/* LAYER 1.5: Selection Rectangles (Behind Content) */}
+      <div
+        className="absolute top-0 left-0 origin-top-left will-change-transform z-5 pointer-events-none"
+        style={{
+          transform: `translate(${viewState.translateX}px, ${viewState.translateY}px) scale(${viewState.scale})`,
+          width: contentWidth,
+          height: contentHeight
+        }}
+      >
+        {layoutData.map((item) => {
+          const { figure, level } = item;
+          const duration = figure.deathYear - figure.birthYear;
+          const left = (figure.birthYear - startYear) * BASE_PIXELS_PER_YEAR;
+          const top = level * ROW_HEIGHT + 60;
 
-              const BAR_VERTICAL_OFFSET = 32;
-              const BAR_HEIGHT = 28;
-              
-              const barCenterX = left + width / 2;
-              
-              const isBelow = (labelLevel ?? level) > level;
-              const startY = isBelow 
-                 ? top + BAR_VERTICAL_OFFSET + BAR_HEIGHT 
-                 : top + BAR_VERTICAL_OFFSET;
+          const isSelected = selectedYear !== null && figure.birthYear <= selectedYear && figure.deathYear >= selectedYear;
 
-              const labelLeft = (figure.birthYear + (labelYearOffset ?? 10) - startYear) * BASE_PIXELS_PER_YEAR;
-              
-              const isGap = (labelLevel ?? level) % 1 !== 0;
-              const gapVisualOffset = isBelow ? 175 : 145;
-              const labelContainerTop = isGap 
-                ? Math.floor(labelLevel ?? level) * ROW_HEIGHT + gapVisualOffset 
-                : (labelLevel ?? level) * ROW_HEIGHT + 60 - 15;
+          if (!isSelected) return null;
 
-              const endX = labelLeft;
-              const endY = labelContainerTop + 13; 
+          const isEvent = figure.category === 'EVENTS';
+          const isShort = duration < 15;
 
-              // --- Projection to Screen Space ---
-              const toScreenX = (val: number) => (val * viewState.scale) + viewState.translateX;
-              const toScreenY = (val: number) => (val * viewState.scale) + viewState.translateY;
+          // For short events: only wrap the bar
+          if (isEvent && isShort) {
+            const BAR_VERTICAL_OFFSET = 32;
+            const barWidth = Math.max(duration * BASE_PIXELS_PER_YEAR, 4);
+            const padding = 12;
 
-              const sStartX = toScreenX(barCenterX);
-              const sStartY = toScreenY(startY);
-              const sEndX = toScreenX(endX);
-              const sEndY = toScreenY(endY);
-              
-              // Manhattan / Elbow Routing with Radius
-              const dx = sEndX - sStartX;
-              const dy = sEndY - sStartY;
-              const absDx = Math.abs(dx);
-              const absDy = Math.abs(dy);
-              
-              const signX = dx > 0 ? 1 : -1;
-              const signY = dy > 0 ? 1 : -1;
-              
-              const radius = 15; 
-              const r = Math.min(radius, absDx, absDy);
-              
-              let pathD = "";
-              
-              if (r < 2) {
-                  pathD = `M ${sStartX} ${sStartY} L ${sStartX} ${sEndY} L ${sEndX} ${sEndY}`;
-              } else {
-                  pathD = `M ${sStartX} ${sStartY} ` +
-                          `L ${sStartX} ${sEndY - signY * r} ` +
-                          `Q ${sStartX} ${sEndY} ${sStartX + signX * r} ${sEndY} ` +
-                          `L ${sEndX} ${sEndY}`;
-              }
-              
-              // Manual Arrow Head Calculation to ensure it scales
-              const arrowLength = 6 * Math.max(0.5, viewState.scale); // Scale the arrow head
-              // Determine direction of last segment: Horizontal from center to right/left
-              // Last segment is Horizontal: from something to sEndX, sEndY
-              // Vector is (signX, 0)
-              
-              // Actually we just know it ends horizontally
-              const arrowTipX = sEndX;
-              const arrowTipY = sEndY;
-              
-              // Backwards points
-              // Rotate vector (-signX, 0) by +/- 30 degrees
-              // Or just manually:
-              // x_back = tipX - signX * len * cos(30)
-              // y_top = tipY - len * sin(30)
-              // y_bot = tipY + len * sin(30)
-              
-              // Simpler: 45 degree chevron
-              const wingX = arrowTipX - (signX * arrowLength);
-              const wingYTop = arrowTipY - arrowLength * 0.6;
-              const wingYBot = arrowTipY + arrowLength * 0.6;
+            return (
+              <div
+                key={`sel-rect-${figure.id}`}
+                className="absolute bg-white/95 backdrop-blur-sm rounded-lg shadow-lg ring-1 ring-black/5 pointer-events-none"
+                style={{
+                  left: `${left - padding}px`,
+                  top: `${top + BAR_VERTICAL_OFFSET - 8}px`,
+                  width: `${barWidth + padding * 2}px`,
+                  height: `${28 + 16}px`
+                }}
+              />
+            );
+          }
 
-              const arrowPath = `M ${wingX} ${wingYTop} L ${arrowTipX} ${arrowTipY} L ${wingX} ${wingYBot}`;
+          // For standard figures: calculate based on content
+          // Name width: ~18px per char at font-black 22px
+          const nameWidth = figure.name.length * 18;
 
-              return (
-                  <g key={`connector-${figure.id}`}>
-                    <path 
-                        d={pathD}
-                        fill="none"
-                        stroke="black"
-                        strokeWidth="1.5"
-                        className="opacity-40"
-                    />
-                    {/* Circle at start */}
-                    <circle cx={sStartX} cy={sStartY} r="2" fill="black" className="opacity-40" />
-                    
-                    {/* Arrow at end */}
-                    <path 
-                        d={arrowPath}
-                        fill="none"
-                        stroke="black"
-                        strokeWidth="1.5"
-                        className="opacity-60"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                    />
-                  </g>
-              );
-          })}
-      </svg>
+          // Occupation width: ~14px per char at font-bold 18px
+          const occupationWidth = figure.occupation.length * 14;
+
+          // Bar width
+          const barWidth = Math.max(duration * BASE_PIXELS_PER_YEAR, 10);
+
+          // Date width: estimate based on year strings
+          const startYStr = formatYear(figure.birthYear);
+          const endYStr = figure.deathYear >= new Date().getFullYear() ? '' : formatYear(figure.deathYear);
+          const dateWidth = ((startYStr.length + endYStr.length + 3) * 14) + 60;
+
+          // Maximum width of content
+          const maxWidth = Math.max(nameWidth, occupationWidth, barWidth, dateWidth);
+
+          // Add horizontal and vertical padding
+          const hPadding = 15;
+          const vPadding = 8;
+
+          return (
+            <div
+              key={`sel-rect-${figure.id}`}
+              className="absolute bg-white/95 backdrop-blur-sm rounded-lg shadow-lg ring-1 ring-black/5 pointer-events-none"
+              style={{
+                left: `${left - hPadding}px`,
+                top: `${top - vPadding}px`,
+                width: `${maxWidth + hPadding * 2}px`,
+                height: `${90 + vPadding * 2}px`
+              }}
+            />
+          );
+        })}
+      </div>
 
       {/* LAYER 2: Content */}
-      <div 
+      <div
         className="absolute top-0 left-0 origin-top-left will-change-transform z-20"
         style={{
           transform: `translate(${viewState.translateX}px, ${viewState.translateY}px) scale(${viewState.scale})`,
@@ -894,7 +901,6 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
           const left = (figure.birthYear - startYear) * BASE_PIXELS_PER_YEAR;
           const top = level * ROW_HEIGHT + 60; 
 
-          const isSelected = selectedYear !== null && figure.birthYear <= selectedYear && figure.deathYear >= selectedYear;
           const isTracingTarget = relationshipState?.relatedIds.includes(figure.id);
           const isNew = newlyDiscoveredIds.has(figure.id);
           const isFocused = focusedFigureId === figure.id;
@@ -905,10 +911,10 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
 
           if (!barBackgroundColor) {
               if (!warnedCategoriesRef.current.has(figure.category)) {
-                  console.warn(`Render: Unknown category detected: "${figure.category}" (assigned to ${figure.name}). Using fallback gray color.`);
+                  console.warn(`Render: Unknown category detected: "${figure.category}" (assigned to ${figure.name}). Defaulting to LEADERS & BADDIES.`);
                   warnedCategoriesRef.current.add(figure.category);
               }
-              barBackgroundColor = '#9ca3af';
+              barBackgroundColor = CATEGORY_COLORS['LEADERS & BADDIES'];
           }
           
           const useWhiteText = 
@@ -952,12 +958,9 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
                   textColorClass = 'text-white';
                   shadowClass = "shadow-xl z-50";
               } else if (isNew) {
-                  barBackgroundColor = '#fbbf24'; 
+                  barBackgroundColor = '#fbbf24';
                   textColorClass = 'text-black';
                   shadowClass = "shadow-md z-30";
-              } else if (isSelected) {
-                  // CHANGED: selection color back to white (with styling for prominence)
-                  wrapperClass = "bg-white/95 backdrop-blur-sm rounded-lg -mx-10 px-10 -my-2 py-2 shadow-lg ring-1 ring-black/5 z-40";
               }
           }
 
@@ -990,19 +993,6 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
                         overflow: 'visible'
                     }}
                 >
-                     {/* Selection Highlight for Short Event Bar */}
-                     {isSelected && (
-                         <div 
-                             className="absolute bg-white/95 backdrop-blur-sm rounded-lg shadow-lg ring-1 ring-black/5 z-0"
-                             style={{
-                                 left: `${left - 12}px`,
-                                 top: `${top + BAR_VERTICAL_OFFSET - 8}px`,
-                                 width: `${Math.max(width, 4) + 24}px`,
-                                 height: `${28 + 16}px`
-                             }}
-                         />
-                     )}
-
                      {/* The Bar Itself */}
                      <div 
                         key={`bar-${figure.id}`}
@@ -1092,24 +1082,132 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
           );
         })}
       </div>
-      
-      {/* LAYER 3.5: Selected Year Line (Red) - Screen Space */}
-      {selectedYearScreenX !== null && (
-          <div 
-              className="absolute top-0 bottom-0 w-[2px] bg-red-500 z-25 pointer-events-none"
-              style={{ left: selectedYearScreenX }}
-          >
-               {/* Label */}
-               <div 
-                  className="absolute left-3 bg-red-600 text-white text-xs font-mono px-2 py-1 rounded shadow-lg transition-all duration-300 z-[60]"
-                  style={{ bottom: '20px' }} 
-              >
-                  {formatYear(Math.floor(selectedYear!))}
-              </div>
-          </div>
-      )}
 
-      {/* LAYER 2.5: Relationship SVG Overlay */}
+      {/* LAYER 2.5: Connector Lines (Manhattan Routes) */}
+      <svg className="absolute inset-0 pointer-events-none z-30 w-full h-full overflow-visible">
+          {layoutData.map(item => {
+              const { figure, level, labelLevel, labelYearOffset } = item;
+              const duration = figure.deathYear - figure.birthYear;
+              const isEvent = figure.category === 'EVENTS';
+
+              // Filter matches the logic in the main rendering loop
+              if (!isEvent || duration >= 15 || isSearchMode || focusedFigureId === figure.id) return null;
+
+              // If filtering categories, also hide the route
+              if (selectedCategories.size > 0 && !selectedCategories.has(figure.category)) {
+                  return null;
+              }
+
+              // --- Calculation Logic (Matches Main Loop) ---
+              const width = Math.max(duration * BASE_PIXELS_PER_YEAR, 4);
+              const left = (figure.birthYear - startYear) * BASE_PIXELS_PER_YEAR;
+              const top = level * ROW_HEIGHT + 60;
+
+              const BAR_VERTICAL_OFFSET = 32;
+              const BAR_HEIGHT = 28;
+
+              const barCenterX = left + width / 2;
+
+              const isBelow = (labelLevel ?? level) > level;
+              const startY = isBelow
+                 ? top + BAR_VERTICAL_OFFSET + BAR_HEIGHT
+                 : top + BAR_VERTICAL_OFFSET;
+
+              const labelLeft = (figure.birthYear + (labelYearOffset ?? 10) - startYear) * BASE_PIXELS_PER_YEAR;
+
+              const isGap = (labelLevel ?? level) % 1 !== 0;
+              const gapVisualOffset = isBelow ? 175 : 145;
+              const labelContainerTop = isGap
+                ? Math.floor(labelLevel ?? level) * ROW_HEIGHT + gapVisualOffset
+                : (labelLevel ?? level) * ROW_HEIGHT + 60 - 15;
+
+              const endX = labelLeft;
+              const endY = labelContainerTop + 13;
+
+              // --- Projection to Screen Space ---
+              const toScreenX = (val: number) => (val * viewState.scale) + viewState.translateX;
+              const toScreenY = (val: number) => (val * viewState.scale) + viewState.translateY;
+
+              const sStartX = toScreenX(barCenterX);
+              const sStartY = toScreenY(startY);
+              const sEndX = toScreenX(endX);
+              const sEndY = toScreenY(endY);
+
+              // Manhattan / Elbow Routing with Radius
+              const dx = sEndX - sStartX;
+              const dy = sEndY - sStartY;
+              const absDx = Math.abs(dx);
+              const absDy = Math.abs(dy);
+
+              const signX = dx > 0 ? 1 : -1;
+              const signY = dy > 0 ? 1 : -1;
+
+              const radius = 15;
+              const r = Math.min(radius, absDx, absDy);
+
+              let pathD = "";
+
+              if (r < 2) {
+                  pathD = `M ${sStartX} ${sStartY} L ${sStartX} ${sEndY} L ${sEndX} ${sEndY}`;
+              } else {
+                  pathD = `M ${sStartX} ${sStartY} ` +
+                          `L ${sStartX} ${sEndY - signY * r} ` +
+                          `Q ${sStartX} ${sEndY} ${sStartX + signX * r} ${sEndY} ` +
+                          `L ${sEndX} ${sEndY}`;
+              }
+
+              // Manual Arrow Head Calculation to ensure it scales
+              const arrowLength = 6 * Math.max(0.5, viewState.scale); // Scale the arrow head
+              // Determine direction of last segment: Horizontal from center to right/left
+              // Last segment is Horizontal: from something to sEndX, sEndY
+              // Vector is (signX, 0)
+
+              // Actually we just know it ends horizontally
+              const arrowTipX = sEndX;
+              const arrowTipY = sEndY;
+
+              // Backwards points
+              // Rotate vector (-signX, 0) by +/- 30 degrees
+              // Or just manually:
+              // x_back = tipX - signX * len * cos(30)
+              // y_top = tipY - len * sin(30)
+              // y_bot = tipY + len * sin(30)
+
+              // Simpler: 45 degree chevron
+              const wingX = arrowTipX - (signX * arrowLength);
+              const wingYTop = arrowTipY - arrowLength * 0.6;
+              const wingYBot = arrowTipY + arrowLength * 0.6;
+
+              const arrowPath = `M ${wingX} ${wingYTop} L ${arrowTipX} ${arrowTipY} L ${wingX} ${wingYBot}`;
+
+              return (
+                  <g key={`connector-${figure.id}`}>
+                    <path
+                        d={pathD}
+                        fill="none"
+                        stroke="black"
+                        strokeWidth="1.5"
+                        className="opacity-40"
+                    />
+                    {/* Circle at start */}
+                    <circle cx={sStartX} cy={sStartY} r="2" fill="black" className="opacity-40" />
+
+                    {/* Arrow at end */}
+                    <path
+                        d={arrowPath}
+                        fill="none"
+                        stroke="black"
+                        strokeWidth="1.5"
+                        className="opacity-60"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                    />
+                  </g>
+              );
+          })}
+      </svg>
+
+      {/* LAYER 3: Relationship SVG Overlay */}
       {relationshipState && (
         <svg className="absolute inset-0 pointer-events-none z-40 w-full h-full overflow-visible">
             {relationshipState.relatedIds.map(id => {
@@ -1211,13 +1309,13 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
 
       {/* LAYER 3.5: Cursor Line - Blue */}
       {cursorX !== null && (
-        <div 
+        <div
             className="absolute top-0 bottom-0 w-px bg-blue-500/70 z-30 pointer-events-none"
             style={{ left: cursorX }}
         >
-            <div 
-                className="absolute left-2 bg-blue-600 text-white text-xs font-mono px-2 py-1 rounded shadow-lg transition-all duration-300"
-                style={{ bottom: '20px' }} 
+            <div
+                className="absolute left-2 bg-blue-600 text-white text-xs font-mono px-2 py-1 rounded shadow-lg transition-all duration-300 z-[100]"
+                style={{ bottom: '35px' }}
             >
                 {formatYear(Math.floor(hoverYearVal || 0))}
             </div>

@@ -1,6 +1,11 @@
 
 import { FigureCategory } from './types';
 
+export const HISTORICAL_FIGURES_COUNT = 60;
+export const HISTORICAL_FIGURES_PER_CENTURY_CHUNK = 20;
+export const HISTORICAL_EVENTS_COUNT = 30;
+export const HISTORICAL_EVENTS_PER_CENTURY_CHUNK = 5;
+
 export const CATEGORY_COLORS: Record<FigureCategory, string> = {
   'ARTISTS': '#b7e1f3',
   'BUSINESS': '#f9c908',
@@ -25,13 +30,3 @@ export const CATEGORY_LIST: FigureCategory[] = [
   'THINKERS',
   'WRITERS'
 ];
-
-// export const HISTORICAL_FIGURES_COUNT = 60;
-// export const HISTORICAL_FIGURES_PER_CENTURY_CHUNK = 20;
-// export const HISTORICAL_EVENTS_COUNT = 30;
-// export const HISTORICAL_EVENTS_PER_CENTURY_CHUNK = 5;
-
-export const HISTORICAL_FIGURES_COUNT = 20;
-export const HISTORICAL_FIGURES_PER_CENTURY_CHUNK = 3;
-export const HISTORICAL_EVENTS_COUNT = 10;
-export const HISTORICAL_EVENTS_PER_CENTURY_CHUNK = 3;

@@ -19,9 +19,9 @@ interface SidebarProps {
 
 type ViewMode = 'FIGURES' | 'EVENTS';
 
-const Sidebar: React.FC<SidebarProps> = ({ 
-  selectedFigures, 
-  currentYear, 
+const Sidebar: React.FC<SidebarProps> = ({
+  selectedFigures,
+  currentYear,
   onTraceRelationships,
   activeTracingFigureId,
   onUpdateSourceY,
@@ -35,6 +35,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [tracingId, setTracingId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('FIGURES');
+  const [scrollPositions, setScrollPositions] = useState<{ FIGURES: number; EVENTS: number }>({ FIGURES: 0, EVENTS: 0 });
 
   // Refs for tracking positions
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -50,11 +51,12 @@ const Sidebar: React.FC<SidebarProps> = ({
   const figuresCount = useMemo(() => categoryFilteredFigures.filter(f => f.category !== 'EVENTS').length, [categoryFilteredFigures]);
   const eventsCount = useMemo(() => categoryFilteredFigures.filter(f => f.category === 'EVENTS').length, [categoryFilteredFigures]);
 
-  // Determine Final Display List based on View Mode
+  // Determine Final Display List based on View Mode with Alphabetical Sorting
   const displayFigures = useMemo(() => {
-    return categoryFilteredFigures.filter(f => 
-       viewMode === 'FIGURES' ? f.category !== 'EVENTS' : f.category === 'EVENTS'
+    const filtered = categoryFilteredFigures.filter(f =>
+      viewMode === 'FIGURES' ? f.category !== 'EVENTS' : f.category === 'EVENTS'
     );
+    return [...filtered].sort((a, b) => a.name.localeCompare(b.name));
   }, [categoryFilteredFigures, viewMode]);
 
   useEffect(() => {
@@ -62,11 +64,11 @@ const Sidebar: React.FC<SidebarProps> = ({
 
     const fetchDetails = async () => {
       if (displayFigures.length === 0) return;
-      
+
       setIsLoading(true);
       // Batch fetch for displayed figures
       const results = await fetchBatchFigureDetails(displayFigures);
-      
+
       if (isMounted) {
         setDetailsMap(prev => new Map([...prev, ...results]));
         setIsLoading(false);
@@ -79,6 +81,37 @@ const Sidebar: React.FC<SidebarProps> = ({
       isMounted = false;
     };
   }, [displayFigures]); // Fetch when the displayed list changes
+
+  // Reset scroll position when content changes
+  useEffect(() => {
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTop = 0;
+    }
+  }, [displayFigures]);
+
+  // Track scroll position when scrolling and restore when switching view modes
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      setScrollPositions(prev => ({
+        ...prev,
+        [viewMode]: container.scrollTop
+      }));
+    };
+
+    container.addEventListener('scroll', handleScroll);
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, [viewMode]);
+
+  // Restore scroll position when switching view modes
+  useEffect(() => {
+    if (scrollContainerRef.current) {
+      const savedPosition = scrollPositions[viewMode];
+      scrollContainerRef.current.scrollTop = savedPosition;
+    }
+  }, [viewMode]);
 
   // Scroll tracking effect
   useEffect(() => {

@@ -296,11 +296,22 @@ export class GeminiService implements IAIService {
                 }
             }
 
-            const allFigures = [...uniquePeople, ...uniqueEvents].filter((f: HistoricalFigure) => 
-                f.birthYear <= f.deathYear && 
-                f.deathYear >= startYear && 
-                f.birthYear <= endYear
-            );
+            const allFigures = [...uniquePeople, ...uniqueEvents].filter((f: HistoricalFigure) => {
+                // For events, ensure both birthYear (startYear) and deathYear (endYear) are valid
+                if (f.category === 'EVENTS') {
+                    // Event must have a valid end year (not null, undefined, or NaN)
+                    const hasValidEndYear = f.deathYear != null && typeof f.deathYear === 'number' && !isNaN(f.deathYear);
+                    // Event must span at least 1 year and overlap with timeline range
+                    return hasValidEndYear &&
+                           f.birthYear < f.deathYear &&
+                           f.deathYear >= startYear &&
+                           f.birthYear <= endYear;
+                }
+                // For figures, allow deathYear >= birthYear and must overlap with timeline range
+                return f.birthYear <= f.deathYear &&
+                       f.deathYear >= startYear &&
+                       f.birthYear <= endYear;
+            });
 
             return allFigures;
 
