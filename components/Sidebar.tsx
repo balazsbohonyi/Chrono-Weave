@@ -179,12 +179,12 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <div className={`absolute right-0 w-[34rem] bg-white/50 backdrop-blur-xl border-l border-gray-200 shadow-2xl flex flex-col z-40 transition-all duration-300 ease-in-out font-sans ${transformClass} ${topClass} ${heightClass}`}>
-        
-        {/* Toggle Slide Button with Frosty Glass Effect */}
+
+        {/* Toggle Slide Button with Plain White Background */}
         {hasSelection && (
             <button
                 onClick={onToggleCollapse}
-                className="absolute top-1/2 -left-8 w-8 h-16 bg-white/40 backdrop-blur-md border border-white/50 shadow-lg rounded-l-xl flex items-center justify-center text-gray-600 hover:text-blue-600 hover:bg-white/60 transition-all z-50 focus:outline-none group"
+                className="absolute top-1/2 -left-6 w-6 h-16 bg-white border border-gray-200 shadow-lg rounded-l-xl flex items-center justify-center text-gray-600 hover:text-blue-600 hover:bg-white transition-all z-50 focus:outline-none group"
                 style={{ transform: 'translateY(-50%)' }}
                 title={isCollapsed ? "Show Sidebar" : "Hide Sidebar"}
             >

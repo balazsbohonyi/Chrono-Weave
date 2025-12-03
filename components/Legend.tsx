@@ -15,7 +15,7 @@ const Legend: React.FC<LegendProps> = ({ selectedCategories, onToggleCategory, i
     <div className="fixed top-[52px] left-0 w-full z-[55] flex flex-col items-center pointer-events-none">
       
       {/* Collapsible Content Area */}
-      <div 
+      <div
         className={`
           w-full bg-white/60 backdrop-blur-xl border-gray-200/50
           transition-all duration-300 ease-in-out overflow-hidden pointer-events-auto
@@ -33,7 +33,7 @@ const Legend: React.FC<LegendProps> = ({ selectedCategories, onToggleCategory, i
                     <button
                         key={category}
                         onClick={() => onToggleCategory(category)}
-                        className={`flex items-center gap-2 transition-all duration-300 group outline-none rounded-md p-1.5 border border-transparent ${isDimmed ? 'opacity-40 grayscale-[0.8] hover:opacity-70' : 'opacity-100 bg-white/30 border-gray-200/30'}`}
+                        className={`flex items-center gap-2 transition-all duration-300 group outline-none rounded-md p-1.5 border border-transparent ${isDimmed ? 'opacity-50 hover:opacity-70' : 'opacity-100 bg-white/30 border-gray-200/30'}`}
                     >
                         <div 
                         className="h-4 w-8 rounded-sm"
@@ -65,9 +65,9 @@ const Legend: React.FC<LegendProps> = ({ selectedCategories, onToggleCategory, i
       </div>
 
       {/* Toggle Handle - Statically positioned in flex column to move with content */}
-      <button 
+      <button
         onClick={onToggleOpen}
-        className="h-6 px-6 bg-white/60 backdrop-blur-xl rounded-b-lg flex items-center justify-center text-gray-500 hover:text-blue-600 hover:bg-white/80 transition-colors cursor-pointer pointer-events-auto shadow-sm border-none outline-none focus:outline-none focus:ring-0 ring-0"
+        className="h-6 px-6 bg-white rounded-b-lg flex items-center justify-center text-gray-500 hover:text-blue-600 hover:bg-white transition-colors cursor-pointer pointer-events-auto shadow-sm border-none outline-none focus:outline-none focus:ring-0 ring-0"
         title="Toggle Filters"
       >
           {isOpen ? (
