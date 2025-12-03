@@ -5,11 +5,23 @@ import { safeAICall, runWithRetry } from "./utils";
 import { CATEGORY_LIST, HISTORICAL_FIGURES_COUNT, HISTORICAL_EVENTS_COUNT, HISTORICAL_FIGURES_PER_CENTURY_CHUNK, HISTORICAL_EVENTS_PER_CENTURY_CHUNK } from "../constants";
 
 export class GeminiService implements IAIService {
-    private ai: GoogleGenAI;
+    private ai: GoogleGenAI | null = null;
+    private apiKey: string;
 
-    constructor() {
-        // NOTE: We assume process.env.API_KEY is available.
-        this.ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    constructor(apiKey?: string) {
+        // Priority: 1. Constructor parameter, 2. localStorage (user override), 3. Environment variable
+        this.apiKey = apiKey || localStorage.getItem('chrono_gemini_key') || process.env.API_KEY || '';
+
+        if (this.apiKey) {
+            this.ai = new GoogleGenAI({ apiKey: this.apiKey });
+        }
+    }
+
+    private ensureAI(): GoogleGenAI {
+        if (!this.ai) {
+            throw new Error('Gemini API key not configured. Please add your API key in Settings.');
+        }
+        return this.ai;
     }
 
     private async fetchFiguresChunk(start: number, end: number): Promise<HistoricalFigure[]> {
@@ -28,8 +40,9 @@ export class GeminiService implements IAIService {
         `;
 
         try {
+            const ai = this.ensureAI();
             // Using runWithRetry directly to allow parallelism via Promise.all in the caller
-            const response = await runWithRetry<GenerateContentResponse>(() => this.ai.models.generateContent({
+            const response = await runWithRetry<GenerateContentResponse>(() => ai.models.generateContent({
                 model: "gemini-2.5-flash",
                 contents: prompt,
                 config: {
@@ -86,7 +99,8 @@ export class GeminiService implements IAIService {
         `;
 
         try {
-            const response = await runWithRetry<GenerateContentResponse>(() => this.ai.models.generateContent({
+            const ai = this.ensureAI();
+            const response = await runWithRetry<GenerateContentResponse>(() => ai.models.generateContent({
                 model: "gemini-2.5-flash",
                 contents: prompt,
                 config: {
@@ -155,7 +169,8 @@ export class GeminiService implements IAIService {
                 7. Classify into exactly one category: ${CATEGORY_LIST.filter(c => c !== 'EVENTS').join(', ')}.
             `;
             
-            peoplePromise = safeAICall<GenerateContentResponse>(() => this.ai.models.generateContent({
+            const ai = this.ensureAI();
+            peoplePromise = safeAICall<GenerateContentResponse>(() => ai.models.generateContent({
                 model,
                 contents: peoplePrompt,
                 config: {
@@ -209,7 +224,8 @@ export class GeminiService implements IAIService {
             8. Select based on historical importance and longevity.
         `;
 
-        const globalEventsPromise = safeAICall<GenerateContentResponse>(() => this.ai.models.generateContent({
+        const ai = this.ensureAI();
+        const globalEventsPromise = safeAICall<GenerateContentResponse>(() => ai.models.generateContent({
             model,
             contents: globalEventsPrompt,
             config: {
@@ -333,7 +349,8 @@ export class GeminiService implements IAIService {
                 Be selective. Only include significant connections.
             `;
 
-            const response = await safeAICall<GenerateContentResponse>(() => this.ai.models.generateContent({
+            const ai = this.ensureAI();
+            const response = await safeAICall<GenerateContentResponse>(() => ai.models.generateContent({
                 model: "gemini-2.5-flash",
                 contents: prompt,
                 config: {
@@ -382,7 +399,8 @@ export class GeminiService implements IAIService {
                 Strictly formatted as JSON array.
             `;
 
-            const response = await safeAICall<GenerateContentResponse>(() => this.ai.models.generateContent({
+            const ai = this.ensureAI();
+            const response = await safeAICall<GenerateContentResponse>(() => ai.models.generateContent({
                 model: "gemini-2.5-flash",
                 contents: prompt,
                 config: {
@@ -435,7 +453,8 @@ export class GeminiService implements IAIService {
                 Ensure the tone is educational and historical.
             `;
 
-            const response = await safeAICall<GenerateContentResponse>(() => this.ai.models.generateContent({
+            const ai = this.ensureAI();
+            const response = await safeAICall<GenerateContentResponse>(() => ai.models.generateContent({
                 model: "gemini-2.5-flash",
                 contents: prompt,
                 config: {
@@ -479,7 +498,8 @@ export class GeminiService implements IAIService {
                 3. "sections": An array of 4 sections, specifically: "Early Life", "Major Achievements", "Key Relationships", and "Historical Legacy". Each content should be a substantial paragraph.
             `;
 
-            const response = await safeAICall<GenerateContentResponse>(() => this.ai.models.generateContent({
+            const ai = this.ensureAI();
+            const response = await safeAICall<GenerateContentResponse>(() => ai.models.generateContent({
                 model: "gemini-2.5-flash",
                 contents: prompt,
                 config: {

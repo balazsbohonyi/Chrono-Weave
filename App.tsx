@@ -81,7 +81,8 @@ const App: React.FC = () => {
   });
 
   const initializeService = (showFeedback = false) => {
-      const provider = localStorage.getItem('chrono_provider');
+      const provider = localStorage.getItem('chrono_provider') || 'gemini';
+
       if (provider === 'openrouter') {
           const key = localStorage.getItem('chrono_openrouter_key') || '';
           const model = localStorage.getItem('chrono_openrouter_model') || 'anthropic/claude-3.5-sonnet';
@@ -89,18 +90,37 @@ const App: React.FC = () => {
               setAiService(new OpenRouterService(key, model));
               if (showFeedback) setToast({ message: "Switched to OpenRouter", type: "info" });
           } else {
-              setAiService(new GeminiService());
-              setToast({ message: "OpenRouter key missing. Defaulting to Gemini.", type: "error" });
+              // Priority: localStorage (user override) first, then env var
+              const geminiKey = localStorage.getItem('chrono_gemini_key') || process.env.API_KEY || '';
+              setAiService(new GeminiService(geminiKey));
+              if (showFeedback) {
+                  setToast({ message: "OpenRouter key missing. Defaulting to Gemini.", type: "error" });
+              }
           }
       } else {
-          setAiService(new GeminiService());
+          // Priority: localStorage (user override) first, then env var
+          const geminiKey = localStorage.getItem('chrono_gemini_key') || process.env.API_KEY || '';
+          setAiService(new GeminiService(geminiKey));
           if (showFeedback) setToast({ message: "Switched to Google Gemini", type: "success" });
+      }
+  };
+
+  const hasValidApiKey = (): boolean => {
+      const provider = localStorage.getItem('chrono_provider') || 'gemini';
+      if (provider === 'openrouter') {
+          return !!(localStorage.getItem('chrono_openrouter_key'));
+      } else {
+          // Priority: localStorage (user override) first, then env var
+          return !!(localStorage.getItem('chrono_gemini_key') || process.env.API_KEY);
       }
   };
 
   useEffect(() => {
     initializeService(false);
-    buildTimeline(600, 1600);
+    // Only auto-build timeline if we have a valid API key
+    if (hasValidApiKey()) {
+        buildTimeline(600, 1600);
+    }
   }, []);
 
   const handleSettingsSaved = () => {

@@ -9,7 +9,8 @@ interface SettingsDialogProps {
 
 const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose, onSave }) => {
   const [provider, setProvider] = useState<string>('gemini');
-  const [apiKey, setApiKey] = useState<string>('');
+  const [geminiApiKey, setGeminiApiKey] = useState<string>('');
+  const [openRouterApiKey, setOpenRouterApiKey] = useState<string>('');
   const [model, setModel] = useState<string>('');
 
   useEffect(() => {
@@ -17,9 +18,10 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose, onSave
       // Fallback to Google Gemini if no settings in local storage
       const storedProvider = localStorage.getItem('chrono_provider') || 'gemini';
       setProvider(storedProvider);
-      
-      // Load OpenRouter settings if they exist (even if current provider is Gemini, so we can switch back easily)
-      setApiKey(localStorage.getItem('chrono_openrouter_key') || '');
+
+      // Load both provider settings (only from localStorage, not from env)
+      setGeminiApiKey(localStorage.getItem('chrono_gemini_key') || '');
+      setOpenRouterApiKey(localStorage.getItem('chrono_openrouter_key') || '');
       setModel(localStorage.getItem('chrono_openrouter_model') || 'anthropic/claude-3.5-sonnet');
     }
   }, [isOpen]);
@@ -27,25 +29,32 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose, onSave
   const handleSave = () => {
     // Check for changes before saving
     const currentStoredProvider = localStorage.getItem('chrono_provider') || 'gemini';
-    const currentStoredKey = localStorage.getItem('chrono_openrouter_key') || '';
+    const currentStoredGeminiKey = localStorage.getItem('chrono_gemini_key') || '';
+    const currentStoredOpenRouterKey = localStorage.getItem('chrono_openrouter_key') || '';
     const currentStoredModel = localStorage.getItem('chrono_openrouter_model') || 'anthropic/claude-3.5-sonnet';
 
-    const hasChanges =
-        provider !== currentStoredProvider ||
-        // Check key/model changes regardless of provider to ensure they are saved if edited
-        apiKey !== currentStoredKey || 
-        model !== currentStoredModel;
-
     localStorage.setItem('chrono_provider', provider);
-    
+
     // Always save keys if they are present, so user doesn't lose them when switching providers
-    if (apiKey) localStorage.setItem('chrono_openrouter_key', apiKey);
+    if (geminiApiKey) {
+        localStorage.setItem('chrono_gemini_key', geminiApiKey);
+    } else {
+        localStorage.removeItem('chrono_gemini_key');
+    }
+
+    if (openRouterApiKey) {
+        localStorage.setItem('chrono_openrouter_key', openRouterApiKey);
+    } else {
+        localStorage.removeItem('chrono_openrouter_key');
+    }
+
     if (model) localStorage.setItem('chrono_openrouter_model', model);
-    
+
     // Notify parent to reload services and data if changes occurred that affect the active service
-    const needsReload = 
+    const needsReload =
         provider !== currentStoredProvider ||
-        (provider === 'openrouter' && (apiKey !== currentStoredKey || model !== currentStoredModel));
+        (provider === 'gemini' && geminiApiKey !== currentStoredGeminiKey) ||
+        (provider === 'openrouter' && (openRouterApiKey !== currentStoredOpenRouterKey || model !== currentStoredModel));
 
     if (needsReload) {
         onSave();
@@ -83,31 +92,56 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose, onSave
             <p className="text-xs text-gray-500 mt-1">Select the backend service to power ChronoWeave.</p>
           </div>
 
-          <div className={`transition-opacity duration-200 ${provider === 'gemini' ? 'opacity-50 pointer-events-none grayscale' : 'opacity-100'}`}>
-             <div>
+          {provider === 'gemini' ? (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Google Gemini API Key</label>
+              <input
+                type="password"
+                value={geminiApiKey}
+                onChange={(e) => setGeminiApiKey(e.target.value)}
+                placeholder="Google Gemini API Key"
+                className="w-full h-10 px-3 bg-white border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none"
+              />
+              {geminiApiKey ? (
+                process.env.API_KEY ? (
+                  <p className="text-xs text-amber-600 mt-1">⚠ Overriding .env.local key with this custom key</p>
+                ) : (
+                  <p className="text-xs text-gray-500 mt-1">Get your API key from <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Google AI Studio</a>.</p>
+                )
+              ) : (
+                process.env.API_KEY ? (
+                  <p className="text-xs text-green-600 mt-1">✓ Using API key from .env.local file</p>
+                ) : (
+                  <p className="text-xs text-gray-500 mt-1">Get your API key from <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Google AI Studio</a>.</p>
+                )
+              )}
+            </div>
+          ) : (
+            <>
+              <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">OpenRouter API Key</label>
                 <input
                   type="password"
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  placeholder="sk-or-..."
+                  value={openRouterApiKey}
+                  onChange={(e) => setOpenRouterApiKey(e.target.value)}
+                  placeholder="OpenRouter API Key"
                   className="w-full h-10 px-3 bg-white border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none"
-                  // Don't disable input completely so users can edit it even if 'Gemini' is selected (for preparation)
-                  // but visually it is greyed out via parent opacity
                 />
-             </div>
-             <div className="mt-4">
+                <p className="text-xs text-gray-500 mt-1">Get your API key from <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">OpenRouter</a>.</p>
+              </div>
+              <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Model ID</label>
                 <input
                   type="text"
                   value={model}
                   onChange={(e) => setModel(e.target.value)}
-                  placeholder="e.g. anthropic/claude-3-opus"
+                  placeholder="anthropic/claude-3.5-sonnet"
                   className="w-full h-10 px-3 bg-white border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none"
                 />
-                <p className="text-xs text-gray-500 mt-1">Full model string ID from OpenRouter docs.</p>
-             </div>
-          </div>
+                <p className="text-xs text-gray-500 mt-1">Full model string ID from <a href="https://openrouter.ai/models" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">OpenRouter docs</a>.</p>
+              </div>
+            </>
+          )}
         </div>
 
         <div className="bg-gray-50 px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
