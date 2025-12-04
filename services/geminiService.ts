@@ -309,8 +309,25 @@ export class GeminiService implements IAIService {
             }
 
             const allFigures = [...uniquePeople, ...uniqueEvents].filter((f: HistoricalFigure) => {
+                // Validate that deathYear is a valid number (not null, undefined, or NaN)
+                const hasValidDeathYear = f.deathYear != null && typeof f.deathYear === 'number' && !isNaN(f.deathYear);
+                const hasValidBirthYear = f.birthYear != null && typeof f.birthYear === 'number' && !isNaN(f.birthYear);
+
+                if (!hasValidBirthYear || !hasValidDeathYear) {
+                    return false;
+                }
+
                 // For events, ensure both birthYear (startYear) and deathYear (endYear) are valid
                 if (f.category === 'EVENTS') {
+                    const currentYear = new Date().getFullYear();
+
+                    // Filter out events that have deathYear = current year when timeline endYear < current year
+                    // This indicates the AI incorrectly set an ongoing event marker for a historical timeline
+                    if (endYear < currentYear && f.deathYear === currentYear) {
+                        console.warn(`[Gemini] Filtering out event "${f.name}" with invalid current year end date`);
+                        return false;
+                    }
+
                     // Event must span at least 1 year and overlap with timeline range
                     return f.birthYear < f.deathYear &&
                         f.deathYear >= startYear &&
@@ -434,7 +451,11 @@ export class GeminiService implements IAIService {
                 occupation: item.occupation,
                 category: item.category,
                 shortDescription: item.description
-            })).filter((f: HistoricalFigure) => f.birthYear < f.deathYear);
+            })).filter((f: HistoricalFigure) => {
+                const hasValidDeathYear = f.deathYear != null && typeof f.deathYear === 'number' && !isNaN(f.deathYear);
+                const hasValidBirthYear = f.birthYear != null && typeof f.birthYear === 'number' && !isNaN(f.birthYear);
+                return hasValidBirthYear && hasValidDeathYear && f.birthYear < f.deathYear;
+            });
 
         } catch (error) {
             console.error("Error discovering new figures:", error);

@@ -21,6 +21,7 @@ export class OpenRouterService implements IAIService {
         try {
             return JSON.parse(trimmedText);
         } catch (e) {
+            console.warn("[OpenRouter] Direct JSON parse failed:", (e as Error).message);
             // If direct parse fails, try cleaning and extracting
         }
 
@@ -29,44 +30,18 @@ export class OpenRouterService implements IAIService {
         if (markdownMatch && markdownMatch[1] && markdownMatch[1].trim().length > 0) {
             try {
                 const extracted = markdownMatch[1].trim();
-                console.log("[OpenRouter] Markdown extraction found, attempting parse. Length:", extracted.length, "First 50 chars:", extracted.substring(0, 50));
+                console.log("[OpenRouter] Markdown extraction found, attempting parse.");
                 return JSON.parse(extracted);
             } catch (e2) {
                 console.warn("[OpenRouter] Markdown extraction found but parse failed:", (e2 as Error).message);
-                // Continue to next extraction method
             }
         }
 
-        // Try to find JSON array [...] first (since arrays are more common in responses)
-        const startBracket = trimmedText.indexOf('[');
-        const endBracket = trimmedText.lastIndexOf(']');
-        console.log("[OpenRouter] Checking array extraction. Start:", startBracket, "End:", endBracket);
-        if (startBracket !== -1 && endBracket !== -1 && endBracket > startBracket) {
-            try {
-                const extracted = trimmedText.substring(startBracket, endBracket + 1);
-                console.log("[OpenRouter] Array extraction found, attempting parse. Length:", extracted.length);
-                return JSON.parse(extracted);
-            } catch(e5) {
-                console.warn("[OpenRouter] Array extraction found but parse failed:", (e5 as Error).message);
-                // Continue to next extraction method
-            }
-        }
 
-        // Try to find JSON object {...}
-        const startBrace = trimmedText.indexOf('{');
-        const endBrace = trimmedText.lastIndexOf('}');
-        console.log("[OpenRouter] Checking object extraction. Start:", startBrace, "End:", endBrace);
-        if (startBrace !== -1 && endBrace !== -1 && endBrace > startBrace) {
-            try {
-                const extracted = trimmedText.substring(startBrace, endBrace + 1);
-                console.log("[OpenRouter] Object extraction found, attempting parse. Length:", extracted.length);
-                return JSON.parse(extracted);
-            } catch(e4) {
-                console.warn("[OpenRouter] Object extraction found but parse failed:", (e4 as Error).message);
-            }
-        }
 
-        console.error("[OpenRouter] Failed to parse JSON. Raw text:", trimmedText);
+        // If we get here, parsing failed
+        console.error("[OpenRouter] Failed to parse JSON. First 500 chars:", trimmedText.substring(0, 500));
+        console.error("[OpenRouter] Last 500 chars:", trimmedText.substring(Math.max(0, trimmedText.length - 500)));
         throw new Error("Failed to parse JSON from OpenRouter response");
     }
 
@@ -109,12 +84,13 @@ export class OpenRouterService implements IAIService {
             3. Short bio (max 25 words).
             4. Classify category from: ${CATEGORY_LIST.filter(c => c !== 'EVENTS').join(', ')}.
             
+            CRITICAL: Return ONLY valid JSON. ALL string values MUST be in double quotes. Do NOT wrap in markdown code blocks.
             Return JSON array of objects with keys: "name", "birthYear", "deathYear", "occupation", "description", "category".
         `;
 
         try {
-            const peopleData = await runWithRetry(() => this.callOpenRouter(prompt, "You are a JSON generator. Strictly output valid JSON arrays."));
-            
+            const peopleData = await runWithRetry(() => this.callOpenRouter(prompt, "You are a strict JSON generator. Output ONLY valid JSON arrays. ALL string values MUST be properly quoted. Do NOT use markdown."));
+
             if (!Array.isArray(peopleData)) return [];
 
             return peopleData.map((item: any, index: number) => ({
@@ -125,10 +101,10 @@ export class OpenRouterService implements IAIService {
                 occupation: item.occupation,
                 category: item.category as FigureCategory,
                 shortDescription: item.description
-             }));
+            }));
         } catch (error) {
-             console.warn(`Failed to fetch chunk ${start}-${end}`, error);
-             return [];
+            console.warn(`[OpenRouter] Failed to fetch figures chunk ${start}-${end}:`, (error as Error).message);
+            return [];
         }
     }
 
@@ -144,12 +120,13 @@ export class OpenRouterService implements IAIService {
             5. Short description (max 25 words).
             6. Category MUST be 'EVENTS'.
             
+            CRITICAL: Return ONLY valid JSON. ALL string values MUST be in double quotes. Do NOT wrap in markdown code blocks.
             Return JSON array of objects with keys: "name", "startYear", "endYear", "type", "description", "category".
         `;
         try {
-             const eventsData = await runWithRetry(() => this.callOpenRouter(prompt, "You are a JSON generator. Strictly output valid JSON arrays."));
-             if (Array.isArray(eventsData)) {
-                 return eventsData.map((item: any, index: number) => ({
+            const eventsData = await runWithRetry(() => this.callOpenRouter(prompt, "You are a strict JSON generator. Output ONLY valid JSON arrays. ALL string values MUST be properly quoted. Do NOT use markdown."));
+            if (Array.isArray(eventsData)) {
+                return eventsData.map((item: any, index: number) => ({
                     id: `e-${item.name.replace(/\s+/g, '-')}-${start}-${index}`,
                     name: item.name,
                     birthYear: item.startYear,
@@ -157,12 +134,12 @@ export class OpenRouterService implements IAIService {
                     occupation: item.type,
                     category: 'EVENTS' as FigureCategory,
                     shortDescription: item.description
-                 }));
-             }
-             return [];
+                }));
+            }
+            return [];
         } catch (e) {
-             console.warn(`Failed to fetch events chunk ${start}-${end}`, e);
-             return [];
+            console.warn(`Failed to fetch events chunk ${start}-${end}`, e);
+            return [];
         }
     }
 
@@ -182,7 +159,7 @@ export class OpenRouterService implements IAIService {
                 console.error("Chunk fetch failed", e);
             }
         } else {
-             const peoplePrompt = `
+            const peoplePrompt = `
                 Generate a list of exactly ${HISTORICAL_FIGURES_COUNT} distinct and famous historical figures.
                 Range: ${startYear}-${endYear}.
                 Rules:
@@ -191,10 +168,11 @@ export class OpenRouterService implements IAIService {
                 3. Short bio (max 25 words).
                 4. Classify category from: ${CATEGORY_LIST.filter(c => c !== 'EVENTS').join(', ')}.
                 
+                CRITICAL: Return ONLY valid JSON. ALL string values MUST be in double quotes. Do NOT wrap in markdown code blocks.
                 Return JSON array of objects with keys: "name", "birthYear", "deathYear", "occupation", "description", "category".
             `;
-             try {
-                const peopleData = await safeAICall(() => this.callOpenRouter(peoplePrompt, "You are a JSON generator. Strictly output valid JSON arrays."));
+            try {
+                const peopleData = await safeAICall(() => this.callOpenRouter(peoplePrompt, "You are a strict JSON generator. Output ONLY valid JSON arrays. ALL string values MUST be properly quoted. Do NOT use markdown."));
                 if (Array.isArray(peopleData)) {
                     figures = figures.concat(peopleData.map((item: any, index: number) => ({
                         id: `p-${item.name.replace(/\s+/g, '-')}-${index}`,
@@ -206,7 +184,7 @@ export class OpenRouterService implements IAIService {
                         shortDescription: item.description
                     })));
                 }
-             } catch (e) { console.error(e); }
+            } catch (e) { console.error(e); }
         }
 
         // 2. Fetch Events
@@ -227,8 +205,8 @@ export class OpenRouterService implements IAIService {
         let rawEvents: HistoricalFigure[] = [];
         const globalEventsPromise = safeAICall(() => this.callOpenRouter(globalEventsPrompt, "You are a JSON generator. Strictly output valid JSON arrays."))
             .then((eventsData: any) => {
-                 if (Array.isArray(eventsData)) {
-                     return eventsData.map((item: any, index: number) => ({
+                if (Array.isArray(eventsData)) {
+                    return eventsData.map((item: any, index: number) => ({
                         id: `e-g-${item.name.replace(/\s+/g, '-')}-${index}`,
                         name: item.name,
                         birthYear: item.startYear,
@@ -236,9 +214,9 @@ export class OpenRouterService implements IAIService {
                         occupation: item.type,
                         category: 'EVENTS' as FigureCategory,
                         shortDescription: item.description
-                     }));
-                 }
-                 return [];
+                    }));
+                }
+                return [];
             })
             .catch(() => []);
 
@@ -249,9 +227,9 @@ export class OpenRouterService implements IAIService {
             }
             const chunkEventsPromise = Promise.all(chunks.map(chunk => this.fetchEventsChunk(chunk.start, chunk.end)))
                 .then(results => results.flat());
-            
+
             rawEvents = await Promise.all([globalEventsPromise, chunkEventsPromise])
-                 .then(([global, chunked]) => [...global, ...chunked]);
+                .then(([global, chunked]) => [...global, ...chunked]);
         } else {
             rawEvents = await globalEventsPromise;
         }
@@ -275,7 +253,7 @@ export class OpenRouterService implements IAIService {
                 const newName = ev.name.toLowerCase().trim();
                 const existingTime = `${existing.birthYear}-${existing.deathYear}`;
                 const newTime = `${ev.birthYear}-${ev.deathYear}`;
-                
+
                 return existingName === newName || existingTime === newTime;
             });
 
@@ -285,20 +263,34 @@ export class OpenRouterService implements IAIService {
         }
 
         return [...uniqueFigures, ...uniqueEvents].filter((f: HistoricalFigure) => {
+            // Validate that both birthYear and deathYear are valid numbers (not null, undefined, or NaN)
+            const hasValidDeathYear = f.deathYear != null && typeof f.deathYear === 'number' && !isNaN(f.deathYear);
+            const hasValidBirthYear = f.birthYear != null && typeof f.birthYear === 'number' && !isNaN(f.birthYear);
+
+            if (!hasValidBirthYear || !hasValidDeathYear) {
+                return false;
+            }
+
             // For events, ensure both birthYear (startYear) and deathYear (endYear) are valid
             if (f.category === 'EVENTS') {
-                // Event must have a valid end year (not null, undefined, or NaN)
-                const hasValidEndYear = f.deathYear != null && typeof f.deathYear === 'number' && !isNaN(f.deathYear);
+                const currentYear = new Date().getFullYear();
+
+                // Filter out events that have deathYear = current year when timeline endYear < current year
+                // This indicates the AI incorrectly set an ongoing event marker for a historical timeline
+                if (endYear < currentYear && f.deathYear === currentYear) {
+                    console.warn(`[OpenRouter] Filtering out event "${f.name}" with invalid current year end date`);
+                    return false;
+                }
+
                 // Event must span at least 1 year and overlap with timeline range
-                return hasValidEndYear &&
-                       f.birthYear < f.deathYear &&
-                       f.deathYear >= startYear &&
-                       f.birthYear <= endYear;
+                return f.birthYear < f.deathYear &&
+                    f.deathYear >= startYear &&
+                    f.birthYear <= endYear;
             }
             // For figures, allow deathYear >= birthYear and must overlap with timeline range
             return f.birthYear <= f.deathYear &&
-                   f.deathYear >= startYear &&
-                   f.birthYear <= endYear;
+                f.deathYear >= startYear &&
+                f.birthYear <= endYear;
         });
     }
 
@@ -343,7 +335,11 @@ export class OpenRouterService implements IAIService {
                 occupation: item.occupation,
                 category: item.category as FigureCategory,
                 shortDescription: item.description
-            })).filter((f: HistoricalFigure) => f.birthYear < f.deathYear);
+            })).filter((f: HistoricalFigure) => {
+                const hasValidDeathYear = f.deathYear != null && typeof f.deathYear === 'number' && !isNaN(f.deathYear);
+                const hasValidBirthYear = f.birthYear != null && typeof f.birthYear === 'number' && !isNaN(f.birthYear);
+                return hasValidBirthYear && hasValidDeathYear && f.birthYear < f.deathYear;
+            });
         } catch (error) {
             console.error("OpenRouter discoverRelatedFigures error:", error);
             return [];
@@ -351,15 +347,15 @@ export class OpenRouterService implements IAIService {
     }
 
     async fetchRelationshipExplanation(source: HistoricalFigure, target: HistoricalFigure): Promise<RelationshipExplanation | null> {
-         const prompt = `
+        const prompt = `
             Explain relationship between ${source.name} and ${target.name}.
             Return JSON: "summary" (string), "sections" (array of {title, content}).
         `;
         try {
             return await safeAICall(() => this.callOpenRouter(prompt, "You are a JSON generator. Output valid JSON."));
         } catch (error) {
-             console.error("OpenRouter fetchRelationshipExplanation error:", error);
-             return null;
+            console.error("OpenRouter fetchRelationshipExplanation error:", error);
+            return null;
         }
     }
 
