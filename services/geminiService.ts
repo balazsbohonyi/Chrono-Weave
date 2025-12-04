@@ -7,10 +7,11 @@ import { CATEGORY_LIST, HISTORICAL_FIGURES_COUNT, HISTORICAL_EVENTS_COUNT, HISTO
 export class GeminiService implements IAIService {
     private ai: GoogleGenAI | null = null;
     private apiKey: string;
+    private model: string;
 
-    constructor(apiKey?: string) {
-        // Priority: 1. Constructor parameter, 2. localStorage (user override), 3. Environment variable
-        this.apiKey = apiKey || localStorage.getItem('chrono_gemini_key') || process.env.API_KEY || '';
+    constructor(apiKey?: string, model?: string) {
+        this.apiKey = apiKey || process.env.API_KEY || '';
+        this.model = model || process.env.MODEL || "gemini-2.5-flash";
 
         if (this.apiKey) {
             this.ai = new GoogleGenAI({ apiKey: this.apiKey });
@@ -43,7 +44,7 @@ export class GeminiService implements IAIService {
             const ai = this.ensureAI();
             // Using runWithRetry directly to allow parallelism via Promise.all in the caller
             const response = await runWithRetry<GenerateContentResponse>(() => ai.models.generateContent({
-                model: "gemini-2.5-flash",
+                model: this.model,
                 contents: prompt,
                 config: {
                     responseMimeType: "application/json",
@@ -64,16 +65,16 @@ export class GeminiService implements IAIService {
                     },
                 },
             }));
-            
+
             const peopleData = JSON.parse(response.text || "[]");
-            
+
             return peopleData.map((item: any, index: number) => ({
                 id: `p-${item.name.replace(/\s+/g, '-')}-${start}-${index}`,
                 name: item.name,
                 birthYear: item.birthYear,
                 deathYear: item.deathYear,
                 occupation: item.occupation,
-                category: item.category, 
+                category: item.category,
                 shortDescription: item.description
             }));
         } catch (error) {
@@ -101,7 +102,7 @@ export class GeminiService implements IAIService {
         try {
             const ai = this.ensureAI();
             const response = await runWithRetry<GenerateContentResponse>(() => ai.models.generateContent({
-                model: "gemini-2.5-flash",
+                model: this.model,
                 contents: prompt,
                 config: {
                     responseMimeType: "application/json",
@@ -122,16 +123,16 @@ export class GeminiService implements IAIService {
                     },
                 },
             }));
-            
+
             const eventsData = JSON.parse(response.text || "[]");
-            
+
             return eventsData.map((item: any, index: number) => ({
                 id: `e-${item.name.replace(/\s+/g, '-')}-${start}-${index}`,
                 name: item.name,
                 birthYear: item.startYear,
                 deathYear: item.endYear,
                 occupation: item.type,
-                category: 'EVENTS', 
+                category: 'EVENTS',
                 shortDescription: item.description
             }));
         } catch (error) {
@@ -141,8 +142,8 @@ export class GeminiService implements IAIService {
     }
 
     async fetchHistoricalFigures(startYear: number, endYear: number): Promise<HistoricalFigure[]> {
-        const model = "gemini-2.5-flash";
-        
+        const model = this.model;
+
         // 1. Fetch People (Chunked if > 200 years, else standard)
         let peoplePromise: Promise<HistoricalFigure[]>;
 
@@ -154,8 +155,8 @@ export class GeminiService implements IAIService {
             peoplePromise = Promise.all(chunks.map(chunk => this.fetchFiguresChunk(chunk.start, chunk.end)))
                 .then(results => results.flat());
         } else {
-             // Standard single prompt
-             const peoplePrompt = `
+            // Standard single prompt
+            const peoplePrompt = `
                 Generate a list of exactly ${HISTORICAL_FIGURES_COUNT} distinct and famous historical figures (politicians, rulers, artists, scientists, etc.) 
                 who lived primarily between the years ${startYear} and ${endYear}.
                 
@@ -168,7 +169,7 @@ export class GeminiService implements IAIService {
                 6. Provide a short, interesting bio description (max 25 words).
                 7. Classify into exactly one category: ${CATEGORY_LIST.filter(c => c !== 'EVENTS').join(', ')}.
             `;
-            
+
             const ai = this.ensureAI();
             peoplePromise = safeAICall<GenerateContentResponse>(() => ai.models.generateContent({
                 model,
@@ -207,7 +208,7 @@ export class GeminiService implements IAIService {
 
         // 2. Fetch Events (Mixed Strategy: Global + Chunked if > 200)
         let eventsPromise: Promise<HistoricalFigure[]>;
-        
+
         // Always fetch global events for continuity
         const globalEventsPrompt = `
             Generate a list of exactly ${HISTORICAL_EVENTS_COUNT} MAJOR historical events (wars, treaties, movements, ages) 
@@ -248,13 +249,13 @@ export class GeminiService implements IAIService {
             },
         })).then(response => {
             const eventsData = JSON.parse(response.text || "[]");
-             return eventsData.map((item: any, index: number) => ({
+            return eventsData.map((item: any, index: number) => ({
                 id: `e-g-${item.name.replace(/\s+/g, '-')}-${index}`,
                 name: item.name,
                 birthYear: item.startYear,
                 deathYear: item.endYear,
                 occupation: item.type,
-                category: 'EVENTS', 
+                category: 'EVENTS',
                 shortDescription: item.description
             }));
         }).catch(() => []);
@@ -265,7 +266,7 @@ export class GeminiService implements IAIService {
             for (let y = startYear; y < endYear; y += 100) {
                 chunks.push({ start: y, end: Math.min(y + 100, endYear) });
             }
-            
+
             const chunkEventsPromise = Promise.all(chunks.map(chunk => this.fetchEventsChunk(chunk.start, chunk.end)))
                 .then(results => results.flat());
 
@@ -298,7 +299,7 @@ export class GeminiService implements IAIService {
                     const newName = ev.name.toLowerCase().trim();
                     const existingTime = `${existing.birthYear}-${existing.deathYear}`;
                     const newTime = `${ev.birthYear}-${ev.deathYear}`;
-                    
+
                     return existingName === newName || existingTime === newTime;
                 });
 
@@ -312,13 +313,13 @@ export class GeminiService implements IAIService {
                 if (f.category === 'EVENTS') {
                     // Event must span at least 1 year and overlap with timeline range
                     return f.birthYear < f.deathYear &&
-                           f.deathYear >= startYear &&
-                           f.birthYear <= endYear;
+                        f.deathYear >= startYear &&
+                        f.birthYear <= endYear;
                 }
                 // For figures, allow deathYear >= birthYear and must overlap with timeline range
                 return f.birthYear <= f.deathYear &&
-                       f.deathYear >= startYear &&
-                       f.birthYear <= endYear;
+                    f.deathYear >= startYear &&
+                    f.birthYear <= endYear;
             });
 
             return allFigures;
@@ -333,7 +334,7 @@ export class GeminiService implements IAIService {
         try {
             // We only send names to save context
             const candidates = allFigures.filter(f => f.id !== target.id).map(f => ({ id: f.id, name: f.name }));
-            
+
             if (candidates.length === 0) return [];
 
             const prompt = `
@@ -351,7 +352,7 @@ export class GeminiService implements IAIService {
 
             const ai = this.ensureAI();
             const response = await safeAICall<GenerateContentResponse>(() => ai.models.generateContent({
-                model: "gemini-2.5-flash",
+                model: this.model,
                 contents: prompt,
                 config: {
                     responseMimeType: "application/json",
@@ -401,7 +402,7 @@ export class GeminiService implements IAIService {
 
             const ai = this.ensureAI();
             const response = await safeAICall<GenerateContentResponse>(() => ai.models.generateContent({
-                model: "gemini-2.5-flash",
+                model: this.model,
                 contents: prompt,
                 config: {
                     responseMimeType: "application/json",
@@ -424,7 +425,7 @@ export class GeminiService implements IAIService {
             }));
 
             const rawData = JSON.parse(response.text || "[]");
-            
+
             return rawData.map((item: any, index: number) => ({
                 id: `${item.name.replace(/\s+/g, '-')}-${Date.now()}-${index}`, // Ensure unique ID
                 name: item.name,
@@ -455,7 +456,7 @@ export class GeminiService implements IAIService {
 
             const ai = this.ensureAI();
             const response = await safeAICall<GenerateContentResponse>(() => ai.models.generateContent({
-                model: "gemini-2.5-flash",
+                model: this.model,
                 contents: prompt,
                 config: {
                     responseMimeType: "application/json",
@@ -500,7 +501,7 @@ export class GeminiService implements IAIService {
 
             const ai = this.ensureAI();
             const response = await safeAICall<GenerateContentResponse>(() => ai.models.generateContent({
-                model: "gemini-2.5-flash",
+                model: this.model,
                 contents: prompt,
                 config: {
                     responseMimeType: "application/json",

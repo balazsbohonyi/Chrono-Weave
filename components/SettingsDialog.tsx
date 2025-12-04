@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 
 interface SettingsDialogProps {
@@ -9,59 +8,58 @@ interface SettingsDialogProps {
 
 const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose, onSave }) => {
   const [provider, setProvider] = useState<string>('gemini');
-  const [geminiApiKey, setGeminiApiKey] = useState<string>('');
-  const [openRouterApiKey, setOpenRouterApiKey] = useState<string>('');
+  const [apiKey, setApiKey] = useState<string>('');
   const [model, setModel] = useState<string>('');
 
   useEffect(() => {
     if (isOpen) {
-      // Fallback to Google Gemini if no settings in local storage
+      // Load settings from generic keys
       const storedProvider = localStorage.getItem('chrono_provider') || 'gemini';
       setProvider(storedProvider);
-
-      // Load both provider settings (only from localStorage, not from env)
-      setGeminiApiKey(localStorage.getItem('chrono_gemini_key') || '');
-      setOpenRouterApiKey(localStorage.getItem('chrono_openrouter_key') || '');
-      setModel(localStorage.getItem('chrono_openrouter_model') || 'anthropic/claude-3.5-sonnet');
+      setApiKey(localStorage.getItem('chrono_api_key') || '');
+      setModel(localStorage.getItem('chrono_model') || 'gemini-2.5-flash');
     }
   }, [isOpen]);
 
   const handleSave = () => {
     // Check for changes before saving
     const currentStoredProvider = localStorage.getItem('chrono_provider') || 'gemini';
-    const currentStoredGeminiKey = localStorage.getItem('chrono_gemini_key') || '';
-    const currentStoredOpenRouterKey = localStorage.getItem('chrono_openrouter_key') || '';
-    const currentStoredModel = localStorage.getItem('chrono_openrouter_model') || 'anthropic/claude-3.5-sonnet';
+    const currentStoredKey = localStorage.getItem('chrono_api_key') || '';
+    const currentStoredModel = localStorage.getItem('chrono_model') || 'gemini-2.5-flash';
 
     localStorage.setItem('chrono_provider', provider);
 
-    // Always save keys if they are present, so user doesn't lose them when switching providers
-    if (geminiApiKey) {
-        localStorage.setItem('chrono_gemini_key', geminiApiKey);
-    } else {
-        localStorage.removeItem('chrono_gemini_key');
-    }
+    if (apiKey) localStorage.setItem('chrono_api_key', apiKey);
+    else localStorage.removeItem('chrono_api_key');
 
-    if (openRouterApiKey) {
-        localStorage.setItem('chrono_openrouter_key', openRouterApiKey);
-    } else {
-        localStorage.removeItem('chrono_openrouter_key');
-    }
+    if (model) localStorage.setItem('chrono_model', model);
+    else localStorage.removeItem('chrono_model');
 
-    if (model) localStorage.setItem('chrono_openrouter_model', model);
-
-    // Notify parent to reload services and data if changes occurred that affect the active service
+    // Notify parent to reload services and data if changes occurred
     const needsReload =
-        provider !== currentStoredProvider ||
-        (provider === 'gemini' && geminiApiKey !== currentStoredGeminiKey) ||
-        (provider === 'openrouter' && (openRouterApiKey !== currentStoredOpenRouterKey || model !== currentStoredModel));
+      provider !== currentStoredProvider ||
+      apiKey !== currentStoredKey ||
+      model !== currentStoredModel;
 
     if (needsReload) {
-        onSave();
-        onClose();
+      onSave();
+      onClose();
     } else {
-        onClose();
+      onClose();
     }
+  };
+
+  // Helper to get default model placeholder based on provider
+  const getModelPlaceholder = () => {
+    return provider === 'gemini' ? 'gemini-2.5-flash' : 'anthropic/claude-3.5-sonnet';
+  };
+
+  // Helper to get API key link
+  const getApiKeyLink = () => {
+    if (provider === 'gemini') {
+      return <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Google AI Studio</a>;
+    }
+    return <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">OpenRouter</a>;
   };
 
   if (!isOpen) return null;
@@ -83,7 +81,13 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose, onSave
             <label className="block text-sm font-medium text-gray-700 mb-1">AI Provider</label>
             <select
               value={provider}
-              onChange={(e) => setProvider(e.target.value)}
+              onChange={(e) => {
+                setProvider(e.target.value);
+                // Keep user input, but maybe set default if empty?
+                if (!model) {
+                  setModel(e.target.value === 'gemini' ? 'gemini-2.5-flash' : 'anthropic/claude-3.5-sonnet');
+                }
+              }}
               className="w-full h-10 px-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none bg-white"
             >
               <option value="gemini">Google Gemini</option>
@@ -92,56 +96,47 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose, onSave
             <p className="text-xs text-gray-500 mt-1">Select the backend service to power ChronoWeave.</p>
           </div>
 
-          {provider === 'gemini' ? (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Google Gemini API Key</label>
-              <input
-                type="password"
-                value={geminiApiKey}
-                onChange={(e) => setGeminiApiKey(e.target.value)}
-                placeholder="Google Gemini API Key"
-                className="w-full h-10 px-3 bg-white border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none"
-              />
-              {geminiApiKey ? (
-                process.env.API_KEY ? (
-                  <p className="text-xs text-amber-600 mt-1">⚠ Overriding .env.local key with this custom key</p>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              {provider === 'gemini' ? 'Google Gemini API Key' : 'OpenRouter API Key'}
+            </label>
+            <input
+              type="password"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              placeholder={provider === 'gemini' ? "Google Gemini API Key" : "OpenRouter API Key"}
+              className="w-full h-10 px-3 bg-white border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none"
+            />
+            <div className="text-xs text-gray-500 mt-1">
+              {apiKey ? (
+                process.env.API_KEY && process.env.PROVIDER === provider ? (
+                  <span className="text-amber-600">⚠ Overriding .env.local key</span>
                 ) : (
-                  <p className="text-xs text-gray-500 mt-1">Get your API key from <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Google AI Studio</a>.</p>
+                  <span>Get your API key from {getApiKeyLink()}.</span>
                 )
               ) : (
-                process.env.API_KEY ? (
-                  <p className="text-xs text-green-600 mt-1">✓ Using API key from .env.local file</p>
+                process.env.API_KEY && process.env.PROVIDER === provider ? (
+                  <span className="text-green-600">✓ Using API key from .env.local file</span>
                 ) : (
-                  <p className="text-xs text-gray-500 mt-1">Get your API key from <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Google AI Studio</a>.</p>
+                  <span>Get your API key from {getApiKeyLink()}.</span>
                 )
               )}
             </div>
-          ) : (
-            <>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">OpenRouter API Key</label>
-                <input
-                  type="password"
-                  value={openRouterApiKey}
-                  onChange={(e) => setOpenRouterApiKey(e.target.value)}
-                  placeholder="OpenRouter API Key"
-                  className="w-full h-10 px-3 bg-white border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none"
-                />
-                <p className="text-xs text-gray-500 mt-1">Get your API key from <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">OpenRouter</a>.</p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Model ID</label>
-                <input
-                  type="text"
-                  value={model}
-                  onChange={(e) => setModel(e.target.value)}
-                  placeholder="anthropic/claude-3.5-sonnet"
-                  className="w-full h-10 px-3 bg-white border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none"
-                />
-                <p className="text-xs text-gray-500 mt-1">Full model string ID from <a href="https://openrouter.ai/models" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">OpenRouter docs</a>.</p>
-              </div>
-            </>
-          )}
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Model ID</label>
+            <input
+              type="text"
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              placeholder={getModelPlaceholder()}
+              className="w-full h-10 px-3 bg-white border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              {provider === 'gemini' ? 'Default: gemini-2.5-flash' : 'Full model string ID from OpenRouter docs.'}
+            </p>
+          </div>
         </div>
 
         <div className="bg-gray-50 px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
