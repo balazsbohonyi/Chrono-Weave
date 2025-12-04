@@ -81,10 +81,15 @@ The app leverages Google Gemini or OpenRouter APIs to intelligently generate his
    npm install
    ```
 
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key:
-   ```
-   GEMINI_API_KEY=your_api_key_here
-   ```
+2. Set the `PROVIDER`, `API_KEY`, and optionally `MODEL` in [.env.local](.env.local) to configure the AI backend:
+```bash
+PROVIDER=gemini
+API_KEY=your_api_key_here
+# Optional: specify model, defaults to gemini-2.5-flash for Gemini or appropriate model for OpenRouter
+MODEL=gemini-2.5-flash
+```
+
+More explanations in the [.env.example](.env.example)
 
 3. Run the development server:
    ```bash
