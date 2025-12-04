@@ -11,7 +11,9 @@ import Legend from './components/Legend';
 import { HistoricalFigure, DeepDiveData, IAIService, RelationshipExplanation, FigureCategory } from './types';
 import { GeminiService } from './services/geminiService';
 import { OpenRouterService } from './services/openRouterService';
+
 import { fetchBatchFigureDetails } from './services/wikiService';
+import { useEnvironment } from './contexts/EnvironmentContext';
 
 export interface RelationshipData {
     explanation: RelationshipExplanation | null;
@@ -48,6 +50,9 @@ const App: React.FC = () => {
 
     // Settings State
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+    const { getEffectiveConfig } = useEnvironment();
+
     // AI Service Instance
     const [aiService, setAiService] = useState<IAIService>(new GeminiService());
 
@@ -80,23 +85,7 @@ const App: React.FC = () => {
         mode: 'relationship'
     });
 
-    const getEffectiveConfig = () => {
-        const localProvider = localStorage.getItem('chrono_provider');
-        const localKey = localStorage.getItem('chrono_api_key');
-        const localModel = localStorage.getItem('chrono_model');
 
-        // Strict "All or Nothing" rule for localStorage
-        if (localProvider && localKey && localModel) {
-            return { provider: localProvider, apiKey: localKey, model: localModel };
-        }
-
-        // Fallback to Environment Variables
-        return {
-            provider: process.env.PROVIDER || 'gemini',
-            apiKey: process.env.API_KEY || '',
-            model: process.env.MODEL || 'gemini-2.5-flash'
-        };
-    };
 
     const initializeService = (showFeedback = false) => {
         const config = getEffectiveConfig();

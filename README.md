@@ -81,13 +81,30 @@ The app leverages Google Gemini or OpenRouter APIs to intelligently generate his
    npm install
    ```
 
-2. Set the `PROVIDER`, `API_KEY`, and optionally `MODEL` in [.env.local](.env.local) to configure the AI backend:
+2. Set the `PROVIDER`, `API_KEY`, and optionally `MODEL` in environment files to configure the AI backend:
+
+**For Development:**
+Create or edit [.env.local](.env.local):
 ```bash
 PROVIDER=gemini
 API_KEY=your_api_key_here
 # Optional: specify model, defaults to gemini-2.5-flash for Gemini or appropriate model for OpenRouter
 MODEL=gemini-2.5-flash
 ```
+
+**For Production:**
+Create [.env.production](.env.production) with your production credentials:
+```bash
+PROVIDER=gemini
+API_KEY=your_production_api_key_here
+MODEL=gemini-2.5-flash
+```
+
+**Important Notes:**
+- `.env.local` is used for **local development** (`npm run dev`) and is gitignored by default.
+- `.env.production` is used when building for **production** (`npm run build`).
+- In production mode, the settings dialog is **hidden**, and the application strictly uses environment variables from the build, ignoring any localStorage overrides.
+- Both `.env.local` and `.env.production` should be added to `.gitignore` to prevent committing secrets.
 
 More explanations in the [.env.example](.env.example)
 

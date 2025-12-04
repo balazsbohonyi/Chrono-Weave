@@ -13,7 +13,8 @@ export default defineConfig(({ mode }) => {
     define: {
       'process.env.PROVIDER': JSON.stringify(env.PROVIDER),
       'process.env.API_KEY': JSON.stringify(env.API_KEY),
-      'process.env.MODEL': JSON.stringify(env.MODEL)
+      'process.env.MODEL': JSON.stringify(env.MODEL),
+      'process.env.APP_MODE': JSON.stringify(mode),
     },
     resolve: {
       alias: {
