@@ -87,6 +87,14 @@ const App: React.FC = () => {
 
 
 
+
+
+    const [hasLoadedFromCache, setHasLoadedFromCache] = useState(false);
+
+    // Storage Keys
+    const TIMELINE_DATA_KEY = 'chrono_timeline_data';
+    const TIMELINE_CONFIG_KEY = 'chrono_timeline_config';
+
     const initializeService = (showFeedback = false) => {
         const config = getEffectiveConfig();
 
@@ -110,20 +118,70 @@ const App: React.FC = () => {
         return !!config.apiKey;
     };
 
-    useEffect(() => {
-        initializeService(false);
-        // Only auto-build timeline if we have a valid API key
-        if (hasValidApiKey()) {
-            buildTimeline(600, 1600);
+    const loadTimelineFromCache = useCallback(() => {
+        try {
+            const cachedData = localStorage.getItem(TIMELINE_DATA_KEY);
+            const cachedConfig = localStorage.getItem(TIMELINE_CONFIG_KEY);
+
+            if (cachedData && cachedConfig) {
+                const parsedData: HistoricalFigure[] = JSON.parse(cachedData);
+                const parsedConfig: { start: number; end: number } = JSON.parse(cachedConfig);
+
+                if (Array.isArray(parsedData) && parsedData.length > 0) {
+                    setFigures(parsedData);
+                    setConfig(parsedConfig);
+                    setHasLoadedFromCache(true);
+                    return true;
+                }
+            }
+        } catch (e) {
+            console.error("Failed to load timeline from cache", e);
+        }
+        return false;
+    }, []);
+
+    const saveTimelineToCache = useCallback((customConfig: { start: number, end: number }, data: HistoricalFigure[]) => {
+        try {
+            localStorage.setItem(TIMELINE_DATA_KEY, JSON.stringify(data));
+            localStorage.setItem(TIMELINE_CONFIG_KEY, JSON.stringify(customConfig));
+        } catch (e) {
+            console.error("Failed to save timeline to cache", e);
         }
     }, []);
 
+    useEffect(() => {
+        initializeService(false);
+
+        // Attempt to load from cache first
+        const loadedFromCache = loadTimelineFromCache();
+
+        // Only auto-build timeline if NOT loaded from cache and we have a valid API key
+        if (!loadedFromCache && hasValidApiKey()) {
+            buildTimeline(600, 1600);
+        }
+    }, [loadTimelineFromCache]);
+
     const handleSettingsSaved = () => {
         initializeService(true);
+        // Note: We might want to clear cache here if settings drastically change model behavior,
+        // but for now we keep the user's manual "Build" control.
+        // If they want to rebuild with new settings, they can click "Build".
+
+        // However, if we are currently showing cached data and settings changed, 
+        // we might just want to let the user decide.
+        // Current behavior: calling buildTimeline immediately.
         buildTimeline(config.start, config.end);
     };
 
+    // Modified buildTimeline to be just a trigger, not the fetcher itself (fetcher is in effect)
+    // But actually, the original code had the fetcher in a separate useEffect reacting to 'loading' state.
+    // We will keep that pattern but ensure saving happens there.
     const buildTimeline = useCallback(async (start: number, end: number) => {
+        if (start === config.start && end === config.end && figures.length > 0) {
+            setToast({ message: "Timeline already includes data for this period.", type: "info" });
+            return;
+        }
+
         setLoading(true);
         setConfig({ start, end });
         setSelectedYear(null);
@@ -139,7 +197,7 @@ const App: React.FC = () => {
         setIsSidebarCollapsed(false);
         setSelectedCategories(new Set());
         setIsLegendOpen(false);
-    }, []);
+    }, [config, figures]);
 
     useEffect(() => {
         let isMounted = true;
@@ -150,6 +208,8 @@ const App: React.FC = () => {
                     if (isMounted) {
                         setFigures(data);
                         setLoading(false);
+                        // Save to cache on successful build
+                        saveTimelineToCache(config, data);
                     }
                 } catch (error) {
                     console.error("Failed to fetch figures", error);
@@ -162,7 +222,7 @@ const App: React.FC = () => {
             performBuild();
         }
         return () => { isMounted = false; };
-    }, [loading, aiService, config.start, config.end]);
+    }, [loading, aiService, config, saveTimelineToCache]);
 
 
     const handleYearClick = (year: number, sortedFigures: HistoricalFigure[]) => {
@@ -267,6 +327,9 @@ const App: React.FC = () => {
                 next.set(sourceFigure.id, allRelatedIdsSet);
                 return next;
             });
+
+            // Save new discovery to cache
+            saveTimelineToCache(config, updatedFigures);
 
             setNewlyDiscoveredIds(new Set(newBatchIds));
 

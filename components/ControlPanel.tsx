@@ -38,6 +38,12 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   const [localEnd, setLocalEnd] = useState<string>(endYear.toString());
   const [searchQuery, setSearchQuery] = useState("");
 
+  // Sync local state with props when they change (e.g. from cache load)
+  React.useEffect(() => {
+    setLocalStart(startYear.toString());
+    setLocalEnd(endYear.toString());
+  }, [startYear, endYear]);
+
   const handleBuild = () => {
     const s = parseInt(localStart);
     const e = parseInt(localEnd);
