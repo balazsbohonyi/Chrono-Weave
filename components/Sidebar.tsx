@@ -5,6 +5,8 @@ import { fetchBatchFigureDetails } from '../services/wikiService';
 import { formatYear } from '../utils/formatters';
 
 import Tooltip from './Tooltip';
+import { useFigureActions } from '../hooks/useFigureActions';
+import SidebarCardActions from './SidebarCardActions';
 
 interface SidebarProps {
     selectedFigures: HistoricalFigure[];
@@ -20,6 +22,8 @@ interface SidebarProps {
     isLegendOpen: boolean;
     isGlobalView?: boolean;
 }
+
+
 
 type ViewMode = 'FIGURES' | 'EVENTS';
 
@@ -162,11 +166,11 @@ const Sidebar: React.FC<SidebarProps> = ({
         };
     }, [activeTracingFigureId, onUpdateSourceY, displayFigures]);
 
-    const handleRelationClick = async (e: React.MouseEvent, fig: HistoricalFigure) => {
+    const handleTrace = async (fig: HistoricalFigure, clientY: number) => {
         if (tracingId) return;
         setTracingId(fig.id);
         try {
-            await onTraceRelationships(fig, e.clientY);
+            await onTraceRelationships(fig, clientY);
         } finally {
             setTracingId(null);
         }
@@ -289,48 +293,13 @@ const Sidebar: React.FC<SidebarProps> = ({
                             </div>
 
                             {!isEvent && (
-                                <div className="absolute bottom-0 left-0 right-0 p-2 flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-10">
-                                    <Tooltip text="Read Biography">
-                                        <button
-                                            onClick={(e) => { e.stopPropagation(); onInspect(fig); }}
-                                            className="p-2 bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-100 rounded-md transition-colors"
-                                        >
-                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                                            </svg>
-                                        </button>
-                                    </Tooltip>
-
-                                    <Tooltip text="Map Relationships">
-                                        <button
-                                            onClick={(e) => handleRelationClick(e, fig)}
-                                            disabled={isTracing}
-                                            className={`p-2 rounded-md border transition-colors ${isTracing
-                                                    ? 'bg-blue-50 text-blue-400 border-blue-100 cursor-wait'
-                                                    : 'bg-blue-50 hover:bg-blue-100 text-blue-600 border-blue-100'
-                                                }`}
-                                        >
-                                            {isTracing ? (
-                                                <div className="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin"></div>
-                                            ) : (
-                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                                                </svg>
-                                            )}
-                                        </button>
-                                    </Tooltip>
-
-                                    <Tooltip text="Expand Timeline">
-                                        <button
-                                            onClick={(e) => { e.stopPropagation(); onDiscover(fig); }}
-                                            className="p-2 bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-100 rounded-md transition-colors"
-                                        >
-                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
-                                            </svg>
-                                        </button>
-                                    </Tooltip>
-                                </div>
+                                <SidebarCardActions
+                                    figure={fig}
+                                    onDiscover={onDiscover}
+                                    onInspect={onInspect}
+                                    onTrace={handleTrace}
+                                    isTracing={isTracing}
+                                />
                             )}
                         </div>
                     );
