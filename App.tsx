@@ -571,6 +571,8 @@ const App: React.FC = () => {
                 selectedFigures={sortedSidebarFigures}
                 currentYear={selectedYear}
                 onTraceRelationships={(f, y) => handleTraceRelationships(f, y)}
+                onDiscover={handleDiscover}
+                onInspect={handleInspectFigure}
                 activeTracingFigureId={relationshipState?.sourceFigure.id}
                 onUpdateSourceY={handleUpdateSourceY}
                 isCollapsed={isSidebarCollapsed}
