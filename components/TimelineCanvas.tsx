@@ -65,6 +65,175 @@ function linesIntersect(p1: {x:number, y:number}, p2: {x:number, y:number}, p3: 
     return (ua > 0.05 && ua < 0.95) && (ub > 0.05 && ub < 0.95);
 }
 
+// Helper functions for simplified short event placement
+
+function tryPlaceLabelInGap(
+    figure: HistoricalFigure,
+    gapLevel: number,
+    horizontalOffset: number,
+    labelWidth: number,
+    barLevel: number,
+    occupiedGaps: { start: number; end: number }[][],
+    placedVectors: { x1: number; y1: number; x2: number; y2: number }[]
+): { success: boolean; visualY?: number } {
+    const LABEL_MARGIN = 10;
+
+    // Don't allow negative gap levels (gap -0.5 would be above row 0, which doesn't exist)
+    if (gapLevel < 0) {
+        return { success: false };
+    }
+
+    const gapIndex = Math.floor(gapLevel);
+    const labelStart = figure.birthYear + horizontalOffset;
+    const labelEnd = labelStart + labelWidth;
+
+    // Check box collision with existing gaps
+    let hasOverlap = false;
+    if (gapIndex >= 0 && gapIndex < occupiedGaps.length) {
+        const gapIntervals = occupiedGaps[gapIndex];
+        hasOverlap = gapIntervals.some(interval =>
+            (labelStart < interval.end + LABEL_MARGIN) &&
+            (labelEnd + LABEL_MARGIN > interval.start)
+        );
+    }
+
+    if (hasOverlap) {
+        return { success: false };
+    }
+
+    // Check connector crossing with existing vectors
+    // Center labels vertically in gaps - use same offset for both directions
+    const visualOffset = 175; // Centered in gap (empirically determined)
+    const visualY = gapIndex * ROW_HEIGHT + visualOffset;
+
+    const barVecX = figure.birthYear * BASE_PIXELS_PER_YEAR;
+    const barVecY = barLevel * ROW_HEIGHT + 80;
+    const labelVecX = labelStart * BASE_PIXELS_PER_YEAR;
+
+    const hasVectorCrossing = placedVectors.some(vec =>
+        linesIntersect(
+            { x: barVecX, y: barVecY },
+            { x: labelVecX, y: visualY },
+            { x: vec.x1, y: vec.y1 },
+            { x: vec.x2, y: vec.y2 }
+        )
+    );
+
+    if (hasVectorCrossing) {
+        return { success: false };
+    }
+
+    return { success: true, visualY };
+}
+
+function removeBarInterval(
+    level: number,
+    barStartYear: number,
+    occupiedRows: { start: number; end: number; type: 'bar' | 'label' }[][]
+): boolean {
+    if (level < 0 || level >= occupiedRows.length) {
+        console.error(`removeBarInterval: Invalid level ${level}`);
+        return false;
+    }
+
+    const intervals = occupiedRows[level];
+    const barIndex = intervals.findIndex(
+        interval => interval.type === 'bar' && Math.abs(interval.start - barStartYear) < 0.1
+    );
+
+    if (barIndex === -1) {
+        console.error(`removeBarInterval: Bar not found at level ${level}, start ${barStartYear}`);
+        return false;
+    }
+
+    intervals.splice(barIndex, 1);
+    return true;
+}
+
+function findNextAvailableRow(
+    figure: HistoricalFigure,
+    startLevel: number,
+    occupiedRows: { start: number; end: number; type: 'bar' | 'label' }[][],
+    barWidth: number
+): number {
+    const MARGIN = 6;
+    const MAX_ROWS_TO_SEARCH = 20;
+
+    const collisionEnd = figure.birthYear + barWidth;
+
+    for (let searchLevel = startLevel; searchLevel < startLevel + MAX_ROWS_TO_SEARCH; searchLevel++) {
+        if (searchLevel < occupiedRows.length) {
+            const intervals = occupiedRows[searchLevel];
+            const hasOverlap = intervals.some(interval =>
+                (figure.birthYear < interval.end + MARGIN) &&
+                (collisionEnd + MARGIN > interval.start)
+            );
+
+            if (!hasOverlap) {
+                return searchLevel;
+            }
+        } else {
+            return searchLevel;
+        }
+    }
+
+    return -1;
+}
+
+function addBarInterval(
+    level: number,
+    barStartYear: number,
+    barWidth: number,
+    occupiedRows: { start: number; end: number; type: 'bar' | 'label' }[][]
+): void {
+    while (occupiedRows.length <= level) {
+        occupiedRows.push([]);
+    }
+
+    occupiedRows[level].push({
+        start: barStartYear,
+        end: barStartYear + barWidth,
+        type: 'bar'
+    });
+}
+
+function recordLabelInterval(
+    gapLevel: number,
+    labelStart: number,
+    labelWidth: number,
+    occupiedGaps: { start: number; end: number }[][]
+): void {
+    const gapIndex = Math.floor(gapLevel);
+
+    while (occupiedGaps.length <= gapIndex) {
+        occupiedGaps.push([]);
+    }
+
+    occupiedGaps[gapIndex].push({
+        start: labelStart,
+        end: labelStart + labelWidth
+    });
+}
+
+function recordConnectorVector(
+    figure: HistoricalFigure,
+    barLevel: number,
+    labelYearOffset: number,
+    labelVisualY: number,
+    placedVectors: { x1: number; y1: number; x2: number; y2: number }[]
+): void {
+    const barVecX = figure.birthYear * BASE_PIXELS_PER_YEAR;
+    const barVecY = barLevel * ROW_HEIGHT + 80;
+    const labelVecX = (figure.birthYear + labelYearOffset) * BASE_PIXELS_PER_YEAR;
+
+    placedVectors.push({
+        x1: barVecX,
+        y1: barVecY,
+        x2: labelVecX,
+        y2: labelVisualY
+    });
+}
+
 const TimelineCanvas: React.FC<TimelineCanvasProps> = ({ 
   figures, 
   startYear, 
@@ -271,171 +440,111 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
         tempLayout.push({ figure: fig, level: placedLevel });
     });
 
-    // --- PASS 2: Place Floating Labels for Short Events ---
+    // --- PASS 2: Place Floating Labels for Short Events (Gaps Only, with Bar Relocation) ---
     const placedVectors: { x1: number, y1: number, x2: number, y2: number }[] = [];
     
+    const MAX_RELOCATION_ATTEMPTS = 10;
+
     tempLayout.forEach(item => {
         const { figure, level } = item;
         const duration = figure.deathYear - figure.birthYear;
         const isEvent = figure.category === 'EVENTS';
         const isShort = duration < 15;
 
-        if (isEvent && isShort) {
-            const labelWidth = getOccupiedWidth(figure, true);
-            const horizontalSafetyOffset = duration + 2; // Always clear the bar
-            
-            // Randomize starting direction (Above/Below) based on ID hash to avoid clustering
-            const idHash = figure.id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-            const preferBelow = idHash % 2 === 0;
+        if (!isEvent || !isShort) return;
 
-            // Generate candidates dynamically - REVERTED to "Stepped" Look preference
-            const candidates: { dLevel: number, dYear: number }[] = [];
-            
-            // Helper to add a candidate pair
-            const addLayer = (dist: number, xOffset: number) => {
-                const below = { dLevel: dist, dYear: xOffset };
-                const above = { dLevel: -dist, dYear: xOffset };
-                if (preferBelow) {
-                    candidates.push(below, above);
-                } else {
-                    candidates.push(above, below);
-                }
-            };
+        const labelWidth = getOccupiedWidth(figure, true);
+        const horizontalOffset = duration + 2; // Position label just past the bar
 
-            // Layer 1: Same Row (Standard Stepped Look)
-            candidates.push({ dLevel: 0, dYear: horizontalSafetyOffset });
+        let currentBarLevel = level;
+        let placementSuccessful = false;
+        let relocationAttempts = 0;
 
-            // Layer 2: Immediate Gaps (+/- 0.5)
-            addLayer(0.5, horizontalSafetyOffset);
+        while (!placementSuccessful && relocationAttempts < MAX_RELOCATION_ATTEMPTS) {
+            // Try gap above first (-0.5)
+            const aboveGapLevel = currentBarLevel - 0.5;
+            const abovePlacement = tryPlaceLabelInGap(
+                figure, aboveGapLevel, horizontalOffset, labelWidth,
+                currentBarLevel, occupiedGaps, placedVectors
+            );
 
-            // Layer 3: Adjacent Rows (+/- 1)
-            addLayer(1, horizontalSafetyOffset);
+            if (abovePlacement.success) {
+                item.level = currentBarLevel;
+                item.labelLevel = aboveGapLevel;
+                item.labelYearOffset = horizontalOffset;
 
-            // Layer 4: Farther Gaps (+/- 1.5)
-            addLayer(1.5, horizontalSafetyOffset);
+                recordLabelInterval(aboveGapLevel, figure.birthYear + horizontalOffset, labelWidth, occupiedGaps);
+                recordConnectorVector(figure, currentBarLevel, horizontalOffset, abovePlacement.visualY!, placedVectors);
 
-            // Layer 5: Farther Rows (+/- 2)
-            addLayer(2, horizontalSafetyOffset);
-            
-            // Fallback: Massive horizontal offset (Same Row) - Prevents dropping to bottom
-            candidates.push({ dLevel: 0, dYear: horizontalSafetyOffset + 80 });
-
-            let bestPlacement = { level: level, offset: horizontalSafetyOffset + 50 }; 
-            let foundSafePlacement = false;
-
-            const barVecX = figure.birthYear * 10;
-            const barVecY = level * ROW_HEIGHT + 80;
-
-            for (const cand of candidates) {
-                const targetLevel = level + cand.dLevel;
-                const targetStart = figure.birthYear + cand.dYear;
-                const targetEnd = targetStart + labelWidth;
-
-                // Don't go below level 0
-                if (targetLevel < -0.5) continue;
-
-                const LABEL_MARGIN = 10;
-                
-                // 1. Check Collision Box
-                let hasOverlap = false;
-                const isGap = targetLevel % 1 !== 0;
-
-                if (isGap) {
-                     // GAP COLLISION CHECK
-                     const gapIndex = Math.floor(targetLevel);
-                     if (gapIndex < 0) continue; 
-                     
-                     if (gapIndex < occupiedGaps.length) {
-                         const gapIntervals = occupiedGaps[gapIndex];
-                         hasOverlap = gapIntervals.some(interval => 
-                            (targetStart < interval.end + LABEL_MARGIN) && (targetEnd + LABEL_MARGIN > interval.start)
-                         );
-                     }
-                } else {
-                     // ROW COLLISION CHECK
-                     const rowIndex = targetLevel;
-                     if (rowIndex < occupiedRows.length) {
-                         const rowIntervals = occupiedRows[rowIndex];
-                         hasOverlap = rowIntervals.some(interval => 
-                            (targetStart < interval.end + LABEL_MARGIN) && (targetEnd + LABEL_MARGIN > interval.start)
-                         );
-                     }
-                }
-
-                // 2. Check Vector Crossing
-                let hasVectorCrossing = false;
-                if (!hasOverlap) {
-                    const labelVecX = targetStart * 10;
-                    
-                    // Determine Visual Y for vector check
-                    // Below (+0.5) -> 175px offset
-                    // Above (-0.5) -> 145px offset (closer to top of gap to avoid bottom bar)
-                    let visualOffset = 60;
-                    if (isGap) {
-                        const isBelow = cand.dLevel > 0;
-                        visualOffset = isBelow ? 175 : 145;
-                    }
-                    
-                    const visualLevelY = Math.floor(targetLevel) * ROW_HEIGHT + visualOffset;
-                    
-                    hasVectorCrossing = placedVectors.some(vec => 
-                        linesIntersect(
-                            {x: barVecX, y: barVecY}, 
-                            {x: labelVecX, y: visualLevelY}, 
-                            {x: vec.x1, y: vec.y1}, 
-                            {x: vec.x2, y: vec.y2}
-                        )
-                    );
-                }
-
-                if (!hasOverlap && !hasVectorCrossing) {
-                    bestPlacement = { level: targetLevel, offset: cand.dYear };
-                    foundSafePlacement = true;
-                    break;
-                }
-            }
-            
-            // If absolutely nothing found, put on new row
-            if (!foundSafePlacement) {
-                bestPlacement = { level: occupiedRows.length, offset: horizontalSafetyOffset };
+                placementSuccessful = true;
+                break;
             }
 
-            item.labelLevel = bestPlacement.level;
-            item.labelYearOffset = bestPlacement.offset;
+            // Try gap below (+0.5)
+            const belowGapLevel = currentBarLevel + 0.5;
+            const belowPlacement = tryPlaceLabelInGap(
+                figure, belowGapLevel, horizontalOffset, labelWidth,
+                currentBarLevel, occupiedGaps, placedVectors
+            );
 
-            // Mark Occupied
-            const isGap = bestPlacement.level % 1 !== 0;
-            const finalStart = figure.birthYear + bestPlacement.offset;
-            const finalEnd = finalStart + labelWidth;
+            if (belowPlacement.success) {
+                item.level = currentBarLevel;
+                item.labelLevel = belowGapLevel;
+                item.labelYearOffset = horizontalOffset;
 
-            if (isGap) {
-                const gapIndex = Math.floor(bestPlacement.level);
-                while (occupiedGaps.length <= gapIndex) {
-                    occupiedGaps.push([]);
-                }
-                occupiedGaps[gapIndex].push({ start: finalStart, end: finalEnd });
-            } else {
-                const rowIndex = bestPlacement.level;
-                while (occupiedRows.length <= rowIndex) {
-                    occupiedRows.push([]);
-                }
-                occupiedRows[rowIndex].push({ start: finalStart, end: finalEnd, type: 'label' });
+                recordLabelInterval(belowGapLevel, figure.birthYear + horizontalOffset, labelWidth, occupiedGaps);
+                recordConnectorVector(figure, currentBarLevel, horizontalOffset, belowPlacement.visualY!, placedVectors);
+
+                placementSuccessful = true;
+                break;
             }
 
-            // Record Vector
-            // Match visual offset logic from loop
-            let finalVisualOffset = 60;
-            if (isGap) {
-                const isBelow = bestPlacement.level > level; // Rough check, relative to bar level
-                 finalVisualOffset = isBelow ? 175 : 145;
-            }
-            const finalVisualY = Math.floor(bestPlacement.level) * ROW_HEIGHT + finalVisualOffset;
+            // BOTH GAPS BLOCKED: Relocate bar to next available row
+            const barWidth = getOccupiedWidth(figure, false);
+            const newBarLevel = findNextAvailableRow(
+                figure, currentBarLevel + 1, occupiedRows, barWidth
+            );
 
-            placedVectors.push({
-                x1: barVecX, 
-                y1: barVecY, 
-                x2: (figure.birthYear + bestPlacement.offset) * 10, 
-                y2: finalVisualY
+            if (newBarLevel === -1) {
+                // No available rows - create new row at bottom
+                currentBarLevel = occupiedRows.length;
+                occupiedRows.push([{
+                    start: figure.birthYear,
+                    end: figure.birthYear + barWidth,
+                    type: 'bar'
+                }]);
+                relocationAttempts++;
+                continue;
+            }
+
+            // Remove old bar interval
+            removeBarInterval(currentBarLevel, figure.birthYear, occupiedRows);
+
+            // Add new bar interval
+            addBarInterval(newBarLevel, figure.birthYear, barWidth, occupiedRows);
+
+            currentBarLevel = newBarLevel;
+            relocationAttempts++;
+        }
+
+        // Emergency fallback if exhausted attempts
+        if (!placementSuccessful) {
+            console.warn(`Failed to place label for ${figure.name} after ${MAX_RELOCATION_ATTEMPTS} relocations`);
+
+            const emergencyLevel = occupiedRows.length;
+            item.level = emergencyLevel;
+            item.labelLevel = emergencyLevel;
+            item.labelYearOffset = horizontalOffset;
+
+            occupiedRows.push([{
+                start: figure.birthYear,
+                end: figure.birthYear + getOccupiedWidth(figure, false),
+                type: 'bar'
+            }]);
+            occupiedRows[emergencyLevel].push({
+                start: figure.birthYear + horizontalOffset,
+                end: figure.birthYear + horizontalOffset + labelWidth,
+                type: 'label'
             });
         }
     });
@@ -971,12 +1080,12 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
               
               const labelLeft = (figure.birthYear + labelOffset - startYear) * BASE_PIXELS_PER_YEAR;
               
-              const isBelow = labelLevel > level;
               const isGap = labelLevel % 1 !== 0;
-              
-              const gapVisualOffset = isBelow ? 175 : 145;
-              const labelContainerTop = isGap 
-                ? Math.floor(labelLevel) * ROW_HEIGHT + gapVisualOffset 
+
+              // Center labels vertically in gaps - use same offset for both directions
+              const gapVisualOffset = 175; // Centered in gap (empirically determined)
+              const labelContainerTop = isGap
+                ? Math.floor(labelLevel) * ROW_HEIGHT + gapVisualOffset
                 : labelLevel * ROW_HEIGHT + 60 - 15;
 
               return (
@@ -1114,7 +1223,8 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
               const labelLeft = (figure.birthYear + (labelYearOffset ?? 10) - startYear) * BASE_PIXELS_PER_YEAR;
 
               const isGap = (labelLevel ?? level) % 1 !== 0;
-              const gapVisualOffset = isBelow ? 175 : 145;
+              // Center labels vertically in gaps - use same offset for both directions
+              const gapVisualOffset = 175; // Centered in gap (empirically determined)
               const labelContainerTop = isGap
                 ? Math.floor(labelLevel ?? level) * ROW_HEIGHT + gapVisualOffset
                 : (labelLevel ?? level) * ROW_HEIGHT + 60 - 15;
