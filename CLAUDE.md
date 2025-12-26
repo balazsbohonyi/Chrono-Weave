@@ -43,6 +43,7 @@ Set the `GEMINI_API_KEY` in `.env.local` to your Google Gemini API key. The app 
      - `discoverRelatedFigures()`: Expand timeline with new related figures
      - `fetchRelationshipExplanation()`: Explain connection between two figures
      - `fetchFigureDeepDive()`: Generate detailed biography/quotes
+     - `testConnection()`: Validate API credentials and model availability
 
 3. **Data Fetching** (`services/wikiService.ts`)
    - Fetches figure images and descriptions from Wikipedia

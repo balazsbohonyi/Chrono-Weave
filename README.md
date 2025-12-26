@@ -115,15 +115,65 @@ More explanations in the [.env.example](.env.example)
 
 The app will be available at `http://localhost:3000`
 
-### Optional: Use OpenRouter
+### Settings Configuration
 
-Instead of Gemini, you can use OpenRouter API:
+ChronoWeave offers flexible configuration through both environment variables and the in-app Settings dialog.
 
-1. Open the app and click the settings gear icon
-2. Select "OpenRouter" as the provider
-3. Enter your OpenRouter API key
-4. Choose your preferred model (e.g., Claude 3.5 Sonnet)
-5. Click Save to apply changes
+#### How Settings Work
+
+**Development Mode (npm run dev):**
+- Settings can be configured via `.env.local` file OR the in-app Settings dialog
+- **Priority**: localStorage (from Settings dialog) > `.env.local` environment variables
+- The Settings dialog allows real-time configuration changes without restarting the dev server
+- Settings are saved to browser localStorage with keys: `chrono_provider`, `chrono_api_key`, `chrono_model`
+
+**Production Mode (npm run build):**
+- The Settings dialog is **hidden** in production
+- Configuration is **strictly** from `.env.production` environment variables
+- localStorage settings are ignored for security
+
+#### Using the Settings Dialog (Development Only)
+
+1. Click the settings gear icon in the control panel
+2. Configure the following:
+   - **AI Provider**: Choose between "Google Gemini" or "OpenRouter"
+   - **API Key**: Enter your API key for the selected provider
+     - [Get Gemini API key](https://aistudio.google.com/apikey)
+     - [Get OpenRouter API key](https://openrouter.ai/keys)
+   - **Model ID**: Specify the model to use (auto-fills with defaults when switching providers)
+     - Gemini default: `gemini-2.5-flash`
+     - OpenRouter default: `openai/gpt-oss-120b`
+3. **Test** your connection before saving (validates API key and model)
+4. Click **Save & Reload** to apply changes (reloads timeline data with new configuration)
+
+**Validation**: All fields are required. The Test and Save buttons are disabled until all fields are filled.
+
+**Connection Testing**: The Test button validates your API credentials and model without saving changes. Success/error messages appear as toast notifications.
+
+**Current Configuration Display**: The dialog shows which provider and model are currently active (from environment or localStorage).
+
+#### Configuration Examples
+
+**Using Gemini:**
+```bash
+PROVIDER=gemini
+API_KEY=your_gemini_api_key
+MODEL=gemini-2.5-flash
+```
+
+**Using OpenRouter with Claude:**
+```bash
+PROVIDER=openrouter
+API_KEY=your_openrouter_api_key
+MODEL=anthropic/claude-3.5-sonnet
+```
+
+**Using OpenRouter with Llama:**
+```bash
+PROVIDER=openrouter
+API_KEY=your_openrouter_api_key
+MODEL=meta-llama/llama-3.3-70b-instruct
+```
 
 ## Available Commands
 
