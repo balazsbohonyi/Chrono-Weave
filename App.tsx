@@ -659,6 +659,7 @@ const App: React.FC = () => {
                 isOpen={isSettingsOpen}
                 onClose={() => setIsSettingsOpen(false)}
                 onSave={handleSettingsSaved}
+                onShowToast={(msg: string, type: 'success' | 'info' | 'error') => setToast({ message: msg, type })}
             />
 
             <Toast

@@ -25,6 +25,42 @@ export class GeminiService implements IAIService {
         return this.ai;
     }
 
+    async testConnection(): Promise<{ success: boolean; error?: string }> {
+        try {
+            const ai = this.ensureAI();
+            // Quick test: generate a simple response with minimal tokens
+            const response = await ai.models.generateContent({
+                model: this.model,
+                contents: "Say 'ok'",
+                config: { responseMimeType: "text/plain" }
+            });
+
+            // Check if we got a valid response (text can be empty string, which is falsy)
+            if (response && response.text !== undefined) {
+                return { success: true };
+            }
+            console.error("[Gemini] Unexpected response structure:", response);
+            return { success: false, error: "No response received" };
+        } catch (error: any) {
+            console.error("[Gemini] Connection test failed:", error);
+            let errorMsg = "Connection test failed";
+
+            if (error.message?.includes("API key")) {
+                errorMsg = "Invalid API key";
+            } else if (error.status === 403 || error.status === 401) {
+                errorMsg = "Authentication failed - check API key";
+            } else if (error.status === 404 || error.message?.includes("models/") || error.message?.includes("not found")) {
+                errorMsg = "Model not found - check model ID";
+            } else if (error.message?.toLowerCase().includes("model") && (error.message?.includes("invalid") || error.message?.includes("does not exist"))) {
+                errorMsg = `Invalid model: ${error.message}`;
+            } else if (error.message) {
+                errorMsg = error.message;
+            }
+
+            return { success: false, error: errorMsg };
+        }
+    }
+
     private async fetchFiguresChunk(start: number, end: number): Promise<HistoricalFigure[]> {
         const prompt = `
             Generate a list of exactly ${HISTORICAL_FIGURES_PER_CENTURY_CHUNK} distinct and famous historical figures (politicians, rulers, artists, scientists, etc.) 

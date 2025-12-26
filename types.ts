@@ -68,4 +68,5 @@ export interface IAIService {
   discoverRelatedFigures(target: HistoricalFigure, existingNames: string[], start: number, end: number): Promise<HistoricalFigure[]>;
   fetchRelationshipExplanation(source: HistoricalFigure, target: HistoricalFigure): Promise<RelationshipExplanation | null>;
   fetchFigureDeepDive(figure: HistoricalFigure): Promise<DeepDiveData | null>;
+  testConnection(): Promise<{ success: boolean; error?: string }>;
 }

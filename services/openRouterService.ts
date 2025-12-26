@@ -13,6 +13,58 @@ export class OpenRouterService implements IAIService {
         this.model = model;
     }
 
+    async testConnection(): Promise<{ success: boolean; error?: string }> {
+        try {
+            const response = await fetch(this.baseUrl, {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${this.apiKey}`,
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": window.location.origin,
+                    "X-Title": "ChronoWeave"
+                },
+                body: JSON.stringify({
+                    model: this.model,
+                    messages: [{ role: "user", content: "Say 'ok'" }],
+                    max_tokens: 5
+                })
+            });
+
+            if (!response.ok) {
+                const errBody = await response.text();
+                let errorMsg = `HTTP ${response.status}`;
+
+                if (response.status === 401 || response.status === 403) {
+                    errorMsg = "Invalid API key";
+                } else if (response.status === 404) {
+                    errorMsg = "Model not found - check model ID";
+                } else {
+                    try {
+                        const errJson = JSON.parse(errBody);
+                        errorMsg = errJson.error?.message || errorMsg;
+                    } catch {}
+                }
+
+                return { success: false, error: errorMsg };
+            }
+
+            const data = await response.json();
+            // Check if response has the expected structure (even if content is empty)
+            if (data.choices && Array.isArray(data.choices) && data.choices.length > 0) {
+                return { success: true };
+            }
+
+            console.error("[OpenRouter] Unexpected response structure:", data);
+            return { success: false, error: "Invalid response format" };
+        } catch (error: any) {
+            console.error("[OpenRouter] Connection test failed:", error);
+            return {
+                success: false,
+                error: error.message || "Network error - check connection"
+            };
+        }
+    }
+
     private parseJson(text: string): any {
         // Trim the text to remove any leading/trailing whitespace
         const trimmedText = text.trim();
