@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import { GeminiService } from '../services/geminiService';
+import { OpenRouterService } from '../services/openRouterService';
 
 interface SettingsDialogProps {
   isOpen: boolean;
@@ -52,15 +54,10 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose, onSave
     setIsTesting(true);
 
     try {
-      // Dynamically create temporary service instance for testing
-      let testService;
-      if (provider === 'gemini') {
-        const { GeminiService } = await import('../services/geminiService');
-        testService = new GeminiService(apiKey, model);
-      } else {
-        const { OpenRouterService } = await import('../services/openRouterService');
-        testService = new OpenRouterService(apiKey, model);
-      }
+      // Create temporary service instance for testing
+      const testService = provider === 'gemini'
+        ? new GeminiService(apiKey, model)
+        : new OpenRouterService(apiKey, model);
 
       const result = await testService.testConnection();
 

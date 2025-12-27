@@ -23,18 +23,8 @@ export const EnvironmentProvider: React.FC<{ children: ReactNode }> = ({ childre
             return provider === 'openrouter' ? 'openai/gpt-oss-120b' : 'gemini-2.5-flash';
         };
 
-        // In production, strictly use environment variables (injected at build time or runtime if configured)
-        // We ignore localStorage to prevent user overrides in production
-        if (isProduction) {
-            const provider = process.env.PROVIDER || 'gemini';
-            return {
-                provider,
-                apiKey: process.env.API_KEY || '',
-                model: process.env.MODEL || getDefaultModel(provider)
-            };
-        }
-
-        // In development, prioritize localStorage for easier testing/switching
+        // Both development and production modes now prioritize localStorage for flexibility
+        // This allows runtime configuration changes via the Settings dialog
         const localProvider = localStorage.getItem('chrono_provider');
         const localKey = localStorage.getItem('chrono_api_key');
         const localModel = localStorage.getItem('chrono_model');
@@ -43,6 +33,7 @@ export const EnvironmentProvider: React.FC<{ children: ReactNode }> = ({ childre
             return { provider: localProvider, apiKey: localKey, model: localModel };
         }
 
+        // Fallback to environment variables if localStorage is not set
         const provider = process.env.PROVIDER || 'gemini';
         return {
             provider,

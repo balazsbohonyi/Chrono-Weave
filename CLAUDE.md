@@ -24,7 +24,7 @@ npm run preview
 
 ### Environment Setup
 
-Set the `GEMINI_API_KEY` in `.env.local` to your Google Gemini API key. The app will fallback to Gemini if OpenRouter is not configured in settings.
+Set `PROVIDER`, `API_KEY`, and optionally `MODEL` in `.env.local` (development) or `.env.production` (production). The app supports both Google Gemini and OpenRouter APIs. Settings can also be configured at runtime via the Settings dialog, which takes precedence over environment variables.
 
 ## Architecture Overview
 
@@ -149,4 +149,7 @@ See `constants.ts` for:
 
 - Use narrow year ranges (e.g., 1400-1500) for quick testing
 - Check localStorage for cached data using `chrono_rel_*` or `chrono_deepdive_*` keys
-- Provider/model selection is saved to localStorage and persists across sessions
+- Provider/model selection is saved to localStorage with keys: `chrono_provider`, `chrono_api_key`, `chrono_model`
+- **Settings Priority**: localStorage (Settings dialog) > environment variables (both dev and production)
+- Settings dialog is available in both development and production modes
+- Environment variables serve as fallback defaults when localStorage is not configured

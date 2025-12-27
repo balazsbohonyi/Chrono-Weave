@@ -114,7 +114,8 @@ MODEL=gemini-2.5-flash
 **Important Notes:**
 - `.env.local` is used for **local development** (`npm run dev`) and is gitignored by default.
 - `.env.production` is used when building for **production** (`npm run build`).
-- In production mode, the settings dialog is **hidden**, and the application strictly uses environment variables from the build, ignoring any localStorage overrides.
+- Both development and production modes support runtime configuration via the Settings dialog (saved to localStorage).
+- Environment variables serve as fallback defaults when localStorage settings are not configured.
 - Both `.env.local` and `.env.production` should be added to `.gitignore` to prevent committing secrets.
 
 More explanations in the [.env.example](.env.example)
@@ -132,18 +133,16 @@ ChronoWeave offers flexible configuration through both environment variables and
 
 #### How Settings Work
 
-**Development Mode (npm run dev):**
-- Settings can be configured via `.env.local` file OR the in-app Settings dialog
-- **Priority**: localStorage (from Settings dialog) > `.env.local` environment variables
-- The Settings dialog allows real-time configuration changes without restarting the dev server
+Both development and production modes work identically:
+
+- Settings can be configured via environment files (`.env.local` or `.env.production`) OR the in-app Settings dialog
+- **Priority**: localStorage (from Settings dialog) > environment variables
+- The Settings dialog allows real-time configuration changes without restarting or rebuilding
 - Settings are saved to browser localStorage with keys: `chrono_provider`, `chrono_api_key`, `chrono_model`
+- Environment variables serve as fallback defaults when localStorage is not configured
+- This provides maximum flexibility for both development and production deployments
 
-**Production Mode (npm run build):**
-- The Settings dialog is **hidden** in production
-- Configuration is **strictly** from `.env.production` environment variables
-- localStorage settings are ignored for security
-
-#### Using the Settings Dialog (Development Only)
+#### Using the Settings Dialog
 
 1. Click the settings gear icon in the control panel
 2. Configure the following:
