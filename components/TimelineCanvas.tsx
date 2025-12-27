@@ -65,6 +65,105 @@ function linesIntersect(p1: {x:number, y:number}, p2: {x:number, y:number}, p3: 
     return (ua > 0.05 && ua < 0.95) && (ub > 0.05 && ub < 0.95);
 }
 
+// Font size constants (matching Tailwind classes)
+const FONT_SIZE_NAME = 22;      // text-[22px]
+const FONT_SIZE_DATE = 18;      // text-lg
+const FONT_SIZE_OCCUPATION = 18; // text-[18px]
+
+// Character width multipliers (empirically derived)
+const CHAR_WIDTH_UPPERCASE = 0.82;  // font-black uppercase → ~18px per char
+const CHAR_WIDTH_BOLD = 0.78;       // font-bold → ~14px per char
+const CHAR_WIDTH_CAPITALIZE = 0.75; // font-bold capitalized → ~13.5px per char
+
+interface TextMeasurement {
+  nameWidthPx: number;
+  dateWidthPx: number;
+  occupationWidthPx: number;
+  totalWidthPx: number;
+  totalWidthYears: number;
+}
+
+/**
+ * Calculate accurate text width for a figure/event label
+ * @param fig - The historical figure
+ * @param isUppercase - Whether name is rendered in uppercase
+ * @param includeDate - Whether to include date width
+ * @returns Object with pixel and year-space widths
+ */
+function calculateTextWidth(
+  fig: HistoricalFigure,
+  isUppercase: boolean,
+  includeDate: boolean = true
+): TextMeasurement {
+  // Name width (always uppercase in rendering)
+  const nameWidthPx = Math.ceil(fig.name.length * FONT_SIZE_NAME * CHAR_WIDTH_UPPERCASE);
+
+  // Occupation width (capitalized)
+  const occupationWidthPx = Math.ceil(fig.occupation.length * FONT_SIZE_OCCUPATION * CHAR_WIDTH_CAPITALIZE);
+
+  // Date width - CRITICAL: This was missing for floating labels!
+  let dateWidthPx = 0;
+  if (includeDate) {
+    const startYStr = formatYear(fig.birthYear);
+    const endYStr = fig.deathYear >= new Date().getFullYear() ? '' : formatYear(fig.deathYear);
+    // Format: "YYYY - YYYY" or "YYYY BC - YYYY" with " - " separator
+    const dateTextLength = startYStr.length + (endYStr ? endYStr.length + 3 : 2);
+    dateWidthPx = Math.ceil(dateTextLength * FONT_SIZE_DATE * CHAR_WIDTH_BOLD) + 60; // +60px padding
+  }
+
+  const totalWidthPx = Math.max(nameWidthPx, dateWidthPx, occupationWidthPx);
+  const totalWidthYears = totalWidthPx / BASE_PIXELS_PER_YEAR;
+
+  return {
+    nameWidthPx,
+    dateWidthPx,
+    occupationWidthPx,
+    totalWidthPx,
+    totalWidthYears
+  };
+}
+
+/**
+ * Calculate total occupied width for collision detection
+ * Accounts for bar width, text content, and padding
+ */
+function calculateOccupiedWidth(
+  fig: HistoricalFigure,
+  forFloatingLabel: boolean = false
+): number {
+  const duration = fig.deathYear - fig.birthYear;
+  const isEvent = fig.category === 'EVENTS';
+  const isShort = duration < 15;
+
+  // For short events in PASS 1: only the tiny bar matters
+  if (!forFloatingLabel && isEvent && isShort) {
+    return duration;
+  }
+
+  // For floating labels - FIX: Now includes date width!
+  if (forFloatingLabel) {
+    const textMeasurement = calculateTextWidth(fig, true, true);
+
+    // Account for min-w-[200px] constraint (line 1124)
+    const MIN_FLOATING_WIDTH_PX = 200;
+    const contentWidthPx = Math.max(textMeasurement.totalWidthPx, MIN_FLOATING_WIDTH_PX);
+
+    // Add padding: pl-2 = 8px
+    const paddingPx = 8;
+    const totalWidthPx = contentWidthPx + paddingPx;
+
+    return (totalWidthPx / BASE_PIXELS_PER_YEAR) + 5; // +5 years buffer
+  }
+
+  // For standard elements
+  const textMeasurement = calculateTextWidth(fig, true, true);
+  const barWidthPx = Math.max(duration * BASE_PIXELS_PER_YEAR, 40);
+  const paddingPx = 4; // px-1 = 4px total horizontal padding
+  const maxContentWidthPx = Math.max(textMeasurement.totalWidthPx, barWidthPx) + paddingPx;
+
+  return (maxContentWidthPx / BASE_PIXELS_PER_YEAR) + 5;
+}
+
 // Helper functions for simplified short event placement
 
 function tryPlaceLabelInGap(
@@ -373,43 +472,7 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
     const MARGIN = 6; 
 
     const getOccupiedWidth = (fig: HistoricalFigure, forFloatingLabel = false) => {
-        const duration = fig.deathYear - fig.birthYear;
-        const isEvent = fig.category === 'EVENTS';
-        const isShort = duration < 15;
-
-        // For short events, Pass 1 only cares about the tiny bar
-        if (!forFloatingLabel && isEvent && isShort) {
-            return duration; 
-        }
-
-        // For labels, we use a rough estimate
-        if (forFloatingLabel) {
-             const textLen = Math.max(fig.name.length, fig.occupation.length);
-             const charEstimate = textLen * 3.0; 
-             return charEstimate + 30; // Extra buffer
-        }
-
-        // Standard Rendered Items (Figures or Long Events)
-        // We calculate the maximum pixel width of content to ensure no overlap
-        
-        // 1. Name Width (22px font-black uppercase) -> ~18px/char conservative
-        const nameWidthPx = fig.name.length * 18; 
-        
-        // 2. Occupation Width (18px bold) -> ~14px/char conservative
-        const occWidthPx = fig.occupation.length * 14;
-
-        // 3. Date Width (18px bold + padding)
-        const startYStr = formatYear(fig.birthYear);
-        const endYStr = fig.deathYear >= new Date().getFullYear() ? '' : formatYear(fig.deathYear);
-        const dateWidthPx = ((startYStr.length + endYStr.length + 3) * 14) + 60; // Text + Padding/Icon
-
-        // 4. Bar Width
-        const barWidthPx = Math.max(duration * BASE_PIXELS_PER_YEAR, 40);
-
-        // 5. Max Width of the container (width: max-content)
-        const maxContentWidthPx = Math.max(nameWidthPx, occWidthPx, dateWidthPx, barWidthPx);
-
-        return (maxContentWidthPx / BASE_PIXELS_PER_YEAR) + 5; 
+        return calculateOccupiedWidth(fig, forFloatingLabel);
     };
 
     sortedFigures.forEach(fig => {
@@ -550,6 +613,171 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
             });
         }
     });
+
+    // --- PASS 3: Post-Placement Overlap Detection & Resolution ---
+    interface OverlapInfo {
+      figureId: string;
+      layoutIndex: number;
+      overlapsWith: string[];
+      isFloatingLabel: boolean;
+    }
+
+    function detectOverlaps(): OverlapInfo[] {
+      const overlaps: OverlapInfo[] = [];
+      const OVERLAP_THRESHOLD = 2; // Years
+
+      tempLayout.forEach((item, index) => {
+        const { figure, level, labelLevel, labelYearOffset } = item;
+        const duration = figure.deathYear - figure.birthYear;
+        const isEvent = figure.category === 'EVENTS';
+        const isShort = duration < 15;
+        const hasFloatingLabel = isEvent && isShort && labelLevel !== undefined;
+
+        const overlapsWith: string[] = [];
+
+        if (hasFloatingLabel) {
+          // Check floating label overlaps
+          const labelWidth = calculateOccupiedWidth(figure, true);
+          const labelStart = figure.birthYear + (labelYearOffset ?? 0);
+          const labelEnd = labelStart + labelWidth;
+          const labelRow = Math.floor(labelLevel ?? level);
+
+          tempLayout.forEach((other, otherIndex) => {
+            if (index === otherIndex) return;
+
+            const otherDuration = other.figure.deathYear - other.figure.birthYear;
+            const otherIsEvent = other.figure.category === 'EVENTS';
+            const otherIsShort = otherDuration < 15;
+
+            // Check against other floating labels
+            if (otherIsEvent && otherIsShort && other.labelLevel !== undefined) {
+              const otherLabelRow = Math.floor(other.labelLevel);
+              if (Math.abs(labelRow - otherLabelRow) < 1) {
+                const otherLabelWidth = calculateOccupiedWidth(other.figure, true);
+                const otherLabelStart = other.figure.birthYear + (other.labelYearOffset ?? 0);
+                const otherLabelEnd = otherLabelStart + otherLabelWidth;
+
+                if ((labelStart < otherLabelEnd + OVERLAP_THRESHOLD) &&
+                    (labelEnd + OVERLAP_THRESHOLD > otherLabelStart)) {
+                  overlapsWith.push(other.figure.id);
+                }
+              }
+            }
+
+            // Check against standard elements in adjacent rows
+            if (!otherIsEvent || !otherIsShort || other.labelLevel === undefined) {
+              if (Math.abs(labelRow - other.level) <= 1) {
+                const otherWidth = calculateOccupiedWidth(other.figure, false);
+                const otherEnd = other.figure.birthYear + otherWidth;
+
+                if ((labelStart < otherEnd + OVERLAP_THRESHOLD) &&
+                    (labelEnd + OVERLAP_THRESHOLD > other.figure.birthYear)) {
+                  overlapsWith.push(other.figure.id);
+                }
+              }
+            }
+          });
+        } else {
+          // Check standard element overlaps
+          const width = calculateOccupiedWidth(figure, false);
+          const end = figure.birthYear + width;
+
+          tempLayout.forEach((other, otherIndex) => {
+            if (index === otherIndex) return;
+            if (Math.abs(level - other.level) > 0.6) return; // Not in same row
+
+            const otherDuration = other.figure.deathYear - other.figure.birthYear;
+            const otherIsEvent = other.figure.category === 'EVENTS';
+            const otherIsShort = otherDuration < 15;
+
+            if (otherIsEvent && otherIsShort && other.labelLevel !== undefined) return;
+
+            const otherWidth = calculateOccupiedWidth(other.figure, false);
+            const otherEnd = other.figure.birthYear + otherWidth;
+
+            if ((figure.birthYear < otherEnd + OVERLAP_THRESHOLD) &&
+                (end + OVERLAP_THRESHOLD > other.figure.birthYear)) {
+              overlapsWith.push(other.figure.id);
+            }
+          });
+        }
+
+        if (overlapsWith.length > 0) {
+          overlaps.push({
+            figureId: figure.id,
+            layoutIndex: index,
+            overlapsWith,
+            isFloatingLabel: hasFloatingLabel
+          });
+        }
+      });
+
+      return overlaps;
+    }
+
+    function resolveOverlaps(overlaps: OverlapInfo[]): void {
+      // Prioritize floating labels (easier to move)
+      const sortedOverlaps = [...overlaps].sort((a, b) => {
+        if (a.isFloatingLabel && !b.isFloatingLabel) return -1;
+        if (!a.isFloatingLabel && b.isFloatingLabel) return 1;
+        return 0;
+      });
+
+      sortedOverlaps.forEach(overlap => {
+        const item = tempLayout[overlap.layoutIndex];
+        const { figure, level } = item;
+
+        if (overlap.isFloatingLabel) {
+          // Try to relocate floating label to opposite gap
+          const labelWidth = calculateOccupiedWidth(figure, true);
+          const barCenter = (figure.deathYear - figure.birthYear) / 2;
+          const horizontalOffset = barCenter + 3;
+
+          const currentLabelLevel = item.labelLevel ?? level;
+          const isCurrentlyAbove = currentLabelLevel < level;
+          const newGapLevel = isCurrentlyAbove ? level + 0.5 : level - 0.5;
+
+          const newPlacement = tryPlaceLabelInGap(
+            figure, newGapLevel, horizontalOffset, labelWidth,
+            level, occupiedGaps, placedVectors
+          );
+
+          if (newPlacement.success) {
+            // Remove old gap interval
+            const oldGapIndex = Math.floor(currentLabelLevel);
+            if (oldGapIndex >= 0 && oldGapIndex < occupiedGaps.length) {
+              const labelStart = figure.birthYear + (item.labelYearOffset ?? horizontalOffset);
+              const intervals = occupiedGaps[oldGapIndex];
+              const intervalIndex = intervals.findIndex(
+                interval => Math.abs(interval.start - labelStart) < 0.1
+              );
+              if (intervalIndex !== -1) {
+                intervals.splice(intervalIndex, 1);
+              }
+            }
+
+            // Update placement
+            item.labelLevel = newGapLevel;
+            item.labelYearOffset = horizontalOffset;
+            recordLabelInterval(newGapLevel, figure.birthYear + horizontalOffset, labelWidth, occupiedGaps);
+            recordConnectorVector(figure, level, horizontalOffset, newPlacement.visualY!, placedVectors);
+
+            console.log(`Resolved overlap: Relocated label for ${figure.name}`);
+          } else {
+            console.warn(`Could not resolve overlap for floating label: ${figure.name}`);
+          }
+        } else {
+          console.warn(`Detected overlap for standard element: ${figure.name}`);
+        }
+      });
+    }
+
+    // Execute overlap detection and resolution
+    const detectedOverlaps = detectOverlaps();
+    if (detectedOverlaps.length > 0) {
+      console.log(`Detected ${detectedOverlaps.length} overlaps, attempting resolution...`);
+      resolveOverlaps(detectedOverlaps);
+    }
 
     // Determine total rows for canvas height. 
     // We check both regular rows and if any gaps push beyond the visual bounds
@@ -960,23 +1188,10 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
             );
           }
 
-          // For standard figures: calculate based on content
-          // Name width: ~18px per char at font-black 22px
-          const nameWidth = figure.name.length * 18;
-
-          // Occupation width: ~14px per char at font-bold 18px
-          const occupationWidth = figure.occupation.length * 14;
-
-          // Bar width
+          // For standard figures: use centralized width calculation
+          const measurement = calculateTextWidth(figure, true, true);
           const barWidth = Math.max(duration * BASE_PIXELS_PER_YEAR, 10);
-
-          // Date width: estimate based on year strings
-          const startYStr = formatYear(figure.birthYear);
-          const endYStr = figure.deathYear >= new Date().getFullYear() ? '' : formatYear(figure.deathYear);
-          const dateWidth = ((startYStr.length + endYStr.length + 3) * 14) + 60;
-
-          // Maximum width of content
-          const maxWidth = Math.max(nameWidth, occupationWidth, barWidth, dateWidth);
+          const maxWidth = Math.max(measurement.totalWidthPx, barWidth);
 
           // Add horizontal and vertical padding
           const hPadding = 15;

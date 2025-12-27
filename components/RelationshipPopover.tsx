@@ -81,9 +81,9 @@ const RelationshipPopover: React.FC<RelationshipPopoverProps> = ({
                 {/* Famous Quote */}
                 {data.famousQuote && (
                     <div className="bg-blue-50/50 p-6 rounded-lg border border-blue-100 mb-8">
-                        <h3 className="text-sm font-bold uppercase text-blue-800 tracking-wider mb-4 font-sans">Famuous Quote</h3>
+                        <h3 className="text-sm font-bold uppercase text-blue-800 tracking-wider mb-4 font-sans">Famous Quote</h3>
                         <p className="text-gray-800 text-lg italic leading-relaxed font-serif">
-                            "{data.famousQuote}"
+                            {data.famousQuote}
                         </p>
                     </div>
                 )}
