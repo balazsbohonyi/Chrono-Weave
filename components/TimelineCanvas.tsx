@@ -111,7 +111,11 @@ function calculateTextWidth(
     dateWidthPx = Math.ceil(dateTextLength * FONT_SIZE_DATE * CHAR_WIDTH_BOLD) + 60; // +60px padding
   }
 
-  const totalWidthPx = Math.max(nameWidthPx, dateWidthPx, occupationWidthPx);
+  // Date and occupation are on the same line for floating labels, so add them together
+  // Format: "YYYY - YYYY • occupation" - add bullet separator width (~15px)
+  const dateAndOccupationWidthPx = dateWidthPx + occupationWidthPx + 15;
+
+  const totalWidthPx = Math.max(nameWidthPx, dateAndOccupationWidthPx);
   const totalWidthYears = totalWidthPx / BASE_PIXELS_PER_YEAR;
 
   return {
@@ -596,21 +600,28 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
         if (!placementSuccessful) {
             console.warn(`Failed to place label for ${figure.name} after ${MAX_RELOCATION_ATTEMPTS} relocations`);
 
-            const emergencyLevel = occupiedRows.length;
-            item.level = emergencyLevel;
-            item.labelLevel = emergencyLevel;
+            // Create new row for bar and place label in gap below
+            const emergencyBarLevel = occupiedRows.length;
+            const emergencyGapLevel = emergencyBarLevel + 0.5;
+
+            item.level = emergencyBarLevel;
+            item.labelLevel = emergencyGapLevel;
             item.labelYearOffset = horizontalOffset;
 
+            // Add bar interval to new row
             occupiedRows.push([{
                 start: figure.birthYear,
                 end: figure.birthYear + getOccupiedWidth(figure, false),
                 type: 'bar'
             }]);
-            occupiedRows[emergencyLevel].push({
-                start: figure.birthYear + horizontalOffset,
-                end: figure.birthYear + horizontalOffset + labelWidth,
-                type: 'label'
-            });
+
+            // Record label in gap below the new row
+            recordLabelInterval(emergencyGapLevel, figure.birthYear + horizontalOffset, labelWidth, occupiedGaps);
+
+            // Record connector vector (bar to label below)
+            const visualOffset = 175; // Same as tryPlaceLabelInGap
+            const visualY = emergencyBarLevel * ROW_HEIGHT + visualOffset;
+            recordConnectorVector(figure, emergencyBarLevel, horizontalOffset, visualY, placedVectors);
         }
     });
 
@@ -664,18 +675,9 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
               }
             }
 
-            // Check against standard elements in adjacent rows
-            if (!otherIsEvent || !otherIsShort || other.labelLevel === undefined) {
-              if (Math.abs(labelRow - other.level) <= 1) {
-                const otherWidth = calculateOccupiedWidth(other.figure, false);
-                const otherEnd = other.figure.birthYear + otherWidth;
-
-                if ((labelStart < otherEnd + OVERLAP_THRESHOLD) &&
-                    (labelEnd + OVERLAP_THRESHOLD > other.figure.birthYear)) {
-                  overlapsWith.push(other.figure.id);
-                }
-              }
-            }
+            // Skip checking against standard elements - floating labels are in gaps,
+            // which are vertically separated from row content
+            // Only check against other floating labels (already done above)
           });
         } else {
           // Check standard element overlaps
@@ -761,8 +763,6 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
             item.labelYearOffset = horizontalOffset;
             recordLabelInterval(newGapLevel, figure.birthYear + horizontalOffset, labelWidth, occupiedGaps);
             recordConnectorVector(figure, level, horizontalOffset, newPlacement.visualY!, placedVectors);
-
-            console.log(`Resolved overlap: Relocated label for ${figure.name}`);
           } else {
             console.warn(`Could not resolve overlap for floating label: ${figure.name}`);
           }
@@ -1264,7 +1264,7 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
                   textColorClass = `text-${getTextColorForBackground(barBackgroundColor)}`;
                   shadowClass = "shadow-2xl z-50";
                   animationClass = "animate-pulse-limited";
-                  containerOpacityClass = "opacity-100 scale-105";
+                  containerOpacityClass = "opacity-100";
               } else {
                   containerOpacityClass = "opacity-20 grayscale";
               }
@@ -1289,14 +1289,14 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
           }
 
           // Special Rendering for Short Events (< 15 Years)
-          if (isEvent && duration < 15 && !isSearchMode && !isFocused) {
+          if (isEvent && duration < 15) {
               const labelLevel = item.labelLevel ?? level;
               const labelOffset = item.labelYearOffset ?? 10;
-              
+
               const BAR_VERTICAL_OFFSET = 32;
-              
+
               const labelLeft = (figure.birthYear + labelOffset - startYear) * BASE_PIXELS_PER_YEAR;
-              
+
               const isGap = labelLevel % 1 !== 0;
 
               // Center labels vertically in gaps - use same offset for both directions
@@ -1318,25 +1318,25 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
                     }}
                 >
                      {/* The Bar Itself */}
-                     <div 
+                     <div
                         key={`bar-${figure.id}`}
                         data-figure-id={figure.id}
-                        className={`absolute h-[28px] rounded-sm z-10 pointer-events-auto cursor-pointer ${shadowClass}`}
-                        style={{ 
+                        className={`absolute h-[28px] rounded-sm z-10 pointer-events-auto cursor-pointer ${shadowClass} ${animationClass}`}
+                        style={{
                             left: `${left}px`,
                             top: `${top + BAR_VERTICAL_OFFSET}px`,
                             width: `${Math.max(width, 4)}px`,
-                            backgroundColor: barBackgroundColor 
+                            backgroundColor: barBackgroundColor
                         }}
                         onPointerEnter={(e) => handleBarEnter(e, figure.id)}
                         onPointerLeave={handleBarLeave}
                      />
 
                      {/* Floating Label */}
-                     <div 
+                     <div
                         key={`label-${figure.id}`}
                         data-figure-id={figure.id}
-                        className="absolute flex flex-col items-start min-w-[200px] z-20 pointer-events-auto cursor-pointer pl-2 origin-left"
+                        className={`absolute flex flex-col items-start min-w-[200px] z-20 pointer-events-auto cursor-pointer pl-2 origin-left ${animationClass}`}
                         style={{
                              left: `${labelLeft}px`,
                              top: `${labelContainerTop}px`,
@@ -1347,8 +1347,8 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
                          <span className="text-[22px] font-black text-black leading-none uppercase drop-shadow-sm filter-none whitespace-nowrap">
                              {figure.name}
                          </span>
-                         <span className="text-lg font-bold text-gray-700 leading-none mt-1">
-                            {formatYear(figure.birthYear)} - {figure.deathYear >= new Date().getFullYear() ? '' : formatYear(figure.deathYear)}
+                         <span className="text-lg font-bold text-gray-700 leading-none mt-1 whitespace-nowrap">
+                            {formatYear(figure.birthYear)} - {figure.deathYear >= new Date().getFullYear() ? '' : formatYear(figure.deathYear)} • <span className="capitalize opacity-90">{figure.occupation}</span>
                          </span>
                      </div>
                 </div>
@@ -1415,7 +1415,7 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
               const isEvent = figure.category === 'EVENTS';
 
               // Filter matches the logic in the main rendering loop
-              if (!isEvent || duration >= 15 || isSearchMode || focusedFigureId === figure.id) return null;
+              if (!isEvent || duration >= 15) return null;
 
               // If filtering categories, also hide the route
               if (selectedCategories.size > 0 && !selectedCategories.has(figure.category)) {
