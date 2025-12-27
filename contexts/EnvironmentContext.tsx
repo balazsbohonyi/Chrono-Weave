@@ -18,13 +18,19 @@ export const EnvironmentProvider: React.FC<{ children: ReactNode }> = ({ childre
     const isProduction = process.env.APP_MODE === 'production';
 
     const getEffectiveConfig = (): AppConfig => {
+        // Helper to get the appropriate default model based on provider
+        const getDefaultModel = (provider: string): string => {
+            return provider === 'openrouter' ? 'openai/gpt-oss-120b' : 'gemini-2.5-flash';
+        };
+
         // In production, strictly use environment variables (injected at build time or runtime if configured)
         // We ignore localStorage to prevent user overrides in production
         if (isProduction) {
+            const provider = process.env.PROVIDER || 'gemini';
             return {
-                provider: process.env.PROVIDER || 'gemini',
+                provider,
                 apiKey: process.env.API_KEY || '',
-                model: process.env.MODEL || 'gemini-2.5-flash'
+                model: process.env.MODEL || getDefaultModel(provider)
             };
         }
 
@@ -37,10 +43,11 @@ export const EnvironmentProvider: React.FC<{ children: ReactNode }> = ({ childre
             return { provider: localProvider, apiKey: localKey, model: localModel };
         }
 
+        const provider = process.env.PROVIDER || 'gemini';
         return {
-            provider: process.env.PROVIDER || 'gemini',
+            provider,
             apiKey: process.env.API_KEY || '',
-            model: process.env.MODEL || 'gemini-2.5-flash'
+            model: process.env.MODEL || getDefaultModel(provider)
         };
     };
 

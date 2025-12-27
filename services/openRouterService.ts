@@ -8,9 +8,9 @@ export class OpenRouterService implements IAIService {
     private model: string;
     private baseUrl: string = "https://openrouter.ai/api/v1/chat/completions";
 
-    constructor(apiKey: string, model: string) {
+    constructor(apiKey: string, model?: string) {
         this.apiKey = apiKey;
-        this.model = model;
+        this.model = model || "openai/gpt-oss-120b";
     }
 
     async testConnection(): Promise<{ success: boolean; error?: string }> {

@@ -97,7 +97,8 @@ Create or edit [.env.local](.env.local):
 ```bash
 PROVIDER=gemini
 API_KEY=your_api_key_here
-# Optional: specify model, defaults to gemini-2.5-flash for Gemini or appropriate model for OpenRouter
+# Optional: specify model
+# If omitted, defaults to: gemini-2.5-flash (Gemini) or openai/gpt-oss-120b (OpenRouter)
 MODEL=gemini-2.5-flash
 ```
 
@@ -106,6 +107,7 @@ Create [.env.production](.env.production) with your production credentials:
 ```bash
 PROVIDER=gemini
 API_KEY=your_production_api_key_here
+# Optional: MODEL will default based on PROVIDER if not specified
 MODEL=gemini-2.5-flash
 ```
 
@@ -163,11 +165,25 @@ ChronoWeave offers flexible configuration through both environment variables and
 
 #### Configuration Examples
 
-**Using Gemini:**
+**Using Gemini (with default model):**
+```bash
+PROVIDER=gemini
+API_KEY=your_gemini_api_key
+# MODEL is optional - defaults to gemini-2.5-flash
+```
+
+**Using Gemini (with custom model):**
 ```bash
 PROVIDER=gemini
 API_KEY=your_gemini_api_key
 MODEL=gemini-2.5-flash
+```
+
+**Using OpenRouter (with default model):**
+```bash
+PROVIDER=openrouter
+API_KEY=your_openrouter_api_key
+# MODEL is optional - defaults to openai/gpt-oss-120b
 ```
 
 **Using OpenRouter with Claude:**
