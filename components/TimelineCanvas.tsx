@@ -1079,12 +1079,12 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
   const cursorClass = isDragging ? 'cursor-grabbing' : 'cursor-default';
 
   // Calculate screen position for red selected year line
-  const selectedYearScreenX = selectedYear !== null 
-    ? ((selectedYear - startYear) * BASE_PIXELS_PER_YEAR * viewState.scale) + viewState.translateX 
+  const selectedYearScreenX = selectedYear !== null
+    ? ((selectedYear - startYear) * BASE_PIXELS_PER_YEAR * viewState.scale) + viewState.translateX
     : null;
 
   // Determine top offset for axes based on filters
-  const axisTopOffset = isLegendCollapsed ? '55px' : '115px';
+  const axisTopOffset = isLegendCollapsed ? '52px' : '114px';
 
   return (
     <div 
@@ -1106,7 +1106,7 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
             }}
         >
             {ticks.map(year => (
-                 <div key={year} className="absolute top-0 bottom-0 border-l border-gray-400/40" style={{ left: (year - startYear) * BASE_PIXELS_PER_YEAR }} />
+                 <div key={year} className="absolute top-0 bottom-0 border-l border-black/20" style={{ left: (year - startYear) * BASE_PIXELS_PER_YEAR }} />
             ))}
         </div>
 
@@ -1571,9 +1571,9 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
         </svg>
       )}
 
-      {/* LAYER 3: Labels (Bottom) - Plain */}
-      <div 
-            className="absolute bottom-0 left-0 h-12 pointer-events-none z-[70]"
+      {/* LAYER 3: Labels (Bottom) - Glossy */}
+      <div
+            className="absolute bottom-0 left-0 h-6 bg-black/75 backdrop-blur-2xl pointer-events-none z-[70]"
             style={{ width: '100%' }}
       >
          <div style={{
@@ -1587,10 +1587,10 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
                 const left = (year - startYear) * BASE_PIXELS_PER_YEAR;
                 return (
                     <div key={year} className="absolute top-0 bottom-0" style={{ left }}>
-                        {/* REMOVED SHORT TICK LINE */}
-                        <span 
-                             className="absolute top-3 -translate-x-1/2 text-[12px] font-serif text-gray-600 font-bold whitespace-nowrap"
-                             style={{ transform: `scaleX(${1/viewState.scale}) translateX(-50%)` }} 
+                        <div className="absolute top-0 w-[2px] h-[6px] bg-white" style={{ left: '-1px', transform: `scaleX(${1/viewState.scale})`, transformOrigin: 'center' }} />
+                        <span
+                             className="absolute top-[5px] text-[12px] font-sans-serif text-white font-bold whitespace-nowrap"
+                             style={{ left: '0', transform: `scaleX(${1/viewState.scale}) translateX(-50%)`, transformOrigin: 'left center' }}
                         >
                             {formatYear(year)}
                         </span>
@@ -1601,8 +1601,8 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
       </div>
 
        {/* LAYER 3b: Labels (Top) - Fixed Position below Header/Filters */}
-       <div 
-            className="absolute left-0 h-10 pointer-events-none z-[60] transition-[top] duration-300 ease-in-out"
+       <div
+            className="absolute left-0 h-6 bg-black/70 backdrop-blur-2xl pointer-events-none z-[60] transition-[top] duration-300 ease-in-out"
             style={{ width: '100%', top: axisTopOffset }}
       >
          <div style={{
@@ -1616,10 +1616,10 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
                 const left = (year - startYear) * BASE_PIXELS_PER_YEAR;
                 return (
                     <div key={year} className="absolute top-0 bottom-0" style={{ left }}>
-                        {/* REMOVED SHORT TICK LINE */}
-                        <span 
-                             className="absolute top-3 -translate-x-1/2 text-[12px] font-serif text-gray-600 font-bold whitespace-nowrap"
-                             style={{ transform: `scaleX(${1/viewState.scale}) translateX(-50%)` }} 
+                        <div className="absolute bottom-0 w-[2px] h-[6px] bg-white" style={{ left: '-1px', transform: `scaleX(${1/viewState.scale})`, transformOrigin: 'center' }} />
+                        <span
+                             className="absolute top-[3px] text-[12px] font-sans-serif text-white font-bold whitespace-nowrap"
+                             style={{ left: '0', transform: `scaleX(${1/viewState.scale}) translateX(-50%)`, transformOrigin: 'left center' }}
                         >
                             {formatYear(year)}
                         </span>
@@ -1671,7 +1671,7 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
              <div className="flex-1 min-w-0">
                  <h3 className="font-bold text-gray-900 text-xl leading-tight truncate">{relationshipState.sourceFigure.name}</h3>
                  <div className="text-sm text-gray-500 font-mono font-semibold">
-                     ({formatYear(relationshipState.sourceFigure.birthYear)} — {formatYear(relationshipState.sourceFigure.deathYear)})
+                     {formatYear(relationshipState.sourceFigure.birthYear)} — {formatYear(relationshipState.sourceFigure.deathYear)}
                  </div>
                  <p className="text-xs text-emerald-800 font-bold uppercase tracking-wide mt-1 truncate">
                      {relationshipState.sourceFigure.occupation}

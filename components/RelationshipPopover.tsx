@@ -166,7 +166,7 @@ const RelationshipPopover: React.FC<RelationshipPopoverProps> = ({
                             <div className="flex flex-wrap items-baseline gap-x-2 mb-1">
                                 <h2 className="text-3xl font-bold text-gray-900 leading-tight">{target.name}</h2>
                                 <span className="text-base text-gray-500 font-mono font-semibold whitespace-nowrap">
-                                    ({formatYear(target.birthYear)} — {formatYear(target.deathYear)})
+                                    {formatYear(target.birthYear)} — {formatYear(target.deathYear)}
                                 </span>
                             </div>
                             <p className="text-sm text-emerald-800 font-bold uppercase tracking-wide mb-2">{target.occupation}</p>
@@ -218,7 +218,7 @@ const FigureCard: React.FC<{
                 <div className="flex flex-wrap items-baseline gap-x-2 mt-1">
                     <h3 className="font-bold text-gray-900 text-xl leading-tight">{figure.name}</h3>
                     <span className="text-sm text-gray-500 font-mono font-semibold whitespace-nowrap">
-                        ({formatYear(figure.birthYear)} — {formatYear(figure.deathYear)})
+                        {formatYear(figure.birthYear)} — {formatYear(figure.deathYear)}
                     </span>
                 </div>
                 

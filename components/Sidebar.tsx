@@ -184,8 +184,8 @@ const Sidebar: React.FC<SidebarProps> = ({
     const transformClass = (hasSelection && !isCollapsed) ? 'translate-x-0' : 'translate-x-full';
 
     // Dynamic Top Offset: Align sidebar top with the bottom of the filters bar
-    const topClass = isLegendOpen ? 'top-[120px]' : 'top-[52px]';
-    const heightClass = isLegendOpen ? 'h-[calc(100vh-120px)]' : 'h-[calc(100vh-52px)]';
+    const topClass = isLegendOpen ? 'top-[114px]' : 'top-[52px]';
+    const heightClass = isLegendOpen ? 'h-[calc(100vh-114px)]' : 'h-[calc(100vh-52px)]';
 
     return (
         <div className={`absolute right-0 w-[34rem] bg-white/50 backdrop-blur-xl border-l border-gray-200 shadow-2xl flex flex-col z-40 transition-all duration-300 ease-in-out font-sans ${transformClass} ${topClass} ${heightClass}`}>
@@ -272,7 +272,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                         <div className="flex flex-wrap items-baseline gap-x-2">
                                             <h3 className="font-bold text-gray-900 text-xl leading-tight">{fig.name}</h3>
                                             <span className="text-sm text-gray-500 font-mono font-semibold whitespace-nowrap">
-                                                ({formatYear(fig.birthYear)} — {formatYear(fig.deathYear)})
+                                                {formatYear(fig.birthYear)} — {formatYear(fig.deathYear)}
                                             </span>
                                         </div>
                                         <p className="text-xs text-emerald-800 font-bold uppercase tracking-wide mt-0.5 mb-2">{fig.occupation}</p>
