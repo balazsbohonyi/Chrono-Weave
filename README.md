@@ -2,6 +2,10 @@
 
 An interactive historical timeline visualization platform powered by AI. Explore centuries of history through an intuitive canvas-based interface, discovering relationships between historical figures and events, and diving deep into the stories that shaped civilization.
 
+<div align="center">
+   <img src="./docs/images/chrono-weave.png" alt="Chrono Weave">
+</div>
+
 ## About ChronoWeave
 
 ChronoWeave transforms the study of history into an immersive, visual experience. Rather than reading linear timelines, you can:
@@ -11,6 +15,11 @@ ChronoWeave transforms the study of history into an immersive, visual experience
 - **Learn** detailed biographies, famous quotes, and historical context powered by AI
 
 The app leverages Google Gemini or OpenRouter APIs to intelligently generate historical data and analyze connections between figures, making history discovery feel like an interactive journey through time.
+
+<div align="center">
+   <img src="./docs/images/biography.png" alt="Chrono Weave">
+   <img src="./docs/images/relationships.png" alt="Chrono Weave">
+</div>
 
 ## Key Features
 

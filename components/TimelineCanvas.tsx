@@ -454,7 +454,9 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
         if (!isEvent || !isShort) return;
 
         const labelWidth = getOccupiedWidth(figure, true);
-        const horizontalOffset = duration + 2; // Position label just past the bar
+        // Label positioned at center of bar + 10 years offset
+        const barCenter = duration / 2;
+        const horizontalOffset = barCenter + 3;
 
         let currentBarLevel = level;
         let placementSuccessful = false;
@@ -1295,18 +1297,15 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
                         fill="none"
                         stroke="black"
                         strokeWidth="1.5"
-                        className="opacity-40"
+                        className="opacity-80"
                     />
-                    {/* Circle at start */}
-                    <circle cx={sStartX} cy={sStartY} r="2" fill="black" className="opacity-40" />
-
                     {/* Arrow at end */}
                     <path
                         d={arrowPath}
                         fill="none"
                         stroke="black"
                         strokeWidth="1.5"
-                        className="opacity-60"
+                        className="opacity-80"
                         strokeLinecap="round"
                         strokeLinejoin="round"
                     />
