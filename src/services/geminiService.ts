@@ -1,8 +1,8 @@
 
-import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
-import { HistoricalFigure, DeepDiveData, RelationshipExplanation, IAIService } from "../types";
-import { safeAICall, runWithRetry } from "./utils";
-import { CATEGORY_LIST, HISTORICAL_FIGURES_COUNT, HISTORICAL_EVENTS_COUNT, HISTORICAL_FIGURES_PER_CENTURY_CHUNK, HISTORICAL_EVENTS_PER_CENTURY_CHUNK } from "../constants";
+import { GenerateContentResponse, GoogleGenAI, Type } from "@google/genai";
+import { DeepDiveData, HistoricalFigure, IAIService, RelationshipExplanation } from "../types";
+import { CATEGORY_LIST, HISTORICAL_EVENTS_COUNT, HISTORICAL_EVENTS_PER_CENTURY_CHUNK, HISTORICAL_FIGURES_COUNT, HISTORICAL_FIGURES_PER_CENTURY_CHUNK } from "../constants";
+import { runWithRetry, enqueueTaskWithRetry } from "./utils";
 
 export class GeminiService implements IAIService {
     private ai: GoogleGenAI | null = null;
@@ -207,7 +207,7 @@ export class GeminiService implements IAIService {
             `;
 
             const ai = this.ensureAI();
-            peoplePromise = safeAICall<GenerateContentResponse>(() => ai.models.generateContent({
+            peoplePromise = enqueueTaskWithRetry<GenerateContentResponse>(() => ai.models.generateContent({
                 model,
                 contents: peoplePrompt,
                 config: {
@@ -262,7 +262,7 @@ export class GeminiService implements IAIService {
         `;
 
         const ai = this.ensureAI();
-        const globalEventsPromise = safeAICall<GenerateContentResponse>(() => ai.models.generateContent({
+        const globalEventsPromise = enqueueTaskWithRetry<GenerateContentResponse>(() => ai.models.generateContent({
             model,
             contents: globalEventsPrompt,
             config: {
@@ -404,7 +404,7 @@ export class GeminiService implements IAIService {
             `;
 
             const ai = this.ensureAI();
-            const response = await safeAICall<GenerateContentResponse>(() => ai.models.generateContent({
+            const response = await enqueueTaskWithRetry<GenerateContentResponse>(() => ai.models.generateContent({
                 model: this.model,
                 contents: prompt,
                 config: {
@@ -454,7 +454,7 @@ export class GeminiService implements IAIService {
             `;
 
             const ai = this.ensureAI();
-            const response = await safeAICall<GenerateContentResponse>(() => ai.models.generateContent({
+            const response = await enqueueTaskWithRetry<GenerateContentResponse>(() => ai.models.generateContent({
                 model: this.model,
                 contents: prompt,
                 config: {
@@ -512,7 +512,7 @@ export class GeminiService implements IAIService {
             `;
 
             const ai = this.ensureAI();
-            const response = await safeAICall<GenerateContentResponse>(() => ai.models.generateContent({
+            const response = await enqueueTaskWithRetry<GenerateContentResponse>(() => ai.models.generateContent({
                 model: this.model,
                 contents: prompt,
                 config: {
@@ -557,7 +557,7 @@ export class GeminiService implements IAIService {
             `;
 
             const ai = this.ensureAI();
-            const response = await safeAICall<GenerateContentResponse>(() => ai.models.generateContent({
+            const response = await enqueueTaskWithRetry<GenerateContentResponse>(() => ai.models.generateContent({
                 model: this.model,
                 contents: prompt,
                 config: {

@@ -1,7 +1,7 @@
 
-import { HistoricalFigure, DeepDiveData, RelationshipExplanation, IAIService, FigureCategory } from "../types";
-import { safeAICall, runWithRetry } from "./utils";
-import { CATEGORY_LIST, HISTORICAL_FIGURES_COUNT, HISTORICAL_EVENTS_COUNT, HISTORICAL_FIGURES_PER_CENTURY_CHUNK, HISTORICAL_EVENTS_PER_CENTURY_CHUNK } from "../constants";
+import { DeepDiveData, FigureCategory, HistoricalFigure, IAIService, RelationshipExplanation } from "../types";
+import { CATEGORY_LIST, HISTORICAL_EVENTS_COUNT, HISTORICAL_EVENTS_PER_CENTURY_CHUNK, HISTORICAL_FIGURES_COUNT, HISTORICAL_FIGURES_PER_CENTURY_CHUNK } from "../constants";
+import { runWithRetry, enqueueTaskWithRetry } from "./utils";
 
 export class OpenRouterService implements IAIService {
     private apiKey: string;
@@ -224,7 +224,7 @@ export class OpenRouterService implements IAIService {
                 Return JSON array of objects with keys: "name", "birthYear", "deathYear", "occupation", "description", "category".
             `;
             try {
-                const peopleData = await safeAICall(() => this.callOpenRouter(peoplePrompt, "You are a strict JSON generator. Output ONLY valid JSON arrays. ALL string values MUST be properly quoted. Do NOT use markdown."));
+                const peopleData = await enqueueTaskWithRetry(() => this.callOpenRouter(peoplePrompt, "You are a strict JSON generator. Output ONLY valid JSON arrays. ALL string values MUST be properly quoted. Do NOT use markdown."));
                 if (Array.isArray(peopleData)) {
                     figures = figures.concat(peopleData.map((item: any, index: number) => ({
                         id: `p-${item.name.replace(/\s+/g, '-')}-${index}`,
@@ -255,7 +255,7 @@ export class OpenRouterService implements IAIService {
         `;
 
         let rawEvents: HistoricalFigure[] = [];
-        const globalEventsPromise = safeAICall(() => this.callOpenRouter(globalEventsPrompt, "You are a JSON generator. Strictly output valid JSON arrays."))
+        const globalEventsPromise = enqueueTaskWithRetry(() => this.callOpenRouter(globalEventsPrompt, "You are a JSON generator. Strictly output valid JSON arrays."))
             .then((eventsData: any) => {
                 if (Array.isArray(eventsData)) {
                     return eventsData.map((item: any, index: number) => ({
@@ -358,7 +358,7 @@ export class OpenRouterService implements IAIService {
         `;
 
         try {
-            const result = await safeAICall(() => this.callOpenRouter(prompt, "You are a JSON generator. Output valid JSON."));
+            const result = await enqueueTaskWithRetry(() => this.callOpenRouter(prompt, "You are a JSON generator. Output valid JSON."));
             return result.relatedIds || [];
         } catch (error) {
             console.error("OpenRouter fetchRelatedFigures error:", error);
@@ -376,7 +376,7 @@ export class OpenRouterService implements IAIService {
         `;
 
         try {
-            const rawData = await safeAICall(() => this.callOpenRouter(prompt, "You are a JSON generator. Output valid JSON arrays."));
+            const rawData = await enqueueTaskWithRetry(() => this.callOpenRouter(prompt, "You are a JSON generator. Output valid JSON arrays."));
             if (!Array.isArray(rawData)) return [];
 
             return rawData.map((item: any, index: number) => ({
@@ -404,7 +404,7 @@ export class OpenRouterService implements IAIService {
             Return JSON: "summary" (string), "sections" (array of {title, content}).
         `;
         try {
-            return await safeAICall(() => this.callOpenRouter(prompt, "You are a JSON generator. Output valid JSON."));
+            return await enqueueTaskWithRetry(() => this.callOpenRouter(prompt, "You are a JSON generator. Output valid JSON."));
         } catch (error) {
             console.error("OpenRouter fetchRelationshipExplanation error:", error);
             return null;
@@ -417,7 +417,7 @@ export class OpenRouterService implements IAIService {
             Return JSON: "summary" (string), "famousQuote" (string), "sections" (array of {title, content}).
         `;
         try {
-            return await safeAICall(() => this.callOpenRouter(prompt, "You are a JSON generator. Output valid JSON."));
+            return await enqueueTaskWithRetry(() => this.callOpenRouter(prompt, "You are a JSON generator. Output valid JSON."));
         } catch (error) {
             console.error("OpenRouter fetchFigureDeepDive error:", error);
             return null;

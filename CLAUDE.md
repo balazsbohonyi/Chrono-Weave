@@ -28,15 +28,31 @@ Set `PROVIDER`, `API_KEY`, and optionally `MODEL` in `.env.local` (development) 
 
 ## Architecture Overview
 
+### Project Structure
+
+Source code lives under `src/`:
+- `src/App.tsx` — root component and state orchestrator
+- `src/main.tsx` — application entry point
+- `src/types.ts` — shared TypeScript types and interfaces
+- `src/constants.ts` — configuration constants
+- `src/components/` — UI components
+- `src/services/` — AI and data-fetching services
+- `src/contexts/` — React context providers (e.g. `EnvironmentContext.tsx`)
+- `src/hooks/` — custom React hooks (e.g. `useFigureActions.tsx`)
+- `src/utils/` — utility functions (`colors.ts`, `formatters.ts`)
+- `src/styles/` — global CSS (`globals.css`)
+
+Documentation and plans live under `ai-docs/plans/`.
+
 ### Core Layers
 
-1. **UI Layer** (`App.tsx` + `components/`)
+1. **UI Layer** (`src/App.tsx` + `src/components/`)
    - Main orchestrator managing all state and user interactions
    - State includes: figure data, selections, search results, relationship tracing, discoveries
    - Handles AI service switching between Gemini and OpenRouter
 
-2. **AI Service Layer** (`services/geminiService.ts`, `openRouterService.ts`)
-   - Both implement the `IAIService` interface defined in `types.ts`
+2. **AI Service Layer** (`src/services/geminiService.ts`, `src/services/openRouterService.ts`)
+   - Both implement the `IAIService` interface defined in `src/types.ts`
    - Core methods:
      - `fetchHistoricalFigures()`: Generate figures for a time range
      - `fetchRelatedFigures()`: Find relationships between figures
@@ -45,11 +61,11 @@ Set `PROVIDER`, `API_KEY`, and optionally `MODEL` in `.env.local` (development) 
      - `fetchFigureDeepDive()`: Generate detailed biography/quotes
      - `testConnection()`: Validate API credentials and model availability
 
-3. **Data Fetching** (`services/wikiService.ts`)
+3. **Data Fetching** (`src/services/wikiService.ts`)
    - Fetches figure images and descriptions from Wikipedia
    - Used for supplementing AI-generated data with real information
 
-4. **Canvas Rendering** (`components/TimelineCanvas.tsx`)
+4. **Canvas Rendering** (`src/components/TimelineCanvas.tsx`)
    - Main visualization using canvas rendering (not SVG)
    - Handles figure positioning in 2D space (time on X-axis, layout levels on Y-axis)
    - Manages hover/click interactions and relationship line drawing
@@ -103,6 +119,8 @@ State updates are passed down as callbacks to child components (ControlPanel, Ti
 
 ## Component Structure
 
+All components are in `src/components/`:
+
 - **TimelineCanvas**: Main visualization, canvas-based rendering
 - **ControlPanel**: Top controls (year range, search, settings, legend toggle)
 - **Sidebar**: Left panel showing figures for selected year or global list
@@ -115,7 +133,7 @@ State updates are passed down as callbacks to child components (ControlPanel, Ti
 
 ## Configuration Constants
 
-See `constants.ts` for:
+See `src/constants.ts` for:
 - `CATEGORY_LIST`: Available figure categories
 - `HISTORICAL_FIGURES_COUNT`: Total figures to generate
 - `HISTORICAL_FIGURES_PER_CENTURY_CHUNK`: Figures per century chunk
@@ -124,26 +142,26 @@ See `constants.ts` for:
 ## Common Development Workflows
 
 ### Adding a New AI Service
-1. Create new class implementing `IAIService` interface in `services/`
+1. Create new class implementing `IAIService` interface in `src/services/`
 2. Implement all 5 required methods
-3. Add provider selection logic in `SettingsDialog.tsx` and `initializeService()` in App.tsx
+3. Add provider selection logic in `src/components/SettingsDialog.tsx` and `initializeService()` in `src/App.tsx`
 
 ### Modifying Timeline Rendering
-- Changes to figure positioning, colors, or interaction in `TimelineCanvas.tsx`
+- Changes to figure positioning, colors, or interaction in `src/components/TimelineCanvas.tsx`
 - Layout algorithm is in the canvas render logic
-- Hover/click handlers call methods passed from App.tsx
+- Hover/click handlers call methods passed from `src/App.tsx`
 
 ### Adding New Figure Categories
-1. Add category to `FigureCategory` type in `types.ts`
-2. Update `CATEGORY_LIST` in `constants.ts`
-3. Update AI prompts in both `geminiService.ts` and `openRouterService.ts`
-4. Add color assignment in `TimelineCanvas.tsx` legend
+1. Add category to `FigureCategory` type in `src/types.ts`
+2. Update `CATEGORY_LIST` in `src/constants.ts`
+3. Update AI prompts in both `src/services/geminiService.ts` and `src/services/openRouterService.ts`
+4. Add color assignment in `src/components/TimelineCanvas.tsx` legend
 
 ### Debugging AI Service Issues
 - Check browser console for `[Gemini]` or `[OpenRouter]` log messages
 - Verify API key in `.env.local` or settings
 - Check network tab for failed API calls
-- Review service retry logic in `services/utils.ts`
+- Review service retry logic in `src/services/utils.ts`
 
 ## Testing Tips
 

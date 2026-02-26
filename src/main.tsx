@@ -1,7 +1,8 @@
+import App from '@/App';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import App from './App';
 import { EnvironmentProvider } from './contexts/EnvironmentContext';
+import './styles/globals.css';
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {

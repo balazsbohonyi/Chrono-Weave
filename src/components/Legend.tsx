@@ -1,7 +1,7 @@
 
 import React from 'react';
-import { CATEGORY_COLORS, CATEGORY_LIST } from '../constants';
 import { FigureCategory } from '../types';
+import { CATEGORY_COLORS, CATEGORY_LIST } from '../constants';
 
 interface LegendProps {
   selectedCategories: Set<FigureCategory>;

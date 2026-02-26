@@ -1,10 +1,10 @@
 
-import React, { useRef, useState, useMemo, useEffect, useLayoutEffect } from 'react';
-import { HistoricalFigure, LayoutData, ViewState, FigureCategory } from '../types';
-import ActionBar from './ActionBar';
-import { formatYear } from '../utils/formatters';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { getTextColorForBackground } from '../utils/colors';
+import { FigureCategory, HistoricalFigure, LayoutData, ViewState } from '../types';
 import { CATEGORY_COLORS } from '../constants';
-import { getTextColorForBackground } from '../services/utils';
+import { formatYear } from '../utils/formatters';
+import ActionBar from './ActionBar';
 
 interface TimelineCanvasProps {
   figures: HistoricalFigure[];

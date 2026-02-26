@@ -23,8 +23,10 @@ dist-ssr
 *.sln
 *.sw?
 
-# Custom
+# Environment variable files
 .env
-.env.production
-.env.local
+.env.*
+!.env.example
+
+# Custom
 .claude
