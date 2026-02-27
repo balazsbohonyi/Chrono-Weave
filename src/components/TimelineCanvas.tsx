@@ -375,6 +375,16 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
   const [lastMousePos, setLastMousePos] = useState({ x: 0, y: 0 });
   const dragStartPos = useRef({ x: 0, y: 0 });
   const wasSearchFocusedOnDown = useRef(false);
+
+  // Multi-pointer tracking for touchscreen pinch-to-zoom
+  const activePointersRef = useRef<Map<number, { clientX: number; clientY: number }>>(new Map());
+  const lastPinchDistanceRef = useRef<number | null>(null);
+
+  // Trackpad detection: mouse wheels produce deltaY in exact multiples of 100
+  // (Windows Chrome) or 120 (macOS), trackpads produce variable values.
+  const isTrackpadModeRef = useRef<boolean>(false);
+  const trackpadModeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   
   const [cursorX, setCursorX] = useState<number | null>(null);
   const [hoverYearVal, setHoverYearVal] = useState<number | null>(null);
@@ -836,42 +846,117 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
   const contentWidth = (endYear - startYear) * BASE_PIXELS_PER_YEAR;
 
   // 3. Interaction Handlers
-  const handleWheel = (e: React.WheelEvent) => {
-    if (!containerRef.current) return;
 
-    if (highlightedFigureIds.length > 0 && onCanvasInteraction) {
+  // Native wheel listener (non-passive) for trackpad/mouse gesture differentiation
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      if (highlightedFigureIds.length > 0 && onCanvasInteraction) {
         onCanvasInteraction();
-    }
+      }
 
-    const rect = containerRef.current.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
+      const rect = el.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
 
-    setViewState(prev => {
-      const scaleSensitivity = 0.001;
-      let newScale = prev.scale * (1 - e.deltaY * scaleSensitivity);
-      newScale = Math.max(0.1, Math.min(5, newScale));
-      const scaleRatio = newScale / prev.scale;
-      const newTranslateX = mouseX - (mouseX - prev.translateX) * scaleRatio;
-      const newTranslateY = mouseY - (mouseY - prev.translateY) * scaleRatio;
+      // Determine if this is a zoom or pan gesture
+      const isCtrl = e.ctrlKey || e.metaKey; // ctrlKey = trackpad pinch gesture
+      const isShift = e.shiftKey;
+      const isLineOrPageMode = e.deltaMode !== 0; // line/page mode = physical mouse wheel
+      const hasDeltaX = Math.abs(e.deltaX) > 0;
 
-      return {
-        scale: newScale,
-        translateX: newTranslateX,
-        translateY: newTranslateY,
-      };
-    });
-  };
+      // Mouse wheel detection: on Windows Chrome, mouse wheels produce deltaY
+      // in exact multiples of 100 per notch; on macOS, multiples of 120.
+      // Trackpads produce variable values that rarely land on these multiples.
+      const absY = Math.abs(e.deltaY);
+      const isMouseWheelStep = e.deltaY !== 0 && Number.isInteger(e.deltaY) &&
+        (absY % 100 === 0 || absY % 120 === 0);
+
+      // Enter trackpad mode on non-wheel-step deltaY or any deltaX.
+      // Stay in trackpad mode for 300ms to cover the entire gesture.
+      if (hasDeltaX || (e.deltaY !== 0 && !isMouseWheelStep)) {
+        isTrackpadModeRef.current = true;
+        if (trackpadModeTimerRef.current) clearTimeout(trackpadModeTimerRef.current);
+        trackpadModeTimerRef.current = setTimeout(() => {
+          isTrackpadModeRef.current = false;
+        }, 300);
+      }
+
+      const looksLikeTrackpad = isTrackpadModeRef.current || (hasDeltaX && !isMouseWheelStep);
+
+      const shouldZoom = isCtrl || isShift || isLineOrPageMode || !looksLikeTrackpad;
+
+      if (shouldZoom) {
+        // Prevent browser zoom on pinch gesture
+        if (isCtrl) e.preventDefault();
+
+        const scaleSensitivity = isCtrl ? 0.01 : 0.001;
+        setViewState(prev => {
+          let newScale = prev.scale * (1 - e.deltaY * scaleSensitivity);
+          newScale = Math.max(0.1, Math.min(5, newScale));
+          const scaleRatio = newScale / prev.scale;
+          const newTranslateX = mouseX - (mouseX - prev.translateX) * scaleRatio;
+          const newTranslateY = mouseY - (mouseY - prev.translateY) * scaleRatio;
+          return { scale: newScale, translateX: newTranslateX, translateY: newTranslateY };
+        });
+      } else {
+        // Pan: two-finger trackpad scroll
+        setViewState(prev => {
+          let nextX = prev.translateX - e.deltaX;
+          const nextY = prev.translateY - e.deltaY;
+
+          // Clamp X panning
+          const viewportWidth = rect.width;
+          const totalTimelineWidth = contentWidth * prev.scale;
+          const buffer = viewportWidth * 0.8;
+          const maxTranslateX = buffer;
+          const minTranslateX = viewportWidth - totalTimelineWidth - buffer;
+          nextX = Math.min(maxTranslateX, Math.max(minTranslateX, nextX));
+
+          return { ...prev, translateX: nextX, translateY: nextY };
+        });
+      }
+    };
+
+    el.addEventListener('wheel', handleWheel, { passive: false });
+    return () => el.removeEventListener('wheel', handleWheel);
+  }, [highlightedFigureIds, onCanvasInteraction, contentWidth]);
+
+  // Cleanup trackpad detection timer
+  useEffect(() => {
+    return () => {
+      if (trackpadModeTimerRef.current) clearTimeout(trackpadModeTimerRef.current);
+    };
+  }, []);
 
   const handlePointerDown = (e: React.PointerEvent) => {
     // Check if clicking on the close button - allow it to propagate normally
     const target = e.target as HTMLElement;
     if (target.closest('button[data-close-selection]')) {
-      // Don't prevent default, don't capture, just let the onClick handler work
       return;
     }
 
     e.preventDefault();
+
+    // Track all active pointers for multi-touch
+    activePointersRef.current.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
+    if (containerRef.current) {
+      containerRef.current.setPointerCapture(e.pointerId);
+    }
+
+    if (activePointersRef.current.size === 2) {
+      // Two pointers: start pinch mode, cancel any drag
+      setIsDragging(false);
+      const pointers = [...activePointersRef.current.values()] as { clientX: number; clientY: number }[];
+      lastPinchDistanceRef.current = Math.hypot(
+        pointers[1].clientX - pointers[0].clientX,
+        pointers[1].clientY - pointers[0].clientY
+      );
+      return;
+    }
+
     wasSearchFocusedOnDown.current = isSearchFocusActive && highlightedFigureIds.length > 0;
 
     if (highlightedFigureIds.length > 0 && onCanvasInteraction) {
@@ -883,23 +968,32 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
         const pos = { x: e.clientX, y: e.clientY };
         setLastMousePos(pos);
         dragStartPos.current = pos;
-
-        if (containerRef.current) {
-            containerRef.current.setPointerCapture(e.pointerId);
-        }
     }
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
-    setIsDragging(false);
+    const wasPinching = activePointersRef.current.size === 2;
+    activePointersRef.current.delete(e.pointerId);
 
     if (containerRef.current) {
         try {
             containerRef.current.releasePointerCapture(e.pointerId);
-        } catch (e) {
+        } catch (_) {
             // Pointer capture may not have been set (e.g., on close button click)
         }
     }
+
+    // Transition from pinch (2 pointers) to single-pointer drag
+    if (wasPinching && activePointersRef.current.size === 1) {
+      lastPinchDistanceRef.current = null;
+      const remaining = ([...activePointersRef.current.values()] as { clientX: number; clientY: number }[])[0];
+      setLastMousePos({ x: remaining.clientX, y: remaining.clientY });
+      setIsDragging(true);
+      return;
+    }
+
+    setIsDragging(false);
+    lastPinchDistanceRef.current = null;
 
     if (isBusy) return;
 
@@ -955,30 +1049,55 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
-    e.preventDefault(); 
+    e.preventDefault();
     currentMousePosRef.current = { x: e.clientX, y: e.clientY };
+
+    // Update stored pointer position
+    if (activePointersRef.current.has(e.pointerId)) {
+      activePointersRef.current.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
+    }
+
+    // Two-pointer pinch-to-zoom
+    if (activePointersRef.current.size === 2 && lastPinchDistanceRef.current !== null) {
+      const pointers = [...activePointersRef.current.values()] as { clientX: number; clientY: number }[];
+      const newDist = Math.hypot(
+        pointers[1].clientX - pointers[0].clientX,
+        pointers[1].clientY - pointers[0].clientY
+      );
+      const ratio = newDist / lastPinchDistanceRef.current;
+      lastPinchDistanceRef.current = newDist;
+
+      // Zoom centered on midpoint between fingers
+      if (containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect();
+        const midX = (pointers[0].clientX + pointers[1].clientX) / 2 - rect.left;
+        const midY = (pointers[0].clientY + pointers[1].clientY) / 2 - rect.top;
+
+        setViewState(prev => {
+          let newScale = prev.scale * ratio;
+          newScale = Math.max(0.1, Math.min(5, newScale));
+          const scaleRatio = newScale / prev.scale;
+          const newTranslateX = midX - (midX - prev.translateX) * scaleRatio;
+          const newTranslateY = midY - (midY - prev.translateY) * scaleRatio;
+          return { scale: newScale, translateX: newTranslateX, translateY: newTranslateY };
+        });
+      }
+      return;
+    }
 
     if (isDragging) {
       const dx = e.clientX - lastMousePos.x;
       const dy = e.clientY - lastMousePos.y;
-      
+
       setViewState(prev => {
           let nextX = prev.translateX + dx;
-          // Clamp panning logic
           if (containerRef.current) {
               const rect = containerRef.current.getBoundingClientRect();
               const viewportWidth = rect.width;
-              // The timeline width in screen pixels
               const totalTimelineWidth = contentWidth * prev.scale;
-              
-              // We allow a generous buffer so you can pan a bit past the edge
               const buffer = viewportWidth * 0.8;
-              
-              // Max translation (Left side of timeline is near right side of screen)
-              const maxTranslateX = buffer; 
-              // Min translation (Right side of timeline is near left side of screen)
+              const maxTranslateX = buffer;
               const minTranslateX = viewportWidth - totalTimelineWidth - buffer;
-              
               nextX = Math.min(maxTranslateX, Math.max(minTranslateX, nextX));
           }
 
@@ -991,13 +1110,13 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
       setLastMousePos({ x: e.clientX, y: e.clientY });
     }
 
-    if (containerRef.current) {
+    if (activePointersRef.current.size <= 1 && containerRef.current) {
       const rect = containerRef.current.getBoundingClientRect();
       const relX = e.clientX - rect.left;
-      
+
       const worldX = (relX - viewState.translateX) / viewState.scale;
       const year = (worldX / BASE_PIXELS_PER_YEAR) + startYear;
-      
+
       if (relX >= 0 && relX <= rect.width) {
         setCursorX(relX);
         setHoverYearVal(year);
@@ -1016,6 +1135,14 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
         onHoverYear(null);
         setHoverYearVal(null);
      }
+  };
+
+  const handlePointerCancel = (e: React.PointerEvent) => {
+    activePointersRef.current.delete(e.pointerId);
+    lastPinchDistanceRef.current = null;
+    if (activePointersRef.current.size === 0) {
+      setIsDragging(false);
+    }
   };
 
   const handleBarEnter = (e: React.PointerEvent, figureId: string) => {
@@ -1090,11 +1217,11 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
     <div 
       ref={containerRef}
       className={`relative w-full h-full overflow-hidden select-none bg-[#f4ecd8] touch-none ${cursorClass}`}
-      onWheel={handleWheel}
       onPointerDown={handlePointerDown}
       onPointerUp={handlePointerUp}
       onPointerMove={handlePointerMove}
       onPointerLeave={handlePointerLeave}
+      onPointerCancel={handlePointerCancel}
     >
         {/* LAYER 1: Grid Lines */}
         <div 
