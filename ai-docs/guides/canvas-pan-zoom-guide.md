@@ -17,6 +17,28 @@
 
 ---
 
+## Supported Interactions Reference
+
+All gestures and shortcuts implemented by this guide:
+
+| Input | Modifier | Action | Notes |
+|-------|----------|--------|-------|
+| Mouse wheel scroll | — | Zoom in/out centered on cursor | Discrete feel; `deltaY` in multiples of 100 (Windows) or 120 (macOS) |
+| Mouse wheel scroll | Shift | Zoom in/out centered on cursor | Shift forces zoom mode explicitly |
+| Mouse wheel scroll | Ctrl / Cmd | Zoom in/out centered on cursor | Treated identically to trackpad pinch |
+| Trackpad two-finger scroll | — | Pan (both axes freely) | No axis lock; X and Y move simultaneously |
+| Trackpad two-finger scroll | Shift | Zoom in/out centered on cursor | Shift overrides trackpad pan detection → zoom |
+| Trackpad two-finger scroll | Ctrl / Cmd | Zoom in/out centered on cursor | Browser reports trackpad pinch as Ctrl+wheel |
+| Trackpad pinch gesture | — | Zoom in/out centered on cursor | Same event as Ctrl+wheel; uses higher sensitivity (0.01 vs 0.001) |
+| Left-click drag | — | Pan | Single pointer drag; pointer captured on element |
+| Touch single-finger drag | — | Pan | Same code path as mouse drag |
+| Touch two-finger pinch | — | Zoom centered on finger midpoint | Uses pointer distance ratio each frame |
+| Touch pinch → lift one finger | — | Seamless transition to single-finger pan | Remaining finger becomes the new drag origin |
+
+**Not implemented by this guide:** Space-key pan, middle-click pan, dedicated pan tool, right-click pan, zoom-to-fit shortcut.
+
+---
+
 ## Architecture Overview
 
 The implementation uses a three-layer model:
