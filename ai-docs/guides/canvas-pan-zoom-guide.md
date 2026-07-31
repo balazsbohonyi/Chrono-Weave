@@ -4,6 +4,7 @@
 
 **What you get after following this guide:**
 - Mouse wheel zooms, centered on the cursor
+- Holding the middle mouse button and dragging pans the canvas
 - Trackpad two-finger scroll pans the canvas
 - Trackpad pinch (`Ctrl+wheel`) zooms
 - `Shift + scroll` always zooms regardless of input device
@@ -11,7 +12,7 @@
 - Touch two-finger pinch zooms, centered on finger midpoint
 - Smooth pinch → drag transition when one finger lifts
 - Click vs drag discrimination (5 px threshold)
-- Browser pinch-zoom prevented on the canvas element only
+- Browser scrolling, pinch-zoom, and middle-click autoscroll are prevented on the canvas element only
 
 **Prerequisites:** A `<div>` container element with a scrollable/zoomable content child. TypeScript is used throughout; the plain-JS notes in Section 14 explain how to adapt each piece.
 
@@ -23,19 +24,20 @@ All gestures and shortcuts implemented by this guide:
 
 | Input | Modifier | Action | Notes |
 |-------|----------|--------|-------|
-| Mouse wheel scroll | — | Zoom in/out centered on cursor | Discrete feel; `deltaY` in multiples of 100 (Windows) or 120 (macOS) |
+| Mouse wheel scroll | — | Zoom in/out centered on cursor | Large vertical-only wheel impulses (ChronoWeave is calibrated for about `90.91px` per notch) |
 | Mouse wheel scroll | Shift | Zoom in/out centered on cursor | Shift forces zoom mode explicitly |
-| Mouse wheel scroll | Ctrl / Cmd | Zoom in/out centered on cursor | Treated identically to trackpad pinch |
+| Mouse wheel scroll | Ctrl / Cmd | Zoom in/out centered on cursor | Physical-wheel impulses retain normal wheel sensitivity |
 | Trackpad two-finger scroll | — | Pan (both axes freely) | No axis lock; X and Y move simultaneously |
 | Trackpad two-finger scroll | Shift | Zoom in/out centered on cursor | Shift overrides trackpad pan detection → zoom |
 | Trackpad two-finger scroll | Ctrl / Cmd | Zoom in/out centered on cursor | Browser reports trackpad pinch as Ctrl+wheel |
 | Trackpad pinch gesture | — | Zoom in/out centered on cursor | Same event as Ctrl+wheel; uses higher sensitivity (0.01 vs 0.001) |
 | Left-click drag | — | Pan | Single pointer drag; pointer captured on element |
+| Middle-button drag | — | Pan | Same pointer path as left drag; native mouse defaults are suppressed to prevent Chrome autoscroll |
 | Touch single-finger drag | — | Pan | Same code path as mouse drag |
 | Touch two-finger pinch | — | Zoom centered on finger midpoint | Uses pointer distance ratio each frame |
 | Touch pinch → lift one finger | — | Seamless transition to single-finger pan | Remaining finger becomes the new drag origin |
 
-**Not implemented by this guide:** Space-key pan, middle-click pan, dedicated pan tool, right-click pan, zoom-to-fit shortcut.
+**Not implemented by this guide:** Space-key pan, dedicated pan tool, right-click pan, zoom-to-fit shortcut.
 
 ---
 
@@ -145,6 +147,7 @@ const MIN_SCALE = 0.1;         // 10% zoom minimum
 const MAX_SCALE = 5;           // 500% zoom maximum
 const WHEEL_SENSITIVITY = 0.001;   // zoom speed for mouse wheel / shift+trackpad
 const PINCH_SENSITIVITY = 0.01;    // zoom speed for ctrl+wheel (trackpad pinch)
+const MOUSE_WHEEL_IMPULSE_THRESHOLD_PX = 40; // vertical-only pixel delta boundary
 const TRACKPAD_STICKY_MS = 300;    // ms to stay in trackpad mode after last trackpad event
 const CLICK_THRESHOLD_PX = 5;     // pointer movement < this = click, not drag
 const PAN_CLAMP_BUFFER = 0.8;     // fraction of viewport width as overscroll buffer
@@ -243,10 +246,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
 ### The Heuristic
 
-Physical mouse wheels produce `deltaY` in exact multiples of **100** (Windows/Chrome) or **120** (macOS). Trackpads produce smooth, variable values like `3`, `7`, `13`, `27` — values that almost never land on those multiples.
+`WheelEvent` has no standard field that identifies whether an event came from a mouse or a trackpad, and browsers and operating-system settings can rescale the deltas. Do not assume physical wheels always produce exact multiples of 100 or 120.
+
+ChronoWeave uses a magnitude-based heuristic calibrated from the required Windows hardware:
+
+- The conventional notched mouse emits vertical-only pixel deltas around `±90.91` per notch.
+- The Precision Touchpad emits fine-grained pixel deltas around `±0.91` to `±3.64` at the start of a gesture.
+- A vertical-only pixel delta with magnitude at least `40px` is therefore treated as a mouse-wheel impulse.
+- A smaller pixel delta or any horizontal pixel delta is treated as trackpad input.
+- Line/page-mode deltas are treated as physical mouse-wheel input.
+
+The `40px` boundary deliberately leaves a wide gap between the observed devices. It is still a heuristic and should be recalibrated if the target hardware or browser produces overlapping ranges.
 
 Additional signals:
-- `deltaX !== 0` → only trackpads produce horizontal scroll from natural scrolling
+- `deltaX !== 0` → trackpad-style free-axis panning
 - `e.deltaMode !== 0` → Firefox uses line/page mode for physical wheels; trackpads always use pixel mode (0)
 - `e.ctrlKey || e.metaKey` → browser reports trackpad pinch gesture as `ctrlKey + wheel`
 
@@ -256,16 +269,16 @@ Evaluated top-to-bottom; first match wins:
 
 | # | Condition | Interpretation | Action |
 |---|-----------|---------------|--------|
-| 1 | `e.ctrlKey \|\| e.metaKey` | Trackpad pinch | **Zoom** + `preventDefault` |
+| 1 | `e.ctrlKey \|\| e.metaKey` | Pinch or modified mouse wheel | **Zoom**; use pinch sensitivity only for fine, non-mouse impulses |
 | 2 | `e.shiftKey` | User forced zoom | **Zoom** |
 | 3 | `e.deltaMode !== 0` | Firefox physical wheel | **Zoom** |
-| 4 | `Math.abs(e.deltaY) % 100 === 0 \|\| Math.abs(e.deltaY) % 120 === 0` (and `deltaY !== 0`) | Mouse wheel click | **Zoom** |
-| 5 | `Math.abs(e.deltaX) > 0` or `deltaY` not a multiple | Trackpad | **Pan** |
-| 6 | `isTrackpadModeRef.current === true` (within 300ms) | Gesture continuation | **Pan** |
+| 4 | `isTrackpadModeRef.current === true` (within 300ms) | Trackpad gesture continuation | **Pan** unless Ctrl/Cmd, Shift, or line/page mode forced zoom |
+| 5 | Pixel mode, no horizontal delta, `abs(deltaY) >= 40` | Mouse-wheel impulse | **Zoom** |
+| 6 | Pixel mode with horizontal movement or a smaller nonzero vertical delta | Trackpad | **Pan** and refresh sticky mode |
 
 ### The Sticky-Mode Timer
 
-Once trackpad mode is detected, hold it for 300ms. This prevents a single gesture from flip-flopping between pan and zoom if a mid-gesture event coincidentally produces a multiple-of-100 delta.
+Once trackpad mode is detected, hold it for 300ms. This prevents accelerated deltas later in the same gesture from crossing the magnitude threshold and switching from pan to zoom. A mouse notch received during this short sticky window can remain classified as pan; preserving continuity of the active trackpad gesture takes precedence.
 
 ```typescript
 function markTrackpadMode() {
@@ -276,19 +289,29 @@ function markTrackpadMode() {
   }, TRACKPAD_STICKY_MS);
 }
 
-function detectTrackpad(e: WheelEvent): boolean {
-  const absY = Math.abs(e.deltaY);
-  const isMouseStep =
-    e.deltaY !== 0 &&
-    Number.isInteger(e.deltaY) &&
-    (absY % 100 === 0 || absY % 120 === 0);
-  const hasDeltaX = Math.abs(e.deltaX) > 0;
+interface WheelClassification {
+  isMouseWheelImpulse: boolean;
+  looksLikeTrackpad: boolean;
+}
 
-  if (hasDeltaX || (e.deltaY !== 0 && !isMouseStep)) {
+function classifyWheel(e: WheelEvent): WheelClassification {
+  const isLineOrPageMode = e.deltaMode !== WheelEvent.DOM_DELTA_PIXEL;
+  const hasDeltaX = Math.abs(e.deltaX) > 0;
+  const isMouseWheelImpulse = isLineOrPageMode || (
+    !hasDeltaX && Math.abs(e.deltaY) >= MOUSE_WHEEL_IMPULSE_THRESHOLD_PX
+  );
+  const hasTrackpadSignature = e.deltaMode === WheelEvent.DOM_DELTA_PIXEL && (
+    hasDeltaX || (e.deltaY !== 0 && !isMouseWheelImpulse)
+  );
+
+  if (hasTrackpadSignature) {
     markTrackpadMode();
-    return true;
   }
-  return isTrackpadModeRef.current;
+
+  return {
+    isMouseWheelImpulse,
+    looksLikeTrackpad: isTrackpadModeRef.current || hasTrackpadSignature,
+  };
 }
 ```
 
@@ -308,15 +331,18 @@ const handleWheel = useCallback((e: WheelEvent) => {
   const isCtrl  = e.ctrlKey || e.metaKey;
   const isShift = e.shiftKey;
   const isLineOrPageMode = e.deltaMode !== 0;
-  const looksLikeTrackpad = detectTrackpad(e);
+  const { isMouseWheelImpulse, looksLikeTrackpad } = classifyWheel(e);
 
   const shouldZoom = isCtrl || isShift || isLineOrPageMode || !looksLikeTrackpad;
 
   setViewState(prev => {
     if (shouldZoom) {
       // ── Zoom branch ───────────────────────────────────────────────────────
-      // Ctrl (trackpad pinch) reports smaller deltas → use coarser sensitivity
-      const sensitivity = isCtrl ? PINCH_SENSITIVITY : WHEEL_SENSITIVITY;
+      // Fine Ctrl/Cmd input is a pinch. A physical Ctrl/Cmd+wheel impulse keeps
+      // ordinary wheel sensitivity so it does not zoom ten times too quickly.
+      const sensitivity = isCtrl && !isMouseWheelImpulse
+        ? PINCH_SENSITIVITY
+        : WHEEL_SENSITIVITY;
       let newScale = prev.scale * (1 - e.deltaY * sensitivity);
       newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, newScale));
       const scaleRatio = newScale / prev.scale;
@@ -350,8 +376,34 @@ const handleWheel = useCallback((e: WheelEvent) => {
 
 ## Step 5 — handlePointerDown
 
+### Suppress native middle-click behavior
+
+Chrome can replace a middle-button drag with its autoscroll UI. Suppress the compatibility `mousedown` and `auxclick` defaults while leaving `pointerdown` available for pointer capture and movement:
+
+```typescript
+useEffect(() => {
+  const el = containerRef.current;
+  if (!el) return;
+
+  const suppressMiddleClickDefault = (e: MouseEvent) => {
+    if (e.button === 1) e.preventDefault();
+  };
+
+  el.addEventListener('mousedown', suppressMiddleClickDefault);
+  el.addEventListener('auxclick', suppressMiddleClickDefault);
+  return () => {
+    el.removeEventListener('mousedown', suppressMiddleClickDefault);
+    el.removeEventListener('auxclick', suppressMiddleClickDefault);
+  };
+}, []);
+```
+
+If the pointer-down handler normally calls `e.preventDefault()`, do not do so for button `1`; let the native `mousedown` listener suppress the browser default instead. Both left and middle drags then use the same captured Pointer Events path.
+
 ```typescript
 const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+  if (e.button !== 1) e.preventDefault();
+
   // Track all pointers by ID (supports multi-touch)
   activePointersRef.current.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
   // Capture pointer so we receive events even if cursor leaves the element
@@ -552,6 +604,7 @@ Every value in this table is app-specific. The formulas and event-handling struc
 | `MAX_SCALE` | `5` | Higher if you need more zoom-in detail |
 | `WHEEL_SENSITIVITY` | `0.001` | Increase for faster scroll zoom, decrease for finer control |
 | `PINCH_SENSITIVITY` | `0.01` | Keep ~10× `WHEEL_SENSITIVITY`; trackpad pinch reports smaller deltas |
+| `MOUSE_WHEEL_IMPULSE_THRESHOLD_PX` | `40` | Recalibrate from captured device deltas if mouse and trackpad ranges differ from the ChronoWeave hardware |
 | `TRACKPAD_STICKY_MS` | `300` | Rarely needs changing |
 | `CLICK_THRESHOLD_PX` | `5` | Increase to `10–15` for touch-first apps where fingers drift more |
 | `PAN_CLAMP_BUFFER` | `0.8` (80% viewport) | Set to `0` for strict bounds; remove the clamp entirely for unbounded |
@@ -603,6 +656,7 @@ const MIN_SCALE           = 0.1;
 const MAX_SCALE           = 5;
 const WHEEL_SENSITIVITY   = 0.001;
 const PINCH_SENSITIVITY   = 0.01;
+const MOUSE_WHEEL_IMPULSE_THRESHOLD_PX = 40;
 const TRACKPAD_STICKY_MS  = 300;
 const CLICK_THRESHOLD_PX  = 5;
 const PAN_CLAMP_BUFFER    = 0.8;
@@ -627,22 +681,29 @@ export function PanZoomCanvas() {
   const viewStateRef = useRef(viewState);
   useEffect(() => { viewStateRef.current = viewState; }, [viewState]);
 
-  // ── Trackpad detection ──────────────────────────────────────────────────────
-  const detectTrackpad = useCallback((e: WheelEvent): boolean => {
-    const absY = Math.abs(e.deltaY);
-    const isMouseStep = e.deltaY !== 0 && Number.isInteger(e.deltaY) &&
-      (absY % 100 === 0 || absY % 120 === 0);
+  // ── Trackpad/mouse-wheel classification ────────────────────────────────────
+  const classifyWheel = useCallback((e: WheelEvent) => {
+    const isLineOrPageMode = e.deltaMode !== WheelEvent.DOM_DELTA_PIXEL;
     const hasDeltaX = Math.abs(e.deltaX) > 0;
+    const isMouseWheelImpulse = isLineOrPageMode || (
+      !hasDeltaX && Math.abs(e.deltaY) >= MOUSE_WHEEL_IMPULSE_THRESHOLD_PX
+    );
+    const hasTrackpadSignature = e.deltaMode === WheelEvent.DOM_DELTA_PIXEL && (
+      hasDeltaX || (e.deltaY !== 0 && !isMouseWheelImpulse)
+    );
 
-    if (hasDeltaX || (e.deltaY !== 0 && !isMouseStep)) {
+    if (hasTrackpadSignature) {
       isTrackpadModeRef.current = true;
       if (trackpadModeTimerRef.current) clearTimeout(trackpadModeTimerRef.current);
       trackpadModeTimerRef.current = setTimeout(() => {
         isTrackpadModeRef.current = false;
       }, TRACKPAD_STICKY_MS);
-      return true;
     }
-    return isTrackpadModeRef.current;
+
+    return {
+      isMouseWheelImpulse,
+      looksLikeTrackpad: isTrackpadModeRef.current || hasTrackpadSignature,
+    };
   }, []);
 
   // ── Wheel handler (registered as non-passive native listener) ───────────────
@@ -652,11 +713,15 @@ export function PanZoomCanvas() {
     const focalX = e.clientX - rect.left;
     const focalY = e.clientY - rect.top;
     const isCtrl = e.ctrlKey || e.metaKey;
-    const shouldZoom = isCtrl || e.shiftKey || e.deltaMode !== 0 || !detectTrackpad(e);
+    const isLineOrPageMode = e.deltaMode !== WheelEvent.DOM_DELTA_PIXEL;
+    const { isMouseWheelImpulse, looksLikeTrackpad } = classifyWheel(e);
+    const shouldZoom = isCtrl || e.shiftKey || isLineOrPageMode || !looksLikeTrackpad;
 
     setViewState(prev => {
       if (shouldZoom) {
-        const sensitivity = isCtrl ? PINCH_SENSITIVITY : WHEEL_SENSITIVITY;
+        const sensitivity = isCtrl && !isMouseWheelImpulse
+          ? PINCH_SENSITIVITY
+          : WHEEL_SENSITIVITY;
         let newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, prev.scale * (1 - e.deltaY * sensitivity)));
         const r = newScale / prev.scale;
         return {
@@ -670,20 +735,28 @@ export function PanZoomCanvas() {
       nextX = Math.min(buffer, Math.max(rect.width - CONTENT_WIDTH * prev.scale - buffer, nextX));
       return { ...prev, translateX: nextX, translateY: prev.translateY - e.deltaY };
     });
-  }, [detectTrackpad]);
+  }, [classifyWheel]);
 
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
+    const suppressMiddleClickDefault = (e: MouseEvent) => {
+      if (e.button === 1) e.preventDefault();
+    };
     el.addEventListener('wheel', handleWheel, { passive: false });
+    el.addEventListener('mousedown', suppressMiddleClickDefault);
+    el.addEventListener('auxclick', suppressMiddleClickDefault);
     return () => {
       el.removeEventListener('wheel', handleWheel);
+      el.removeEventListener('mousedown', suppressMiddleClickDefault);
+      el.removeEventListener('auxclick', suppressMiddleClickDefault);
       if (trackpadModeTimerRef.current) clearTimeout(trackpadModeTimerRef.current);
     };
   }, [handleWheel]);
 
   // ── Pointer handlers ────────────────────────────────────────────────────────
   const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 1) e.preventDefault();
     activePointersRef.current.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
     containerRef.current?.setPointerCapture(e.pointerId);
 
@@ -851,7 +924,13 @@ let dragStartY          = 0;           // was dragStartPos.current.y
 
 ```javascript
 function initPanZoom(containerEl, contentEl) {
+  const suppressMiddleClickDefault = (event) => {
+    if (event.button === 1) event.preventDefault();
+  };
+
   containerEl.addEventListener('wheel', handleWheel, { passive: false });
+  containerEl.addEventListener('mousedown', suppressMiddleClickDefault);
+  containerEl.addEventListener('auxclick', suppressMiddleClickDefault);
   containerEl.addEventListener('pointerdown',   handlePointerDown);
   containerEl.addEventListener('pointermove',   handlePointerMove);
   containerEl.addEventListener('pointerup',     handlePointerUp);
@@ -860,6 +939,8 @@ function initPanZoom(containerEl, contentEl) {
   // Cleanup (call this when unmounting / destroying):
   return function destroy() {
     containerEl.removeEventListener('wheel', handleWheel);
+    containerEl.removeEventListener('mousedown', suppressMiddleClickDefault);
+    containerEl.removeEventListener('auxclick', suppressMiddleClickDefault);
     containerEl.removeEventListener('pointerdown',   handlePointerDown);
     containerEl.removeEventListener('pointermove',   handlePointerMove);
     containerEl.removeEventListener('pointerup',     handlePointerUp);
@@ -903,7 +984,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 ```
 IDLE
- ├── pointerdown (1 pointer)    → DRAGGING
+ ├── pointerdown (left, middle, or one touch pointer) → DRAGGING
  │    ├── pointermove           → pan content
  │    ├── pointerdown (2nd)     → PINCHING  (cancel drag)
  │    └── pointerup (dist < 5px) → CLICK → IDLE
@@ -914,7 +995,7 @@ IDLE
  │    ├── pointerup (1 remains) → DRAGGING  (smooth transition)
  │    └── pointerup (all up)    → IDLE
  │
- ├── wheel (ctrl / shift / mouse wheel) → ZOOMING  (state update, back to IDLE)
+ ├── wheel (ctrl / shift / classified mouse impulse) → ZOOMING  (state update, back to IDLE)
  └── wheel (trackpad, no modifier)      → PANNING  (state update, back to IDLE)
 
 All zoom operations:

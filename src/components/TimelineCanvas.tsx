@@ -47,6 +47,8 @@ const BAR_CENTER_OFFSET = 45;
 const AXIS_INTERVAL = 50; 
 const SIDEBAR_OPEN_WIDTH = 544; 
 const FLOATING_CARD_WIDTH = 320; 
+const MOUSE_WHEEL_IMPULSE_THRESHOLD_PX = 40;
+const TRACKPAD_STICKY_MS = 300;
 
 // Helper for line intersection checks (p1->p2 vs p3->p4)
 function linesIntersect(p1: {x:number, y:number}, p2: {x:number, y:number}, p3: {x:number, y:number}, p4: {x:number, y:number}): boolean {
@@ -380,8 +382,9 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
   const activePointersRef = useRef<Map<number, { clientX: number; clientY: number }>>(new Map());
   const lastPinchDistanceRef = useRef<number | null>(null);
 
-  // Trackpad detection: mouse wheels produce deltaY in exact multiples of 100
-  // (Windows Chrome) or 120 (macOS), trackpads produce variable values.
+  // Wheel events do not expose their source device. Large vertical-only pixel
+  // impulses are treated as mouse-wheel notches; finer or horizontal events
+  // are kept in trackpad mode for the duration of the gesture.
   const isTrackpadModeRef = useRef<boolean>(false);
   const trackpadModeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -853,6 +856,9 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
     if (!el) return;
 
     const handleWheel = (e: WheelEvent) => {
+      // Keep wheel scrolling and browser zoom contained within the timeline.
+      e.preventDefault();
+
       if (highlightedFigureIds.length > 0 && onCanvasInteraction) {
         onCanvasInteraction();
       }
@@ -867,32 +873,34 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
       const isLineOrPageMode = e.deltaMode !== 0; // line/page mode = physical mouse wheel
       const hasDeltaX = Math.abs(e.deltaX) > 0;
 
-      // Mouse wheel detection: on Windows Chrome, mouse wheels produce deltaY
-      // in exact multiples of 100 per notch; on macOS, multiples of 120.
-      // Trackpads produce variable values that rarely land on these multiples.
-      const absY = Math.abs(e.deltaY);
-      const isMouseWheelStep = e.deltaY !== 0 && Number.isInteger(e.deltaY) &&
-        (absY % 100 === 0 || absY % 120 === 0);
+      // The target mouse reports approximately 90.91px per notch, while the
+      // Precision Touchpad reports fine-grained values around 0.91-3.64px.
+      // Line/page deltas are always physical wheel input.
+      const isMouseWheelImpulse = isLineOrPageMode || (
+        !hasDeltaX && Math.abs(e.deltaY) >= MOUSE_WHEEL_IMPULSE_THRESHOLD_PX
+      );
+      const hasTrackpadSignature = e.deltaMode === WheelEvent.DOM_DELTA_PIXEL && (
+        hasDeltaX || (e.deltaY !== 0 && !isMouseWheelImpulse)
+      );
 
-      // Enter trackpad mode on non-wheel-step deltaY or any deltaX.
-      // Stay in trackpad mode for 300ms to cover the entire gesture.
-      if (hasDeltaX || (e.deltaY !== 0 && !isMouseWheelStep)) {
+      // Keep trackpad classification sticky so acceleration within one gesture
+      // cannot cause a mid-gesture switch from panning to zooming.
+      if (hasTrackpadSignature) {
         isTrackpadModeRef.current = true;
         if (trackpadModeTimerRef.current) clearTimeout(trackpadModeTimerRef.current);
         trackpadModeTimerRef.current = setTimeout(() => {
           isTrackpadModeRef.current = false;
-        }, 300);
+        }, TRACKPAD_STICKY_MS);
       }
 
-      const looksLikeTrackpad = isTrackpadModeRef.current || (hasDeltaX && !isMouseWheelStep);
+      const looksLikeTrackpad = isTrackpadModeRef.current || hasTrackpadSignature;
 
       const shouldZoom = isCtrl || isShift || isLineOrPageMode || !looksLikeTrackpad;
 
       if (shouldZoom) {
-        // Prevent browser zoom on pinch gesture
-        if (isCtrl) e.preventDefault();
-
-        const scaleSensitivity = isCtrl ? 0.01 : 0.001;
+        // Fine Ctrl/Cmd wheel input is a trackpad pinch. A physical wheel keeps
+        // ordinary wheel sensitivity even when Ctrl/Cmd is held.
+        const scaleSensitivity = isCtrl && !isMouseWheelImpulse ? 0.01 : 0.001;
         setViewState(prev => {
           let newScale = prev.scale * (1 - e.deltaY * scaleSensitivity);
           newScale = Math.max(0.1, Math.min(5, newScale));
@@ -931,6 +939,24 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
     };
   }, []);
 
+  // Let the compatibility mousedown event suppress Chrome's middle-click
+  // autoscroll UI while Pointer Events continue to own the drag itself.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const suppressMiddleClickDefault = (e: MouseEvent) => {
+      if (e.button === 1) e.preventDefault();
+    };
+
+    el.addEventListener('mousedown', suppressMiddleClickDefault);
+    el.addEventListener('auxclick', suppressMiddleClickDefault);
+    return () => {
+      el.removeEventListener('mousedown', suppressMiddleClickDefault);
+      el.removeEventListener('auxclick', suppressMiddleClickDefault);
+    };
+  }, []);
+
   const handlePointerDown = (e: React.PointerEvent) => {
     // Check if clicking on the close button - allow it to propagate normally
     const target = e.target as HTMLElement;
@@ -938,7 +964,9 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
       return;
     }
 
-    e.preventDefault();
+    // Middle-button default is suppressed by the native mousedown listener so
+    // the compatibility mouse event remains available in Chrome.
+    if (e.button !== 1) e.preventDefault();
 
     // Track all active pointers for multi-touch
     activePointersRef.current.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
