@@ -49,6 +49,8 @@ const SIDEBAR_OPEN_WIDTH = 544;
 const FLOATING_CARD_WIDTH = 320; 
 const MOUSE_WHEEL_IMPULSE_THRESHOLD_PX = 40;
 const TRACKPAD_STICKY_MS = 300;
+const IS_MAC_PLATFORM = typeof navigator !== 'undefined'
+  && /Mac|iPhone|iPad|iPod/i.test(navigator.platform);
 
 // Helper for line intersection checks (p1->p2 vs p3->p4)
 function linesIntersect(p1: {x:number, y:number}, p2: {x:number, y:number}, p3: {x:number, y:number}, p4: {x:number, y:number}): boolean {
@@ -1034,8 +1036,52 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
             return;
         }
 
-        if (wasSearchFocusedOnDown.current) {
-            wasSearchFocusedOnDown.current = false;
+        const shouldConsumeForSearch = wasSearchFocusedOnDown.current;
+        wasSearchFocusedOnDown.current = false;
+
+        const isMousePointer = e.pointerType === 'mouse';
+        const hasAnyModifier = e.altKey || e.ctrlKey || e.metaKey || e.shiftKey;
+        const hasExactSelectionModifier = isMousePointer
+          && !e.altKey
+          && !e.shiftKey
+          && (IS_MAC_PLATFORM
+            ? e.metaKey && !e.ctrlKey
+            : e.ctrlKey && !e.metaKey);
+
+        // Alt takes priority over every other modifier. It only resets state
+        // when a selected-year line is currently visible.
+        if (isMousePointer && e.altKey) {
+            if (selectedYear !== null) {
+                onEmptyClick();
+            }
+            return;
+        }
+
+        // The platform-specific modifier selects a year unless relationship
+        // mode owns the canvas. Search focus was already dismissed on pointer
+        // down, so the shortcut can execute on the same click.
+        if (hasExactSelectionModifier) {
+            if (relationshipState || hoverYearVal === null) {
+                return;
+            }
+
+            const clickedYear = hoverYearVal;
+            const activeItems = layoutData.filter(({ figure }) =>
+                clickedYear >= figure.birthYear && clickedYear <= figure.deathYear
+            );
+            activeItems.sort((a, b) => a.level - b.level);
+            const sortedFigures = activeItems.map(item => item.figure);
+            onYearClick(clickedYear, sortedFigures);
+            return;
+        }
+
+        // Leave unsupported or mixed modifier chords available for future
+        // interactions instead of treating them as ordinary clicks.
+        if (hasAnyModifier) {
+            return;
+        }
+
+        if (shouldConsumeForSearch) {
             return;
         }
 
@@ -1057,20 +1103,10 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
              }
         }
 
-        if (hoverYearVal !== null) {
-             const clickedYear = hoverYearVal;
-             
-            if (!relationshipState) {
-                const activeItems = layoutData.filter(({ figure }) => 
-                    clickedYear >= figure.birthYear && clickedYear <= figure.deathYear
-                );
-                activeItems.sort((a, b) => a.level - b.level);
-                const sortedFigures = activeItems.map(item => item.figure);
-                onYearClick(clickedYear, sortedFigures);
-            } else {
-                onEmptyClick();
-            }
-        } else {
+        // Preserve existing relationship-mode empty-click clearing. Outside
+        // relationship mode, an ordinary click is intentionally a no-op so it
+        // remains available for a future interaction.
+        if (relationshipState) {
             onEmptyClick();
         }
     }
