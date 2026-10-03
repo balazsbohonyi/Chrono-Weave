@@ -14,7 +14,7 @@ ChronoWeave transforms the study of history into an immersive, visual experience
 - **Discover** new figures and events through contextual expansion
 - **Learn** detailed biographies, famous quotes, and historical context powered by AI
 
-The app leverages Google Gemini or OpenRouter APIs to intelligently generate historical data and analyze connections between figures, making history discovery feel like an interactive journey through time.
+The app uses Google Gemini, OpenRouter, or Ollama to generate historical data and analyze connections between figures, making history discovery feel like an interactive journey through time.
 
 <div align="center">
    <img src="./docs/images/biography.png" alt="Chrono Weave">
@@ -63,8 +63,9 @@ The app leverages Google Gemini or OpenRouter APIs to intelligently generate his
 - **Search Focus**: Automatically highlights and focuses on search results
 
 ### ⚙️ Flexible AI Backend
-- **Provider Selection**: Switch between Google Gemini and OpenRouter API
+- **Provider Selection**: Switch between Google Gemini, OpenRouter, and Ollama
 - **OpenRouter Support**: Use any OpenRouter-compatible model (Claude, Llama, etc.)
+- **Ollama Support**: Connect to a local Ollama server or directly to Ollama Cloud
 - **Easy Configuration**: Settings dialog to manage API keys and model selection
 - **Persistent Settings**: Your provider and model preferences are saved locally
 
@@ -138,7 +139,9 @@ Both development and production modes work identically:
 - Settings can be configured via environment files (`.env.local` or `.env.production`) OR the in-app Settings dialog
 - **Priority**: localStorage (from Settings dialog) > environment variables
 - The Settings dialog allows real-time configuration changes without restarting or rebuilding
-- Settings are saved to browser localStorage with keys: `chrono_provider`, `chrono_api_key`, `chrono_model`
+- The active provider is saved as `chrono_provider`; settings are stored separately in `chrono_settings_gemini`, `chrono_settings_openrouter`, `chrono_settings_ollama_local`, and `chrono_settings_ollama_cloud`. Existing shared settings are migrated automatically.
+- Ollama Cloud keys entered in the dialog persist in the browser's provider profile when you click **Save**, like Gemini and OpenRouter keys. Server-side `OLLAMA_API_KEY` remains outside the frontend bundle.
+- Ollama reasoning defaults to off. **Enable reasoning** in Settings or set `OLLAMA_REASONING=true` for supported models. GPT-OSS uses low effort when off and medium when enabled. Local and cloud modes remember this setting separately.
 - Environment variables serve as fallback defaults when localStorage is not configured
 - This provides maximum flexibility for both development and production deployments
 
@@ -146,7 +149,7 @@ Both development and production modes work identically:
 
 1. Click the settings gear icon in the control panel
 2. Configure the following:
-   - **AI Provider**: Choose between "Google Gemini" or "OpenRouter"
+   - **AI Provider**: Choose "Google Gemini", "OpenRouter", or "Ollama"
    - **API Key**: Enter your API key for the selected provider
      - [Get Gemini API key](https://aistudio.google.com/apikey)
      - [Get OpenRouter API key](https://openrouter.ai/keys)
@@ -154,13 +157,57 @@ Both development and production modes work identically:
      - Gemini default: `gemini-2.5-flash`
      - OpenRouter default: `openai/gpt-oss-120b`
 3. **Test** your connection before saving (validates API key and model)
-4. Click **Save & Reload** to apply changes (reloads timeline data with new configuration)
+4. Click **Save** to apply changes. The displayed timeline stays in place; new AI requests use the selected provider/model. Click **Build** to regenerate it, including the same year range.
 
-**Validation**: All fields are required. The Test and Save buttons are disabled until all fields are filled.
+**Validation**: Gemini and OpenRouter require an API key and model. Local Ollama requires a valid server URL and model. Ollama Cloud requires a model and either a saved dialog key or a server-side environment key.
 
 **Connection Testing**: The Test button validates your API credentials and model without saving changes. Success/error messages appear as toast notifications.
 
 **Current Configuration Display**: The dialog shows which provider and model are currently active (from environment or localStorage).
+
+### Ollama setup
+
+See the [Ollama setup guide](docs/ollama.md) for step-by-step Linux/WSL instructions, local and cloud model examples, model switching, and troubleshooting. The direct-cloud relay starts inside `npm run dev` or `npm run preview`; there is no separate relay server to launch.
+
+Use Ollama on the same computer as ChronoWeave. The Settings dialog offers **Local server** and **Ollama Cloud** modes, model suggestions from the selected server/catalog, a **Refresh models** button, and manual model entry. Settings remembers each mode's model separately. Models must support chat and follow JSON instructions; embedding-only models cannot supply timeline data. The app does not download models automatically.
+
+For your local Ollama installation, set these values in `.env.local` (development) or `.env.production` (local production build/preview):
+
+```dotenv
+PROVIDER=ollama
+OLLAMA_MODE=local
+MODEL=gpt-oss:20b-cloud
+OLLAMA_BASE_URL=http://localhost:11434
+```
+
+Start Ollama. To use cloud models through the local server, sign in using `ollama signin` and make the chosen cloud model available in Ollama. No API key is required in ChronoWeave's local mode. Downloaded local models work through the same mode. If browser requests fail, check the URL and configure `OLLAMA_ORIGINS` to allow the exact app origin (for example, `http://localhost:3000`), then restart Ollama. See [Ollama authentication](https://docs.ollama.com/api/authentication) and [origin configuration](https://docs.ollama.com/faq#how-can-i-allow-additional-web-origins-to-access-ollama).
+
+For direct cloud access:
+
+```dotenv
+PROVIDER=ollama
+OLLAMA_MODE=cloud
+MODEL=gpt-oss:20b
+OLLAMA_API_KEY=your_ollama_cloud_api_key
+```
+
+Create an [Ollama API key](https://ollama.com/settings/keys), or enter it in Settings and click **Save** to retain it across reloads. Leave the dialog key blank to use `OLLAMA_API_KEY` from the server environment. This variable stays server-side; use `OLLAMA_API_KEY`, not the Gemini/OpenRouter `API_KEY` variable. The relay only forwards to `https://ollama.com/api` and accepts requests from the local app. Cloud model IDs must match the [cloud catalog](https://docs.ollama.com/cloud), rather than assuming a local `-cloud` alias is valid.
+
+Run `npm run dev`, or `npm run build` followed by `npm run preview` for a locally served production build. The cloud relay is available in both Vite servers. A deployment containing only the static `dist` files has no cloud relay; direct cloud access requires a server. Restart the server after changing environment values; rebuild production assets after changing provider/model defaults. Keep environment files out of source control.
+
+Page load restores a cached timeline, or leaves an empty timeline for you to build explicitly with **Weave History**. A 600–1600 build uses 21 generation requests before retries: 10 century batches of people, 10 century batches of events, and one batch of major events across the entire range. Ollama requests run sequentially to avoid bursts. GPT-OSS requests use `think: "low"` to reduce reasoning overhead; other models retain their defaults. Each request has a three-minute timeout; a complete timeline may take longer. Invalid output receives one corrective retry; transient rate-limit/busy errors receive at most two retries. A failed build preserves the displayed timeline and its cache. [Ollama Cloud currently lacks enforced structured outputs](https://docs.ollama.com/capabilities/structured-outputs), so responses are requested as JSON and validated in the app.
+
+For Linux/WSL server commands, downloading and switching models, and cloud examples, follow the [Ollama setup guide](docs/ollama.md).
+
+Relationship maps, biographies, and relationship explanations are cached in browser localStorage and reused across providers/models. Remapping the same figure on the same canvas restores its connections after clearing curves or reloading. Known relationship pairs and explanations can also be reused from either figure. Changing timeline figures requires a new search for remaining candidates; unchanged known pairs stay available even if that search fails. An empty map automatically tries **Expand Timeline** once for that source and canvas. If no connections are found, a message replaces the floating source card; explicit **Expand Timeline** can retry. Switching models affects uncached requests and explicit timeline builds.
+
+Events lasting less than three years are omitted from new and cached timelines. Short events are filtered without failing the build or changing their historical dates.
+
+AI content in relationship and biography dialogs renders Markdown, including emphasis, lists, links, quotations, tables, and code. Existing cached responses receive the same formatting without regeneration.
+
+To run the focused configuration, service, and relay tests, install [Bun](https://bun.sh) and run `bun test`. Run `npm run typecheck` and `npm run build` for TypeScript and production checks.
+
+For an opt-in live check of all Ollama service methods, run `bun run scripts/verify-ollama.ts gpt-oss:20b-cloud`. This sends generation requests and consumes the selected model's quota. For direct cloud mode, configure `OLLAMA_MODE=cloud`, an optional `OLLAMA_API_KEY`, and `CHRONOWEAVE_URL` if the relay is served somewhere other than `http://localhost:3000`; pass a cloud catalog model ID as the argument.
 
 #### Configuration Examples
 
@@ -216,6 +263,6 @@ npm run preview
 
 - **Frontend**: React 19 with TypeScript
 - **Bundler**: Vite 6
-- **AI APIs**: Google Gemini & OpenRouter
+- **AI APIs**: Google Gemini, OpenRouter, and Ollama
 - **Styling**: Tailwind CSS
 - **Canvas Rendering**: HTML5 Canvas with custom layout algorithm

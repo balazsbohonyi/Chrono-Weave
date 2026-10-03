@@ -3,6 +3,7 @@ import React, { useEffect } from 'react';
 import { HistoricalFigure, DeepDiveData } from '../types';
 import { RelationshipData } from '../App';
 import { formatYear } from '../utils/formatters';
+import MarkdownContent from './MarkdownContent';
 
 interface RelationshipPopoverProps {
   isOpen: boolean;
@@ -55,7 +56,7 @@ const RelationshipPopover: React.FC<RelationshipPopoverProps> = ({
                {/* Summary */}
                <div className="bg-blue-50/50 p-6 rounded-lg border border-blue-100 mb-8">
                  <h3 className="text-sm font-bold uppercase text-blue-800 tracking-wider mb-2 font-sans">Relationship Summary</h3>
-                 <p className="text-gray-800 text-lg font-sans leading-relaxed">{content.summary}</p>
+                 <MarkdownContent className="text-gray-800 text-lg font-sans leading-relaxed">{content.summary}</MarkdownContent>
                </div>
 
                {/* Sections */}
@@ -63,11 +64,11 @@ const RelationshipPopover: React.FC<RelationshipPopoverProps> = ({
                  {content.sections.map((section, idx) => (
                    <div key={idx} className="group">
                      <h4 className="text-xl font-sans font-bold text-gray-900 mb-2">
-                       {section.title}
+                       <MarkdownContent inline>{section.title}</MarkdownContent>
                      </h4>
-                     <p className="text-gray-700 leading-relaxed transition-colors font-sans">
+                     <MarkdownContent className="text-gray-700 leading-relaxed transition-colors font-sans">
                        {section.content}
-                     </p>
+                     </MarkdownContent>
                    </div>
                  ))}
                </div>
@@ -82,9 +83,9 @@ const RelationshipPopover: React.FC<RelationshipPopoverProps> = ({
                 {data.famousQuote && (
                     <div className="bg-blue-50/50 p-6 rounded-lg border border-blue-100 mb-8">
                         <h3 className="text-sm font-bold uppercase text-blue-800 tracking-wider mb-4 font-sans">Famous Quote</h3>
-                        <p className="text-gray-800 text-lg italic leading-relaxed font-serif">
+                        <MarkdownContent className="text-gray-800 text-lg italic leading-relaxed font-serif">
                             {data.famousQuote}
-                        </p>
+                        </MarkdownContent>
                     </div>
                 )}
 
@@ -93,11 +94,11 @@ const RelationshipPopover: React.FC<RelationshipPopoverProps> = ({
                     {data.sections.map((section, idx) => (
                         <div key={idx} className="group">
                             <h4 className="text-xl font-sans font-bold text-gray-900 mb-2">
-                                {section.title}
+                                <MarkdownContent inline>{section.title}</MarkdownContent>
                             </h4>
-                            <p className="text-gray-700 leading-relaxed font-sans text-base">
+                            <MarkdownContent className="text-gray-700 leading-relaxed font-sans text-base">
                                 {section.content}
-                            </p>
+                            </MarkdownContent>
                         </div>
                     ))}
                 </div>
@@ -171,9 +172,9 @@ const RelationshipPopover: React.FC<RelationshipPopoverProps> = ({
                             </div>
                             <p className="text-sm text-emerald-800 font-bold uppercase tracking-wide mb-2">{target.occupation}</p>
                             
-                            <p className="text-base text-gray-700 leading-relaxed font-sans max-w-2xl">
+                            <MarkdownContent className="text-base text-gray-700 leading-relaxed font-sans max-w-2xl">
                                 {target.shortDescription || (isDeepDiveData(data) ? data.summary : "Loading details...")}
-                            </p>
+                            </MarkdownContent>
                         </div>
                     </div>
                 ) : null}
@@ -225,7 +226,7 @@ const FigureCard: React.FC<{
                 <p className={`text-xs ${occupationColor} font-bold uppercase tracking-wide mt-1 mb-2`}>{figure.occupation}</p>
                 
                 <div className="text-base text-gray-800 leading-relaxed font-sans">
-                    {detail ? detail.description : <span className="animate-pulse bg-gray-100 text-transparent rounded">Loading bio...</span>}
+                    {detail ? <MarkdownContent>{detail.description}</MarkdownContent> : <span className="animate-pulse bg-gray-100 text-transparent rounded">Loading bio...</span>}
                 </div>
             </div>
         </div>

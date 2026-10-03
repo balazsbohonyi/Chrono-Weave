@@ -359,10 +359,13 @@ export class OpenRouterService implements IAIService {
 
         try {
             const result = await enqueueTaskWithRetry(() => this.callOpenRouter(prompt, "You are a JSON generator. Output valid JSON."));
-            return result.relatedIds || [];
+            if (!Array.isArray(result.relatedIds) || !result.relatedIds.every((id: unknown) => typeof id === 'string')) {
+                throw new Error('The model returned an invalid relationship map.');
+            }
+            return result.relatedIds;
         } catch (error) {
             console.error("OpenRouter fetchRelatedFigures error:", error);
-            return [];
+            throw error;
         }
     }
 
@@ -377,7 +380,7 @@ export class OpenRouterService implements IAIService {
 
         try {
             const rawData = await enqueueTaskWithRetry(() => this.callOpenRouter(prompt, "You are a JSON generator. Output valid JSON arrays."));
-            if (!Array.isArray(rawData)) return [];
+            if (!Array.isArray(rawData)) throw new Error('The model returned invalid discovery data.');
 
             return rawData.map((item: any, index: number) => ({
                 id: `${item.name.replace(/\s+/g, '-')}-${Date.now()}-${index}`,
@@ -394,7 +397,7 @@ export class OpenRouterService implements IAIService {
             });
         } catch (error) {
             console.error("OpenRouter discoverRelatedFigures error:", error);
-            return [];
+            throw error;
         }
     }
 

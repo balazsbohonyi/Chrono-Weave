@@ -63,10 +63,10 @@ export interface RelationshipExplanation {
 export type InteractionMode = 'select' | 'pan' | 'zoom';
 
 export interface IAIService {
-  fetchHistoricalFigures(start: number, end: number): Promise<HistoricalFigure[]>;
-  fetchRelatedFigures(target: HistoricalFigure, allFigures: HistoricalFigure[]): Promise<string[]>;
-  discoverRelatedFigures(target: HistoricalFigure, existingNames: string[], start: number, end: number): Promise<HistoricalFigure[]>;
-  fetchRelationshipExplanation(source: HistoricalFigure, target: HistoricalFigure): Promise<RelationshipExplanation | null>;
-  fetchFigureDeepDive(figure: HistoricalFigure): Promise<DeepDiveData | null>;
-  testConnection(): Promise<{ success: boolean; error?: string }>;
+  fetchHistoricalFigures(start: number, end: number, signal?: AbortSignal): Promise<HistoricalFigure[]>;
+  fetchRelatedFigures(target: HistoricalFigure, allFigures: HistoricalFigure[], signal?: AbortSignal): Promise<string[]>;
+  discoverRelatedFigures(target: HistoricalFigure, existingNames: string[], start: number, end: number, signal?: AbortSignal): Promise<HistoricalFigure[]>;
+  fetchRelationshipExplanation(source: HistoricalFigure, target: HistoricalFigure, signal?: AbortSignal): Promise<RelationshipExplanation | null>;
+  fetchFigureDeepDive(figure: HistoricalFigure, signal?: AbortSignal): Promise<DeepDiveData | null>;
+  testConnection(signal?: AbortSignal): Promise<{ success: boolean; error?: string }>;
 }
