@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import TimelineCanvas from './components/TimelineCanvas';
 import ControlPanel from './components/ControlPanel';
 import Sidebar from './components/Sidebar';
@@ -9,8 +9,10 @@ import ProgressOverlay from './components/ProgressOverlay';
 import SettingsDialog from './components/SettingsDialog';
 import Legend from './components/Legend';
 import { HistoricalFigure, DeepDiveData, IAIService, RelationshipExplanation, FigureCategory } from './types';
-import { GeminiService } from './services/geminiService';
-import { OpenRouterService } from './services/openRouterService';
+import { createAIService } from './services/aiService';
+import { isConfigValid, providerNames } from './utils/providerConfig';
+import { filterTimelineFigures, isTimelineFigureVisible } from './utils/timelineFigures';
+import { readKnownRelationshipIds, readRelationshipMap, saveRelationshipMap, validRelatedIds } from './utils/relationshipCache';
 
 import { fetchBatchFigureDetails } from './services/wikiService';
 import { useEnvironment } from './contexts/EnvironmentContext';
@@ -54,7 +56,7 @@ const App: React.FC = () => {
     const { getEffectiveConfig } = useEnvironment();
 
     // AI Service Instance
-    const [aiService, setAiService] = useState<IAIService>(new GeminiService());
+    const [aiService, setAiService] = useState<IAIService>(() => createAIService(getEffectiveConfig()));
 
     // Category Filter State
     const [selectedCategories, setSelectedCategories] = useState<Set<FigureCategory>>(new Set());
@@ -89,34 +91,56 @@ const App: React.FC = () => {
 
 
 
-    const [hasLoadedFromCache, setHasLoadedFromCache] = useState(false);
+    const serviceRef = useRef(aiService);
+    const operationController = useRef(new AbortController());
+    const operationVersion = useRef(0);
+    const buildController = useRef<AbortController | null>(null);
+    const buildVersion = useRef(0);
+    const traceVersion = useRef(0);
+    const traceController = useRef<AbortController | null>(null);
+    const popoverVersion = useRef(0);
+
+    const invalidateFigureOperations = () => {
+        operationVersion.current++;
+        popoverVersion.current++;
+        traceVersion.current++;
+        operationController.current.abort();
+        operationController.current = new AbortController();
+    };
+
+    const invalidateOperations = () => {
+        invalidateFigureOperations();
+        buildController.current?.abort();
+        buildVersion.current++;
+    };
+
+    const beginRelationshipAction = () => {
+        traceController.current?.abort();
+        const controller = new AbortController();
+        traceController.current = controller;
+        const version = operationVersion.current;
+        const request = ++traceVersion.current;
+        const signal = AbortSignal.any([controller.signal, operationController.current.signal]);
+        return {
+            signal,
+            isCurrent: () => !signal.aborted && operationVersion.current === version && traceVersion.current === request,
+        };
+    };
+
+    const cancelRelationshipAction = () => {
+        traceVersion.current++;
+        traceController.current?.abort();
+        setIsTracing(false);
+        setIsDiscovering(false);
+        if (isDiscovering) {
+            setHighlightedFigureIds([]);
+            setIsSearchFocusActive(false);
+        }
+    };
 
     // Storage Keys
     const TIMELINE_DATA_KEY = 'chrono_timeline_data';
     const TIMELINE_CONFIG_KEY = 'chrono_timeline_config';
-
-    const initializeService = (showFeedback = false) => {
-        const config = getEffectiveConfig();
-
-        if (config.provider === 'openrouter') {
-            if (config.apiKey) {
-                setAiService(new OpenRouterService(config.apiKey, config.model));
-                if (showFeedback) setToast({ message: "Switched to OpenRouter", type: "info" });
-            } else {
-                // Fallback if key is missing even in env (shouldn't happen if env is set, but good for safety)
-                if (showFeedback) setToast({ message: "OpenRouter API key missing.", type: "error" });
-            }
-        } else {
-            // Default to Gemini
-            setAiService(new GeminiService(config.apiKey, config.model));
-            if (showFeedback) setToast({ message: "Switched to Google Gemini", type: "success" });
-        }
-    };
-
-    const hasValidApiKey = (): boolean => {
-        const config = getEffectiveConfig();
-        return !!config.apiKey;
-    };
 
     const loadTimelineFromCache = useCallback(() => {
         try {
@@ -128,9 +152,12 @@ const App: React.FC = () => {
                 const parsedConfig: { start: number; end: number } = JSON.parse(cachedConfig);
 
                 if (Array.isArray(parsedData) && parsedData.length > 0) {
-                    setFigures(parsedData);
+                    const visibleFigures = filterTimelineFigures(parsedData);
+                    setFigures(visibleFigures);
                     setConfig(parsedConfig);
-                    setHasLoadedFromCache(true);
+                    if (visibleFigures.length !== parsedData.length) {
+                        localStorage.setItem(TIMELINE_DATA_KEY, JSON.stringify(visibleFigures));
+                    }
                     return true;
                 }
             }
@@ -149,83 +176,76 @@ const App: React.FC = () => {
         }
     }, []);
 
-    useEffect(() => {
-        initializeService(false);
-
-        // Attempt to load from cache first
-        const loadedFromCache = loadTimelineFromCache();
-
-        // Only auto-build timeline if NOT loaded from cache and we have a valid API key
-        if (!loadedFromCache && hasValidApiKey()) {
-            buildTimeline(600, 1600);
+    const buildTimeline = useCallback(async (start: number, end: number) => {
+        if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start >= end) {
+            setToast({ message: 'Enter a valid year range.', type: 'error' });
+            return;
         }
+        const selectedConfig = getEffectiveConfig();
+        if (selectedConfig.provider !== 'ollama' && !isConfigValid(selectedConfig)) {
+            setToast({ message: 'Configure your AI provider in Settings first.', type: 'error' });
+            return;
+        }
+        invalidateOperations();
+        const version = buildVersion.current;
+        const controller = new AbortController();
+        buildController.current = controller;
+        const service = serviceRef.current;
+        setLoading(true);
+        setIsDiscovering(false);
+        setIsTracing(false);
+        setPopoverState(previous => ({ ...previous, isOpen: false, loading: false }));
+        try {
+            const data = filterTimelineFigures(await service.fetchHistoricalFigures(start, end, controller.signal));
+            if (controller.signal.aborted || buildVersion.current !== version) return;
+            if (!data.length) throw new Error('The model returned no timeline data. Try another model or year range.');
+            invalidateFigureOperations();
+            const nextConfig = { start, end };
+            setFigures(data);
+            setConfig(nextConfig);
+            setSelectedYear(null);
+            setSelectedFigures([]);
+            setRelationshipState(null);
+            setHighlightedFigureIds([]);
+            setCurrentSearchIndex(0);
+            setIsSearchFocusActive(false);
+            setNewlyDiscoveredIds(new Set());
+            setDiscoverySourceId(null);
+            setKnownRelationships(new Map());
+            setIsSidebarCollapsed(false);
+            setSelectedCategories(new Set());
+            setIsLegendOpen(false);
+            saveTimelineToCache(nextConfig, data);
+        } catch (error) {
+            if (!controller.signal.aborted && buildVersion.current === version) {
+                setToast({ message: error instanceof Error ? error.message : 'Failed to load timeline data.', type: 'error' });
+            }
+        } finally {
+            if (!controller.signal.aborted && buildVersion.current === version) setLoading(false);
+        }
+    }, [getEffectiveConfig, saveTimelineToCache]);
+
+    useEffect(() => {
+        loadTimelineFromCache();
+        return () => invalidateOperations();
     }, [loadTimelineFromCache]);
 
     const handleSettingsSaved = () => {
-        initializeService(true);
-        // Note: We might want to clear cache here if settings drastically change model behavior,
-        // but for now we keep the user's manual "Build" control.
-        // If they want to rebuild with new settings, they can click "Build".
-
-        // However, if we are currently showing cached data and settings changed, 
-        // we might just want to let the user decide.
-        // Current behavior: calling buildTimeline immediately.
-        buildTimeline(config.start, config.end);
+        const selectedConfig = getEffectiveConfig();
+        const service = createAIService(selectedConfig);
+        invalidateOperations();
+        serviceRef.current = service;
+        setAiService(service);
+        setLoading(false);
+        setIsDiscovering(false);
+        setIsTracing(false);
+        setPopoverState(previous => ({ ...previous, isOpen: false, loading: false }));
+        setToast({ message: 'Settings saved. New requests use ' + providerNames[selectedConfig.provider] + '. Click Build to regenerate the timeline.', type: 'success' });
     };
-
-    // Modified buildTimeline to be just a trigger, not the fetcher itself (fetcher is in effect)
-    // But actually, the original code had the fetcher in a separate useEffect reacting to 'loading' state.
-    // We will keep that pattern but ensure saving happens there.
-    const buildTimeline = useCallback(async (start: number, end: number) => {
-        if (start === config.start && end === config.end && figures.length > 0) {
-            setToast({ message: "Timeline already includes data for this period.", type: "info" });
-            return;
-        }
-
-        setLoading(true);
-        setConfig({ start, end });
-        setSelectedYear(null);
-        setSelectedFigures([]);
-        setRelationshipState(null);
-        setHighlightedFigureIds([]);
-        setCurrentSearchIndex(0);
-        setIsSearchFocusActive(false);
-        setNewlyDiscoveredIds(new Set());
-        setDiscoverySourceId(null);
-        setKnownRelationships(new Map());
-        setPopoverState(prev => ({ ...prev, isOpen: false }));
-        setIsSidebarCollapsed(false);
-        setSelectedCategories(new Set());
-        setIsLegendOpen(false);
-    }, [config, figures]);
-
-    useEffect(() => {
-        let isMounted = true;
-        if (loading) {
-            const performBuild = async () => {
-                try {
-                    const data = await aiService.fetchHistoricalFigures(config.start, config.end);
-                    if (isMounted) {
-                        setFigures(data);
-                        setLoading(false);
-                        // Save to cache on successful build
-                        saveTimelineToCache(config, data);
-                    }
-                } catch (error) {
-                    console.error("Failed to fetch figures", error);
-                    if (isMounted) {
-                        setToast({ message: "Failed to load timeline data.", type: "error" });
-                        setLoading(false);
-                    }
-                }
-            };
-            performBuild();
-        }
-        return () => { isMounted = false; };
-    }, [loading, aiService, config, saveTimelineToCache]);
 
 
     const handleYearClick = (year: number, sortedFigures: HistoricalFigure[]) => {
+        cancelRelationshipAction();
         setSelectedYear(year);
         setSelectedFigures(sortedFigures);
         setRelationshipState(null);
@@ -237,24 +257,51 @@ const App: React.FC = () => {
         currentFigures: HistoricalFigure[] = figures,
         forcedRelatedIds: string[] = []
     ) => {
-        setRelationshipState(null);
-        if (mouseY !== null) {
-            setIsTracing(true);
+        const { signal, isCurrent } = beginRelationshipAction();
+        setToast(null);
+        const cached = readRelationshipMap(figure, currentFigures, localStorage);
+        const knownIds = validRelatedIds(figure, currentFigures, [
+            ...readKnownRelationshipIds(figure, currentFigures, localStorage),
+            ...(knownRelationships.get(figure.id) || new Set<string>()),
+            ...forcedRelatedIds,
+        ]);
+        const knownSet = new Set(knownIds);
+        const remainingFigures = currentFigures.filter(candidate => !knownSet.has(candidate.id));
+        const needsMapping = cached === null && remainingFigures.some(candidate => candidate.id !== figure.id);
+        const effectiveY = mouseY ?? window.innerHeight / 2;
+        setRelationshipState(knownIds.length ? {
+            sourceY: effectiveY, relatedIds: knownIds, targetId: figure.id,
+            sourceFigure: figure, sourceImageUrl: figure.imageUrl || null,
+        } : null);
+        if (isDiscovering) {
+            setHighlightedFigureIds([]);
+            setIsSearchFocusActive(false);
         }
+        setIsDiscovering(false);
+        setIsTracing(needsMapping);
 
         try {
-            const aiRelatedIds = await aiService.fetchRelatedFigures(figure, currentFigures);
-            const knownIds = knownRelationships.get(figure.id) || new Set();
-            const uniqueRelatedIds = Array.from(new Set([
+            const aiRelatedIds = cached?.relatedIds ?? (needsMapping ? await aiService.fetchRelatedFigures(figure, remainingFigures, signal) : []);
+            if (!isCurrent()) return;
+            const uniqueRelatedIds = validRelatedIds(figure, currentFigures, [
                 ...aiRelatedIds,
-                ...Array.from(knownIds),
-                ...forcedRelatedIds
-            ]));
+                ...knownIds,
+            ]);
+            saveRelationshipMap(figure, currentFigures, uniqueRelatedIds, localStorage, cached?.expansionAttempted);
+
+            if (uniqueRelatedIds.length === 0) {
+                if (cached?.expansionAttempted) {
+                    setToast({ message: `Relationships could not be mapped for ${figure.name} with the figures on this canvas. Try Expand Timeline or a different year range.`, type: 'info' });
+                } else {
+                    setToast({ message: `No relationships found for ${figure.name} on the canvas. Expanding the timeline to look for related figures...`, type: 'info' });
+                    await handleDiscover(figure, { fromMapping: true, sourceY: mouseY ?? window.innerHeight / 2 });
+                }
+                return;
+            }
 
             const detailsMap = await fetchBatchFigureDetails([figure]);
+            if (!isCurrent()) return;
             const sourceDetails = detailsMap.get(figure.id);
-            const effectiveY = mouseY !== null ? mouseY : window.innerHeight / 2;
-
             setRelationshipState({
                 sourceY: effectiveY,
                 relatedIds: uniqueRelatedIds,
@@ -264,10 +311,14 @@ const App: React.FC = () => {
             });
 
         } catch (error) {
-            console.error("Failed to trace relationships", error);
-            setToast({ message: "Failed to trace connections.", type: "error" });
+            if (isCurrent()) {
+                const message = error instanceof Error ? error.message : 'Failed to trace connections.';
+                setToast(knownIds.length
+                    ? { message: `Showing ${knownIds.length} cached ${knownIds.length === 1 ? 'relationship' : 'relationships'} for ${figure.name}. Could not check additional connections: ${message}`, type: 'info' }
+                    : { message, type: 'error' });
+            }
         } finally {
-            setIsTracing(false);
+            if (isCurrent()) setIsTracing(false);
         }
     };
 
@@ -279,7 +330,11 @@ const App: React.FC = () => {
         });
     }, []);
 
-    const handleDiscover = async (sourceFigure: HistoricalFigure) => {
+    const handleDiscover = async (sourceFigure: HistoricalFigure, options: { fromMapping?: boolean; sourceY?: number } = {}) => {
+        const { signal, isCurrent } = beginRelationshipAction();
+        const cached = readRelationshipMap(sourceFigure, figures, localStorage);
+        setRelationshipState(null);
+        setIsTracing(false);
         setIsDiscovering(true);
         setSelectedYear(null);
 
@@ -289,14 +344,24 @@ const App: React.FC = () => {
 
         try {
             const existingNames = figures.map(f => f.name);
-            const newFigures = await aiService.discoverRelatedFigures(sourceFigure, existingNames, config.start, config.end);
+            const newFigures = await aiService.discoverRelatedFigures(sourceFigure, existingNames, config.start, config.end, signal);
+            if (!isCurrent()) return;
 
-            const uniqueNewFigures = newFigures.filter(nf =>
-                !figures.some(ef => ef.id === nf.id || ef.name.toLowerCase() === nf.name.toLowerCase())
-            );
+            const seenIds = new Set(figures.map(figure => figure.id));
+            const seenNames = new Set(figures.map(figure => figure.name.trim().toLowerCase()));
+            const uniqueNewFigures = newFigures.filter(figure => {
+                const name = figure.name.trim().toLowerCase();
+                if (!isTimelineFigureVisible(figure) || seenIds.has(figure.id) || seenNames.has(name)) return false;
+                seenIds.add(figure.id);
+                seenNames.add(name);
+                return true;
+            });
 
             let updatedFigures = figures;
-            let allRelatedIdsSet = new Set<string>(knownRelationships.get(sourceFigure.id) || []);
+            const allRelatedIdsSet = new Set<string>([
+                ...(knownRelationships.get(sourceFigure.id) || []), ...(cached?.relatedIds || []),
+                ...readKnownRelationshipIds(sourceFigure, figures, localStorage),
+            ]);
             let newBatchIds: string[] = [];
 
             if (uniqueNewFigures.length > 0) {
@@ -312,29 +377,40 @@ const App: React.FC = () => {
                 });
             } else {
                 setToast({
-                    message: `No new significant connections found for ${sourceFigure.name} in this period.`,
+                    message: options.fromMapping
+                        ? `Relationships could not be mapped for ${sourceFigure.name} with the figures on this canvas, and no new related figures were found in this period.`
+                        : `No new significant connections found for ${sourceFigure.name} in this period.`,
                     type: 'info'
                 });
             }
 
-            const allRelatedIds = Array.from(allRelatedIdsSet);
+            const allRelatedIds = validRelatedIds(sourceFigure, updatedFigures, Array.from(allRelatedIdsSet));
+            if (allRelatedIds.length === 0) {
+                saveRelationshipMap(sourceFigure, updatedFigures, [], localStorage, true);
+                setDiscoverySourceId(null);
+                setHighlightedFigureIds([]);
+                setIsSearchFocusActive(false);
+                return;
+            }
             const detailsMap = await fetchBatchFigureDetails([sourceFigure]);
+            if (!isCurrent()) return;
             const sourceDetails = detailsMap.get(sourceFigure.id);
 
             setFigures(updatedFigures);
             setKnownRelationships(prev => {
                 const next = new Map(prev);
-                next.set(sourceFigure.id, allRelatedIdsSet);
+                next.set(sourceFigure.id, new Set(allRelatedIds));
                 return next;
             });
 
             // Save new discovery to cache
             saveTimelineToCache(config, updatedFigures);
+            saveRelationshipMap(sourceFigure, updatedFigures, allRelatedIds, localStorage, true);
 
             setNewlyDiscoveredIds(new Set(newBatchIds));
 
             setRelationshipState({
-                sourceY: window.innerHeight / 2,
+                sourceY: options.sourceY ?? window.innerHeight / 2,
                 relatedIds: allRelatedIds,
                 targetId: sourceFigure.id,
                 sourceFigure: sourceFigure,
@@ -351,10 +427,13 @@ const App: React.FC = () => {
             setSelectedFigures(sidebarList);
 
         } catch (error) {
-            console.error(error);
-            setToast({ message: "Failed to discover connections.", type: "error" });
+            if (isCurrent()) {
+                setHighlightedFigureIds([]);
+                setIsSearchFocusActive(false);
+                setToast({ message: error instanceof Error ? error.message : "Failed to discover connections.", type: "error" });
+            }
         } finally {
-            setIsDiscovering(false);
+            if (isCurrent()) setIsDiscovering(false);
         }
     };
 
@@ -362,6 +441,10 @@ const App: React.FC = () => {
         if (!relationshipState) return;
 
         const sourceFigure = relationshipState.sourceFigure;
+        const version = operationVersion.current;
+        const request = ++popoverVersion.current;
+        const signal = operationController.current.signal;
+        const isCurrent = () => !signal.aborted && operationVersion.current === version && popoverVersion.current === request;
 
         setPopoverState({
             isOpen: true,
@@ -373,11 +456,15 @@ const App: React.FC = () => {
         });
 
         const cacheKey = `chrono_rel_${sourceFigure.id}_${targetFigure.id}`;
-        const cached = localStorage.getItem(cacheKey);
-
-        if (cached) {
+        const reverseCacheKey = `chrono_rel_${targetFigure.id}_${sourceFigure.id}`;
+        for (const key of [cacheKey, reverseCacheKey]) {
+            const cached = localStorage.getItem(key);
+            if (!cached) continue;
             try {
-                const parsedData = JSON.parse(cached);
+                const parsed = JSON.parse(cached);
+                const parsedData = key === reverseCacheKey
+                    ? { ...parsed, sourceDetail: parsed.targetDetail, targetDetail: parsed.sourceDetail }
+                    : parsed;
                 setPopoverState({
                     isOpen: true,
                     target: targetFigure,
@@ -388,15 +475,17 @@ const App: React.FC = () => {
                 });
                 return;
             } catch (e) {
-                localStorage.removeItem(cacheKey);
+                localStorage.removeItem(key);
             }
         }
 
         try {
             const [explanation, detailsMap] = await Promise.all([
-                aiService.fetchRelationshipExplanation(sourceFigure, targetFigure),
+                aiService.fetchRelationshipExplanation(sourceFigure, targetFigure, signal),
                 fetchBatchFigureDetails([sourceFigure, targetFigure])
             ]);
+
+            if (!isCurrent()) return;
 
             const combinedData: RelationshipData = {
                 explanation,
@@ -404,7 +493,7 @@ const App: React.FC = () => {
                 targetDetail: detailsMap.get(targetFigure.id)
             };
 
-            localStorage.setItem(cacheKey, JSON.stringify(combinedData));
+            if (explanation) localStorage.setItem(cacheKey, JSON.stringify(combinedData));
 
             setPopoverState({
                 isOpen: true,
@@ -415,12 +504,18 @@ const App: React.FC = () => {
                 mode: 'relationship'
             });
         } catch (error) {
-            console.error("Error loading relationship data", error);
-            setPopoverState(prev => ({ ...prev, loading: false }));
+            if (isCurrent()) {
+                setToast({ message: error instanceof Error ? error.message : 'Failed to explain the relationship.', type: 'error' });
+                setPopoverState(prev => ({ ...prev, loading: false }));
+            }
         }
     };
 
     const handleInspectFigure = async (figure: HistoricalFigure) => {
+        const version = operationVersion.current;
+        const request = ++popoverVersion.current;
+        const signal = operationController.current.signal;
+        const isCurrent = () => !signal.aborted && operationVersion.current === version && popoverVersion.current === request;
         setPopoverState({
             isOpen: true,
             target: figure,
@@ -452,9 +547,11 @@ const App: React.FC = () => {
 
         try {
             const [deepDiveData, detailsMap] = await Promise.all([
-                aiService.fetchFigureDeepDive(figure),
+                aiService.fetchFigureDeepDive(figure, signal),
                 fetchBatchFigureDetails([figure])
             ]);
+
+            if (!isCurrent()) return;
 
             if (deepDiveData) {
                 const detail = detailsMap.get(figure.id);
@@ -472,14 +569,20 @@ const App: React.FC = () => {
                     loading: false,
                     mode: 'single'
                 });
+            } else {
+                setPopoverState(previous => ({ ...previous, loading: false }));
+                setToast({ message: 'The model returned no biography.', type: 'error' });
             }
         } catch (error) {
-            console.error("Error inspecting figure", error);
-            setPopoverState(prev => ({ ...prev, loading: false }));
+            if (isCurrent()) {
+                setToast({ message: error instanceof Error ? error.message : 'Failed to inspect the figure.', type: 'error' });
+                setPopoverState(prev => ({ ...prev, loading: false }));
+            }
         }
     };
 
     const handleEmptyClick = () => {
+        cancelRelationshipAction();
         setRelationshipState(null);
         setSelectedFigures([]);
         setSelectedYear(null);
@@ -535,6 +638,7 @@ const App: React.FC = () => {
     }, []);
 
     const closePopover = () => {
+        popoverVersion.current++;
         setPopoverState(prev => ({ ...prev, isOpen: false }));
     };
 

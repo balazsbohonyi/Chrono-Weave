@@ -4,6 +4,7 @@ import { getTextColorForBackground } from '../utils/colors';
 import { FigureCategory, HistoricalFigure, LayoutData, ViewState } from '../types';
 import { CATEGORY_COLORS } from '../constants';
 import { formatYear } from '../utils/formatters';
+import { isTimelineFigureVisible } from '../utils/timelineFigures';
 import ActionBar from './ActionBar';
 
 interface TimelineCanvasProps {
@@ -464,8 +465,8 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
     const standardFigures: HistoricalFigure[] = [];
 
     figures.forEach(fig => {
-        // FILTER: Remove extremely short events < 3 years
-        if (fig.category === 'EVENTS' && (fig.deathYear - fig.birthYear < 3)) {
+        // Keep the canvas consistent with filtering of generated and cached timelines.
+        if (!isTimelineFigureVisible(fig)) {
             return;
         }
         if (priorityIds.has(fig.id)) {
@@ -1721,7 +1722,7 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
       </svg>
 
       {/* LAYER 3: Relationship SVG Overlay */}
-      {relationshipState && (
+      {relationshipState && relationshipState.relatedIds.length > 0 && (
         <svg className="absolute inset-0 pointer-events-none z-40 w-full h-full overflow-visible">
             {relationshipState.relatedIds.map(id => {
                 const layoutItem = layoutData.find(l => l.figure.id === id);
@@ -1836,7 +1837,7 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
       )}
 
       {/* LAYER 4: Floating Source Card */}
-      {relationshipState && (
+      {relationshipState && relationshipState.relatedIds.length > 0 && (
           <div 
             ref={floatingCardRef}
             className="absolute z-50 pointer-events-auto flex items-center gap-2 p-4 bg-white/90 backdrop-blur-md border border-gray-200 rounded-xl shadow-2xl w-fit"

@@ -10,7 +10,7 @@ export class GeminiService implements IAIService {
     private model: string;
 
     constructor(apiKey?: string, model?: string) {
-        this.apiKey = apiKey || process.env.API_KEY || '';
+        this.apiKey = apiKey ?? process.env.API_KEY ?? '';
         this.model = model || process.env.MODEL || "gemini-2.5-flash";
 
         if (this.apiKey) {
@@ -422,11 +422,14 @@ export class GeminiService implements IAIService {
             }));
 
             const result = JSON.parse(response.text || "{}");
-            return result.relatedIds || [];
+            if (!Array.isArray(result.relatedIds) || !result.relatedIds.every((id: unknown) => typeof id === 'string')) {
+                throw new Error('The model returned an invalid relationship map.');
+            }
+            return result.relatedIds;
 
         } catch (error) {
             console.error("Error fetching relationships:", error);
-            return [];
+            throw error;
         }
     }
 
@@ -477,7 +480,8 @@ export class GeminiService implements IAIService {
                 },
             }));
 
-            const rawData = JSON.parse(response.text || "[]");
+            const rawData = JSON.parse(response.text || "null");
+            if (!Array.isArray(rawData)) throw new Error('The model returned invalid discovery data.');
 
             return rawData.map((item: any, index: number) => ({
                 id: `${item.name.replace(/\s+/g, '-')}-${Date.now()}-${index}`, // Ensure unique ID
@@ -495,7 +499,7 @@ export class GeminiService implements IAIService {
 
         } catch (error) {
             console.error("Error discovering new figures:", error);
-            return [];
+            throw error;
         }
     }
 
