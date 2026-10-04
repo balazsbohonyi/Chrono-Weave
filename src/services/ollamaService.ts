@@ -1,10 +1,29 @@
-import { CATEGORY_LIST, HISTORICAL_EVENTS_COUNT, HISTORICAL_EVENTS_PER_CENTURY_CHUNK, HISTORICAL_FIGURES_COUNT, HISTORICAL_FIGURES_PER_CENTURY_CHUNK } from '../constants';
+import { parseRelationshipAssessment, RelationshipAssessmentError } from './relationshipAssessment';
+import {
+  TIMELINE_CHUNKING_THRESHOLD_YEARS,
+  TIMELINE_CHUNK_YEARS,
+  HISTORICAL_EVENTS_COUNT,
+  HISTORICAL_EVENTS_PER_CENTURY_CHUNK,
+  HISTORICAL_FIGURES_COUNT,
+  HISTORICAL_FIGURES_PER_CENTURY_CHUNK,
+  CATEGORY_LIST,
+} from '../constants';
+import {
+  buildPeoplePrompt,
+  buildEventsPrompt,
+  buildDiscoveryPrompt,
+  buildRelatedFiguresPrompt,
+  buildRelationshipExplanationPrompt,
+  buildDeepDivePrompt,
+  HISTORIAN_SYSTEM_PROMPT,
+  CONNECTION_TEST_PROMPT,
+  buildCorrectionPrompt,
+} from './prompts';
 import type { DeepDiveData, FigureCategory, HistoricalFigure, IAIService, RelationshipExplanation } from '../types';
 import { validateLocalUrl, type AppConfig } from '../utils/providerConfig';
-import { isTimelineFigureVisible, MIN_EVENT_DURATION } from '../utils/timelineFigures';
+import { isTimelineFigureVisible } from '../utils/timelineFigures';
 
 const RELAY = '/api/ollama/cloud';
-const SYSTEM_PROMPT = 'You are a careful historian. Return ONLY the requested valid JSON, without markdown or commentary. Use accurate historical dates and do not invent quotations.';
 
 function thinkingOptions(model: string, enabled = false): { think: 'low' | 'medium' | boolean } {
   // Use identical controls for direct cloud IDs and local cloud aliases.
@@ -146,11 +165,11 @@ export class OllamaService implements IAIService {
               model: this.config.model, stream: false,
               ...thinkingOptions(this.config.model, this.config.ollamaReasoning),
               messages: [
-                { role: 'system', content: SYSTEM_PROMPT },
+                { role: 'system', content: HISTORIAN_SYSTEM_PROMPT },
                 { role: 'user', content: prompt },
                 ...(validationError ? [
                   ...(previousContent ? [{ role: 'assistant', content: previousContent }] : []),
-                  { role: 'user', content: `The previous response was invalid: ${validationError}. Correct the response and return only the requested JSON. Preserve accurate historical dates; do not invent or stretch them.` },
+                  { role: 'user', content: buildCorrectionPrompt(validationError) },
                 ] : []),
               ],
             }, signal);
@@ -168,7 +187,13 @@ export class OllamaService implements IAIService {
           return validate(parseJson(previousContent));
         } catch (error) {
           validationError = error instanceof Error ? error.message : 'Invalid JSON response.';
-          if (correction === 1) throw new Error(`Model ${this.config.model} returned unusable data after a retry: ${validationError}`);
+          if (correction === 1) {
+            if (error instanceof RelationshipAssessmentError) throw error;
+            if (validate === parseRelationshipAssessment && error instanceof SyntaxError) {
+              throw new RelationshipAssessmentError('The model did not return valid JSON for this relationship.');
+            }
+            throw new Error(`Model ${this.config.model} returned unusable data after a retry: ${validationError}`);
+          }
         }
       }
       throw new Error('Ollama generation failed.');
@@ -186,7 +211,7 @@ export class OllamaService implements IAIService {
       // Historical JSON validation and its retries belong to the actual AI operations.
       const response = object(await this.request('chat', {
         model: this.config.model, stream: false, ...thinkingOptions(this.config.model, this.config.ollamaReasoning),
-        messages: [{ role: 'user', content: 'Reply with OK.' }],
+        messages: [{ role: 'user', content: CONNECTION_TEST_PROMPT }],
       }, combined));
       string(object(response.message).content, 'model response');
       if (response.done === false || response.done_reason === 'length') throw new Error('The model response was incomplete.');
@@ -219,27 +244,19 @@ export class OllamaService implements IAIService {
     return results;
   }
 
-  private peoplePrompt(start: number, end: number, count: number): string {
-    return `Generate exactly ${count} distinct, famous historical figures whose lives overlap ${start} to ${end}. Use integer birthYear/deathYear with birthYear <= deathYear, negative years for BCE and positive years for CE. For living people use ${new Date().getFullYear()} as deathYear; do not use 0 or null as an unknown date. Use occupation (max 3 words), description (max 25 words), and category from ${CATEGORY_LIST.filter(c => c !== 'EVENTS').join(', ')}. Return a JSON array of objects with keys name, birthYear, deathYear, occupation, description, category.`;
-  }
-
-  private eventsPrompt(start: number, end: number, count: number): string {
-    return `Generate up to ${count} major historical events overlapping ${start} to ${end}. Include only events with endYear - startYear >= ${MIN_EVENT_DURATION}; omit shorter events rather than stretching their actual dates. Return [] if none qualify. Use integer startYear/endYear with startYear <= endYear, negative years for BCE and positive years for CE. Use type (max 3 words), description (max 25 words), and category "EVENTS". Use ${new Date().getFullYear()} only for genuinely ongoing events. Return a JSON array of objects with keys name, startYear, endYear, type, description, category.`;
-  }
-
   async fetchHistoricalFigures(start: number, end: number, signal?: AbortSignal): Promise<HistoricalFigure[]> {
     if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start >= end) throw new Error('Enter a valid historical year range.');
     const results: HistoricalFigure[] = [];
-    if (end - start > 200) {
-      for (let year = start; year < end; year += 100) {
-        const chunkEnd = Math.min(year + 100, end);
-        results.push(...await this.generate(this.peoplePrompt(year, chunkEnd, HISTORICAL_FIGURES_PER_CENTURY_CHUNK), value => this.figures(value, year, chunkEnd, false), signal));
-        results.push(...await this.generate(this.eventsPrompt(year, chunkEnd, HISTORICAL_EVENTS_PER_CENTURY_CHUNK), value => this.figures(value, year, chunkEnd, true), signal));
+    if (end - start > TIMELINE_CHUNKING_THRESHOLD_YEARS) {
+      for (let year = start; year < end; year += TIMELINE_CHUNK_YEARS) {
+        const chunkEnd = Math.min(year + TIMELINE_CHUNK_YEARS, end);
+        results.push(...await this.generate(buildPeoplePrompt(year, chunkEnd, HISTORICAL_FIGURES_PER_CENTURY_CHUNK), value => this.figures(value, year, chunkEnd, false), signal));
+        results.push(...await this.generate(buildEventsPrompt(year, chunkEnd, HISTORICAL_EVENTS_PER_CENTURY_CHUNK), value => this.figures(value, year, chunkEnd, true), signal));
       }
     } else {
-      results.push(...await this.generate(this.peoplePrompt(start, end, HISTORICAL_FIGURES_COUNT), value => this.figures(value, start, end, false), signal));
+      results.push(...await this.generate(buildPeoplePrompt(start, end, HISTORICAL_FIGURES_COUNT), value => this.figures(value, start, end, false), signal));
     }
-    results.push(...await this.generate(this.eventsPrompt(start, end, HISTORICAL_EVENTS_COUNT), value => this.figures(value, start, end, true), signal));
+    results.push(...await this.generate(buildEventsPrompt(start, end, HISTORICAL_EVENTS_COUNT), value => this.figures(value, start, end, true), signal));
     const seen = new Set<string>();
     return results.filter(figure => {
       const key = `${figure.category === 'EVENTS' ? 'event' : 'person'}:${figure.name.toLowerCase().trim()}`;
@@ -259,8 +276,8 @@ export class OllamaService implements IAIService {
       const name = figure.name.trim().toLowerCase();
       names.set(name, [...(names.get(name) || []), figure.id]);
     });
-    const catalog = candidates.map(({ name, birthYear, deathYear }, index) => ({ id: `c${index + 1}`, name, birthYear, deathYear }));
-    return this.generate(`Identify significant connections to ${target.name} (${target.birthYear}-${target.deathYear}: met, influenced, fought, participated in). Candidates: ${JSON.stringify(catalog)}. Return a JSON object with relatedIds, an array of strings. Copy only the exact short candidate IDs (such as "c1") from this list, not names or invented IDs. Do not include ${target.name} itself. Return {"relatedIds":[]} if none are connected.`, value => {
+    const catalog = candidates.map(({ name, birthYear, deathYear, category }, index) => ({ id: `c${index + 1}`, name, birthYear, deathYear, category }));
+    return this.generate(buildRelatedFiguresPrompt(target, catalog), value => {
       const related = object(value).relatedIds;
       if (!Array.isArray(related) || !related.every(id => typeof id === 'string')) {
         throw new Error('Invalid relatedIds: expected an array of strings containing candidate IDs.');
@@ -283,7 +300,7 @@ export class OllamaService implements IAIService {
 
   async discoverRelatedFigures(target: HistoricalFigure, existingNames: string[], start: number, end: number, signal?: AbortSignal): Promise<HistoricalFigure[]> {
     const excluded = new Set(existingNames.map(name => name.trim().toLowerCase()));
-    return this.generate(`${this.peoplePrompt(start, end, 5)} These must be new figures significantly related to ${target.name}. Exclude ${JSON.stringify(existingNames)}. Return [] if no such figures exist.`, value => {
+    return this.generate(buildDiscoveryPrompt(target, existingNames, start, end), value => {
       const seen = new Set(excluded);
       return this.figures(value, start, end, false, true).filter(figure => {
         const key = figure.name.toLowerCase().trim();
@@ -294,11 +311,11 @@ export class OllamaService implements IAIService {
   }
 
   fetchRelationshipExplanation(source: HistoricalFigure, target: HistoricalFigure, signal?: AbortSignal): Promise<RelationshipExplanation> {
-    return this.generate(`Explain the historical relationship between ${source.name} and ${target.name}. Distinguish documented connections from indirect influence. Return a JSON object with summary (string) and sections (non-empty array of {title, content}, both strings).`, explanation, signal);
+    return this.generate(buildRelationshipExplanationPrompt(source, target), parseRelationshipAssessment, signal);
   }
 
   fetchFigureDeepDive(figure: HistoricalFigure, signal?: AbortSignal): Promise<DeepDiveData> {
-    return this.generate(`Historical analysis of ${figure.name}. Return a JSON object with summary (string), famousQuote (string; empty if no reliable quotation is known), and sections (non-empty array of {title, content}, both strings).`, value => ({
+    return this.generate(buildDeepDivePrompt(figure), value => ({
       ...explanation(value), famousQuote: string(object(value).famousQuote, 'famousQuote', true),
     }), signal);
   }

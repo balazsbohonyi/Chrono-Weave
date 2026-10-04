@@ -56,5 +56,7 @@ test('both dialog modes render model Markdown from existing data without changin
   assert.match(relationship, /<em>Target biography<\/em>/);
   assert.match(relationship, /<strong>Scientific influence<\/strong>/);
   assert.match(relationship, /<ol>/);
+  assert.doesNotMatch(relationship, />Focus<|>Connected To</);
+  assert.match(relationship, /role="dialog" aria-modal="true" aria-label="Relationship explanation"/);
   assert.equal(sections[0].content, '1. **Mechanics**\n2. *Astronomy*');
 });

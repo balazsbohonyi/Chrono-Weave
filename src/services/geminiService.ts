@@ -1,7 +1,25 @@
+import { generateRelationshipAssessment } from './relationshipAssessment';
 
 import { GenerateContentResponse, GoogleGenAI, Type } from "@google/genai";
 import { DeepDiveData, HistoricalFigure, IAIService, RelationshipExplanation } from "../types";
-import { CATEGORY_LIST, HISTORICAL_EVENTS_COUNT, HISTORICAL_EVENTS_PER_CENTURY_CHUNK, HISTORICAL_FIGURES_COUNT, HISTORICAL_FIGURES_PER_CENTURY_CHUNK } from "../constants";
+import {
+  TIMELINE_CHUNKING_THRESHOLD_YEARS,
+  TIMELINE_CHUNK_YEARS,
+  HISTORICAL_EVENTS_COUNT,
+  HISTORICAL_EVENTS_PER_CENTURY_CHUNK,
+  HISTORICAL_FIGURES_COUNT,
+  HISTORICAL_FIGURES_PER_CENTURY_CHUNK,
+} from '../constants';
+import {
+  buildPeoplePrompt,
+  buildEventsPrompt,
+  buildDiscoveryPrompt,
+  buildRelatedFiguresPrompt,
+  buildRelationshipExplanationPrompt,
+  buildDeepDivePrompt,
+  HISTORIAN_SYSTEM_PROMPT,
+  CONNECTION_TEST_PROMPT,
+} from './prompts';
 import { runWithRetry, enqueueTaskWithRetry } from "./utils";
 
 export class GeminiService implements IAIService {
@@ -31,7 +49,7 @@ export class GeminiService implements IAIService {
             // Quick test: generate a simple response with minimal tokens
             const response = await ai.models.generateContent({
                 model: this.model,
-                contents: "Say 'ok'",
+                contents: CONNECTION_TEST_PROMPT,
                 config: { responseMimeType: "text/plain" }
             });
 
@@ -62,19 +80,7 @@ export class GeminiService implements IAIService {
     }
 
     private async fetchFiguresChunk(start: number, end: number): Promise<HistoricalFigure[]> {
-        const prompt = `
-            Generate a list of exactly ${HISTORICAL_FIGURES_PER_CENTURY_CHUNK} distinct and famous historical figures (politicians, rulers, artists, scientists, etc.) 
-            who lived primarily between the years ${start} and ${end}.
-            
-            Strict rules:
-            1. The figure must have been alive for at least part of the range ${start}-${end}.
-            2. Birth year and death year must be integers. 
-            3. If the exact year is unknown, estimate it as an integer.
-            4. Do not include overlapping duplicates.
-            5. Provide a concise occupation (max 3 words).
-            6. Provide a short, interesting bio description (max 25 words).
-            7. Classify into exactly one category: ${CATEGORY_LIST.filter(c => c !== 'EVENTS').join(', ')}.
-        `;
+        const prompt = buildPeoplePrompt(start, end, HISTORICAL_FIGURES_PER_CENTURY_CHUNK);
 
         try {
             const ai = this.ensureAI();
@@ -83,6 +89,7 @@ export class GeminiService implements IAIService {
                 model: this.model,
                 contents: prompt,
                 config: {
+                    systemInstruction: HISTORIAN_SYSTEM_PROMPT,
                     responseMimeType: "application/json",
                     responseSchema: {
                         type: Type.ARRAY,
@@ -120,20 +127,7 @@ export class GeminiService implements IAIService {
     }
 
     private async fetchEventsChunk(start: number, end: number): Promise<HistoricalFigure[]> {
-        const prompt = `
-            Generate a list of exactly ${HISTORICAL_EVENTS_PER_CENTURY_CHUNK} MAJOR historical events (wars, treaties, movements, ages) 
-            that occurred between the years ${start} and ${end}.
-            
-            Strict rules:
-            1. The event must have occurred within ${start}-${end}.
-            2. The event MUST span at least 3 years. Exclude single-day battles or short events.
-            3. Start year and End year must be integers.
-            4. If the event is ongoing, set endYear to ${new Date().getFullYear()}.
-            5. Provide a concise type (max 3 words) e.g. "War", "Treaty".
-            6. Provide a short description (max 25 words).
-            7. Set category strictly to 'EVENTS'.
-            8. Select based on historical importance.
-        `;
+        const prompt = buildEventsPrompt(start, end, HISTORICAL_EVENTS_PER_CENTURY_CHUNK);
 
         try {
             const ai = this.ensureAI();
@@ -141,6 +135,7 @@ export class GeminiService implements IAIService {
                 model: this.model,
                 contents: prompt,
                 config: {
+                    systemInstruction: HISTORIAN_SYSTEM_PROMPT,
                     responseMimeType: "application/json",
                     responseSchema: {
                         type: Type.ARRAY,
@@ -183,34 +178,23 @@ export class GeminiService implements IAIService {
         // 1. Fetch People (Chunked if > 200 years, else standard)
         let peoplePromise: Promise<HistoricalFigure[]>;
 
-        if (endYear - startYear > 200) {
+        if (endYear - startYear > TIMELINE_CHUNKING_THRESHOLD_YEARS) {
             const chunks = [];
-            for (let y = startYear; y < endYear; y += 100) {
-                chunks.push({ start: y, end: Math.min(y + 100, endYear) });
+            for (let y = startYear; y < endYear; y += TIMELINE_CHUNK_YEARS) {
+                chunks.push({ start: y, end: Math.min(y + TIMELINE_CHUNK_YEARS, endYear) });
             }
             peoplePromise = Promise.all(chunks.map(chunk => this.fetchFiguresChunk(chunk.start, chunk.end)))
                 .then(results => results.flat());
         } else {
             // Standard single prompt
-            const peoplePrompt = `
-                Generate a list of exactly ${HISTORICAL_FIGURES_COUNT} distinct and famous historical figures (politicians, rulers, artists, scientists, etc.) 
-                who lived primarily between the years ${startYear} and ${endYear}.
-                
-                Strict rules:
-                1. The figure must have been alive for at least part of the range ${startYear}-${endYear}.
-                2. Birth year and death year must be integers. 
-                3. If the exact year is unknown, estimate it as an integer.
-                4. Do not include overlapping duplicates.
-                5. Provide a concise occupation (max 3 words).
-                6. Provide a short, interesting bio description (max 25 words).
-                7. Classify into exactly one category: ${CATEGORY_LIST.filter(c => c !== 'EVENTS').join(', ')}.
-            `;
+            const peoplePrompt = buildPeoplePrompt(startYear, endYear, HISTORICAL_FIGURES_COUNT);
 
             const ai = this.ensureAI();
             peoplePromise = enqueueTaskWithRetry<GenerateContentResponse>(() => ai.models.generateContent({
                 model,
                 contents: peoplePrompt,
                 config: {
+                    systemInstruction: HISTORIAN_SYSTEM_PROMPT,
                     responseMimeType: "application/json",
                     responseSchema: {
                         type: Type.ARRAY,
@@ -242,30 +226,18 @@ export class GeminiService implements IAIService {
             }).catch(() => []);
         }
 
-        // 2. Fetch Events (Mixed Strategy: Global + Chunked if > 200)
+        // 2. Fetch Events (Mixed Strategy: Global + Chunked if > TIMELINE_CHUNKING_THRESHOLD_YEARS)
         let eventsPromise: Promise<HistoricalFigure[]>;
 
         // Always fetch global events for continuity
-        const globalEventsPrompt = `
-            Generate a list of exactly ${HISTORICAL_EVENTS_COUNT} MAJOR historical events (wars, treaties, movements, ages) 
-            that occurred between the years ${startYear} and ${endYear}.
-            
-            Strict rules:
-            1. The event must have occurred within ${startYear}-${endYear}.
-            2. The event MUST span at least 3 years (e.g. 1939-1945). Exclude single-day battles or short events.
-            3. Start year and End year must be integers.
-            4. If the event is ongoing (relative to history or current day), set endYear to ${new Date().getFullYear()}.
-            5. Provide a concise type (max 3 words) e.g. "War", "Treaty".
-            6. Provide a short description (max 25 words).
-            7. Set category strictly to 'EVENTS'.
-            8. Select based on historical importance and longevity.
-        `;
+        const globalEventsPrompt = buildEventsPrompt(startYear, endYear, HISTORICAL_EVENTS_COUNT);
 
         const ai = this.ensureAI();
         const globalEventsPromise = enqueueTaskWithRetry<GenerateContentResponse>(() => ai.models.generateContent({
             model,
             contents: globalEventsPrompt,
             config: {
+                systemInstruction: HISTORIAN_SYSTEM_PROMPT,
                 responseMimeType: "application/json",
                 responseSchema: {
                     type: Type.ARRAY,
@@ -296,11 +268,11 @@ export class GeminiService implements IAIService {
             }));
         }).catch(() => []);
 
-        if (endYear - startYear > 200) {
+        if (endYear - startYear > TIMELINE_CHUNKING_THRESHOLD_YEARS) {
             // Also fetch chunks for better density
             const chunks = [];
-            for (let y = startYear; y < endYear; y += 100) {
-                chunks.push({ start: y, end: Math.min(y + 100, endYear) });
+            for (let y = startYear; y < endYear; y += TIMELINE_CHUNK_YEARS) {
+                chunks.push({ start: y, end: Math.min(y + TIMELINE_CHUNK_YEARS, endYear) });
             }
 
             const chunkEventsPromise = Promise.all(chunks.map(chunk => this.fetchEventsChunk(chunk.start, chunk.end)))
@@ -385,29 +357,19 @@ export class GeminiService implements IAIService {
 
     async fetchRelatedFigures(target: HistoricalFigure, allFigures: HistoricalFigure[]): Promise<string[]> {
         try {
-            // We only send names to save context
-            const candidates = allFigures.filter(f => f.id !== target.id).map(f => ({ id: f.id, name: f.name }));
+            // Send compact historical context without descriptions or images
+            const candidates = allFigures.filter(f => f.id !== target.id).map(({ id, name, birthYear, deathYear, category }) => ({ id, name, birthYear, deathYear, category }));
 
             if (candidates.length === 0) return [];
 
-            const prompt = `
-                I am analyzing: "${target.name}" (${target.occupation}, ${target.birthYear}-${target.deathYear}).
-                
-                Here is a list of other figures and events on my timeline:
-                ${JSON.stringify(candidates)}
-
-                Identify which of these figures "${target.name}" likely met, influenced, was influenced by, or fought with.
-                If the target is a person, also identify which EVENTS they participated in.
-                
-                Return a JSON object with a single property "relatedIds" which is an array of strings containing ONLY the 'id' of the related figures/events.
-                Be selective. Only include significant connections.
-            `;
+            const prompt = buildRelatedFiguresPrompt(target, candidates);
 
             const ai = this.ensureAI();
             const response = await enqueueTaskWithRetry<GenerateContentResponse>(() => ai.models.generateContent({
                 model: this.model,
                 contents: prompt,
                 config: {
+                    systemInstruction: HISTORIAN_SYSTEM_PROMPT,
                     responseMimeType: "application/json",
                     responseSchema: {
                         type: Type.OBJECT,
@@ -440,27 +402,14 @@ export class GeminiService implements IAIService {
         endYear: number
     ): Promise<HistoricalFigure[]> {
         try {
-            const prompt = `
-                I have a timeline focusing on ${target.name} (${target.birthYear}-${target.deathYear}).
-                
-                Find exactly 5 NEW historical figures who:
-                1. Had a direct and significant relationship with ${target.name} (friend, rival, student, teacher, family).
-                2. Lived primarily between ${startYear} and ${endYear}.
-                3. Are NOT in this list: ${JSON.stringify(existingNames)}.
-                
-                Strict rules:
-                1. Provide a concise occupation (max 3 words).
-                2. Provide a short, interesting bio description (max 25 words).
-                3. Classify into exactly one category: ${CATEGORY_LIST.filter(c => c !== 'EVENTS').join(', ')}.
-                
-                Strictly formatted as JSON array.
-            `;
+            const prompt = buildDiscoveryPrompt(target, existingNames, startYear, endYear);
 
             const ai = this.ensureAI();
             const response = await enqueueTaskWithRetry<GenerateContentResponse>(() => ai.models.generateContent({
                 model: this.model,
                 contents: prompt,
                 config: {
+                    systemInstruction: HISTORIAN_SYSTEM_PROMPT,
                     responseMimeType: "application/json",
                     responseSchema: {
                         type: Type.ARRAY,
@@ -505,66 +454,57 @@ export class GeminiService implements IAIService {
 
     async fetchRelationshipExplanation(source: HistoricalFigure, target: HistoricalFigure): Promise<RelationshipExplanation | null> {
         try {
-            const prompt = `
-                Explain the historical relationship between ${source.name} (${source.birthYear}-${source.deathYear}) and ${target.name} (${target.birthYear}-${target.deathYear}).
-                
-                Provide the output in JSON format with:
-                1. "summary": A 1-2 sentence high-level summary of their connection.
-                2. "sections": An array of objects, each having a "title" (e.g., "Direct Interactions", "Intellectual Influence", "Conflict", "Legacy") and "content" (a paragraph explaining that aspect).
-                
-                Ensure the tone is educational and historical.
-            `;
+            const prompt = buildRelationshipExplanationPrompt(source, target);
 
             const ai = this.ensureAI();
-            const response = await enqueueTaskWithRetry<GenerateContentResponse>(() => ai.models.generateContent({
-                model: this.model,
-                contents: prompt,
-                config: {
-                    responseMimeType: "application/json",
-                    responseSchema: {
-                        type: Type.OBJECT,
-                        properties: {
-                            summary: { type: Type.STRING },
-                            sections: {
-                                type: Type.ARRAY,
-                                items: {
-                                    type: Type.OBJECT,
-                                    properties: {
-                                        title: { type: Type.STRING },
-                                        content: { type: Type.STRING }
-                                    },
-                                    required: ["title", "content"]
+            return await generateRelationshipAssessment(async correction => {
+                const response = await enqueueTaskWithRetry<GenerateContentResponse>(() => ai.models.generateContent({
+                    model: this.model,
+                    contents: correction ? `${prompt}\n${correction}` : prompt,
+                    config: {
+                        systemInstruction: HISTORIAN_SYSTEM_PROMPT,
+                        responseMimeType: "application/json",
+                        responseSchema: {
+                            type: Type.OBJECT,
+                            properties: {
+                                isRelevant: { type: Type.BOOLEAN },
+                                evidence: { type: Type.STRING },
+                                summary: { type: Type.STRING },
+                                sections: {
+                                    type: Type.ARRAY,
+                                    items: {
+                                        type: Type.OBJECT,
+                                        properties: {
+                                            title: { type: Type.STRING },
+                                            content: { type: Type.STRING }
+                                        },
+                                        required: ["title", "content"]
+                                    }
                                 }
-                            }
-                        },
-                        required: ["summary", "sections"]
+                            },
+                            required: ["isRelevant", "evidence", "summary", "sections"]
+                        }
                     }
-                }
-            }));
+                }));
 
-            return JSON.parse(response.text || "null");
+                return JSON.parse(response.text || "null");
+            });
         } catch (error) {
             console.error("Error fetching relationship explanation:", error);
-            return null;
+            throw error;
         }
     }
 
     async fetchFigureDeepDive(figure: HistoricalFigure): Promise<DeepDiveData | null> {
         try {
-            const prompt = `
-                Provide a detailed historical analysis of ${figure.name} (${figure.birthYear}-${figure.deathYear}, ${figure.occupation}).
-                
-                Return a JSON object with:
-                1. "summary": A comprehensive summary of their life and major impact (max 60 words).
-                2. "famousQuote": A short, verified, and famous quote attributed to them (or a very short description of their philosophy if no quote exists).
-                3. "sections": An array of 4 sections, specifically: "Early Life", "Major Achievements", "Key Relationships", and "Historical Legacy". Each content should be a substantial paragraph.
-            `;
+            const prompt = buildDeepDivePrompt(figure);
 
             const ai = this.ensureAI();
             const response = await enqueueTaskWithRetry<GenerateContentResponse>(() => ai.models.generateContent({
                 model: this.model,
                 contents: prompt,
                 config: {
+                    systemInstruction: HISTORIAN_SYSTEM_PROMPT,
                     responseMimeType: "application/json",
                     responseSchema: {
                         type: Type.OBJECT,

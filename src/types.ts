@@ -56,6 +56,9 @@ export interface DeepDiveData {
 }
 
 export interface RelationshipExplanation {
+    // Optional for compatibility with explanations cached before relevance checks.
+    isRelevant?: boolean;
+    evidence?: string;
     summary: string;
     sections: { title: string; content: string }[];
 }

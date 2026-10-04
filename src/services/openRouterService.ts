@@ -1,6 +1,24 @@
+import { generateRelationshipAssessment } from './relationshipAssessment';
 
 import { DeepDiveData, FigureCategory, HistoricalFigure, IAIService, RelationshipExplanation } from "../types";
-import { CATEGORY_LIST, HISTORICAL_EVENTS_COUNT, HISTORICAL_EVENTS_PER_CENTURY_CHUNK, HISTORICAL_FIGURES_COUNT, HISTORICAL_FIGURES_PER_CENTURY_CHUNK } from "../constants";
+import {
+  TIMELINE_CHUNKING_THRESHOLD_YEARS,
+  TIMELINE_CHUNK_YEARS,
+  HISTORICAL_EVENTS_COUNT,
+  HISTORICAL_EVENTS_PER_CENTURY_CHUNK,
+  HISTORICAL_FIGURES_COUNT,
+  HISTORICAL_FIGURES_PER_CENTURY_CHUNK,
+} from '../constants';
+import {
+  buildPeoplePrompt,
+  buildEventsPrompt,
+  buildDiscoveryPrompt,
+  buildRelatedFiguresPrompt,
+  buildRelationshipExplanationPrompt,
+  buildDeepDivePrompt,
+  HISTORIAN_SYSTEM_PROMPT,
+  CONNECTION_TEST_PROMPT,
+} from './prompts';
 import { runWithRetry, enqueueTaskWithRetry } from "./utils";
 
 export class OpenRouterService implements IAIService {
@@ -25,7 +43,7 @@ export class OpenRouterService implements IAIService {
                 },
                 body: JSON.stringify({
                     model: this.model,
-                    messages: [{ role: "user", content: "Say 'ok'" }],
+                    messages: [{ role: "user", content: CONNECTION_TEST_PROMPT }],
                     max_tokens: 5
                 })
             });
@@ -97,9 +115,9 @@ export class OpenRouterService implements IAIService {
         throw new Error("Failed to parse JSON from OpenRouter response");
     }
 
-    private async callOpenRouter(prompt: string, systemPrompt?: string): Promise<any> {
+    private async callOpenRouter(prompt: string): Promise<any> {
         const messages = [];
-        if (systemPrompt) messages.push({ role: "system", content: systemPrompt });
+        messages.push({ role: "system", content: HISTORIAN_SYSTEM_PROMPT });
         messages.push({ role: "user", content: prompt });
 
         const response = await fetch(this.baseUrl, {
@@ -127,21 +145,10 @@ export class OpenRouterService implements IAIService {
     }
 
     private async fetchFiguresChunk(start: number, end: number): Promise<HistoricalFigure[]> {
-        const prompt = `
-            Generate a list of exactly ${HISTORICAL_FIGURES_PER_CENTURY_CHUNK} distinct and famous historical figures.
-            Range: ${start}-${end}.
-            Rules:
-            1. Integers for birth/death.
-            2. Concise occupation (max 3 words).
-            3. Short bio (max 25 words).
-            4. Classify category from: ${CATEGORY_LIST.filter(c => c !== 'EVENTS').join(', ')}.
-            
-            CRITICAL: Return ONLY valid JSON. ALL string values MUST be in double quotes. Do NOT wrap in markdown code blocks.
-            Return JSON array of objects with keys: "name", "birthYear", "deathYear", "occupation", "description", "category".
-        `;
+        const prompt = buildPeoplePrompt(start, end, HISTORICAL_FIGURES_PER_CENTURY_CHUNK);
 
         try {
-            const peopleData = await runWithRetry(() => this.callOpenRouter(prompt, "You are a strict JSON generator. Output ONLY valid JSON arrays. ALL string values MUST be properly quoted. Do NOT use markdown."));
+            const peopleData = await runWithRetry(() => this.callOpenRouter(prompt));
 
             if (!Array.isArray(peopleData)) return [];
 
@@ -161,22 +168,9 @@ export class OpenRouterService implements IAIService {
     }
 
     private async fetchEventsChunk(start: number, end: number): Promise<HistoricalFigure[]> {
-        const prompt = `
-            Generate a list of exactly ${HISTORICAL_EVENTS_PER_CENTURY_CHUNK} MAJOR historical events.
-            Range: ${start}-${end}.
-            Rules:
-            1. Integers for startYear/endYear.
-            2. Duration MUST be >= 3 years.
-            3. If ongoing, set endYear to ${new Date().getFullYear()}.
-            4. Type (max 3 words).
-            5. Short description (max 25 words).
-            6. Category MUST be 'EVENTS'.
-            
-            CRITICAL: Return ONLY valid JSON. ALL string values MUST be in double quotes. Do NOT wrap in markdown code blocks.
-            Return JSON array of objects with keys: "name", "startYear", "endYear", "type", "description", "category".
-        `;
+        const prompt = buildEventsPrompt(start, end, HISTORICAL_EVENTS_PER_CENTURY_CHUNK);
         try {
-            const eventsData = await runWithRetry(() => this.callOpenRouter(prompt, "You are a strict JSON generator. Output ONLY valid JSON arrays. ALL string values MUST be properly quoted. Do NOT use markdown."));
+            const eventsData = await runWithRetry(() => this.callOpenRouter(prompt));
             if (Array.isArray(eventsData)) {
                 return eventsData.map((item: any, index: number) => ({
                     id: `e-${item.name.replace(/\s+/g, '-')}-${start}-${index}`,
@@ -198,11 +192,11 @@ export class OpenRouterService implements IAIService {
     async fetchHistoricalFigures(startYear: number, endYear: number): Promise<HistoricalFigure[]> {
         let figures: HistoricalFigure[] = [];
 
-        // 1. Fetch People (Chunked if > 200)
-        if (endYear - startYear > 200) {
+        // 1. Fetch People (Chunked if > TIMELINE_CHUNKING_THRESHOLD_YEARS)
+        if (endYear - startYear > TIMELINE_CHUNKING_THRESHOLD_YEARS) {
             const chunks = [];
-            for (let y = startYear; y < endYear; y += 100) {
-                chunks.push({ start: y, end: Math.min(y + 100, endYear) });
+            for (let y = startYear; y < endYear; y += TIMELINE_CHUNK_YEARS) {
+                chunks.push({ start: y, end: Math.min(y + TIMELINE_CHUNK_YEARS, endYear) });
             }
             try {
                 const chunkResults = await Promise.all(chunks.map(chunk => this.fetchFiguresChunk(chunk.start, chunk.end)));
@@ -211,20 +205,9 @@ export class OpenRouterService implements IAIService {
                 console.error("Chunk fetch failed", e);
             }
         } else {
-            const peoplePrompt = `
-                Generate a list of exactly ${HISTORICAL_FIGURES_COUNT} distinct and famous historical figures.
-                Range: ${startYear}-${endYear}.
-                Rules:
-                1. Integers for birth/death.
-                2. Concise occupation (max 3 words).
-                3. Short bio (max 25 words).
-                4. Classify category from: ${CATEGORY_LIST.filter(c => c !== 'EVENTS').join(', ')}.
-                
-                CRITICAL: Return ONLY valid JSON. ALL string values MUST be in double quotes. Do NOT wrap in markdown code blocks.
-                Return JSON array of objects with keys: "name", "birthYear", "deathYear", "occupation", "description", "category".
-            `;
+            const peoplePrompt = buildPeoplePrompt(startYear, endYear, HISTORICAL_FIGURES_COUNT);
             try {
-                const peopleData = await enqueueTaskWithRetry(() => this.callOpenRouter(peoplePrompt, "You are a strict JSON generator. Output ONLY valid JSON arrays. ALL string values MUST be properly quoted. Do NOT use markdown."));
+                const peopleData = await enqueueTaskWithRetry(() => this.callOpenRouter(peoplePrompt));
                 if (Array.isArray(peopleData)) {
                     figures = figures.concat(peopleData.map((item: any, index: number) => ({
                         id: `p-${item.name.replace(/\s+/g, '-')}-${index}`,
@@ -240,22 +223,10 @@ export class OpenRouterService implements IAIService {
         }
 
         // 2. Fetch Events
-        const globalEventsPrompt = `
-            Generate a list of exactly ${HISTORICAL_EVENTS_COUNT} MAJOR historical events.
-            Range: ${startYear}-${endYear}.
-            Rules:
-            1. Integers for startYear/endYear.
-            2. Duration MUST be >= 3 years.
-            3. If ongoing, set endYear to ${new Date().getFullYear()}.
-            4. Type (max 3 words).
-            5. Short description (max 25 words).
-            6. Category MUST be 'EVENTS'.
-            
-            Return JSON array of objects with keys: "name", "startYear", "endYear", "type", "description", "category".
-        `;
+        const globalEventsPrompt = buildEventsPrompt(startYear, endYear, HISTORICAL_EVENTS_COUNT);
 
         let rawEvents: HistoricalFigure[] = [];
-        const globalEventsPromise = enqueueTaskWithRetry(() => this.callOpenRouter(globalEventsPrompt, "You are a JSON generator. Strictly output valid JSON arrays."))
+        const globalEventsPromise = enqueueTaskWithRetry(() => this.callOpenRouter(globalEventsPrompt))
             .then((eventsData: any) => {
                 if (Array.isArray(eventsData)) {
                     return eventsData.map((item: any, index: number) => ({
@@ -272,10 +243,10 @@ export class OpenRouterService implements IAIService {
             })
             .catch(() => []);
 
-        if (endYear - startYear > 200) {
+        if (endYear - startYear > TIMELINE_CHUNKING_THRESHOLD_YEARS) {
             const chunks = [];
-            for (let y = startYear; y < endYear; y += 100) {
-                chunks.push({ start: y, end: Math.min(y + 100, endYear) });
+            for (let y = startYear; y < endYear; y += TIMELINE_CHUNK_YEARS) {
+                chunks.push({ start: y, end: Math.min(y + TIMELINE_CHUNK_YEARS, endYear) });
             }
             const chunkEventsPromise = Promise.all(chunks.map(chunk => this.fetchEventsChunk(chunk.start, chunk.end)))
                 .then(results => results.flat());
@@ -347,18 +318,13 @@ export class OpenRouterService implements IAIService {
     }
 
     async fetchRelatedFigures(target: HistoricalFigure, allFigures: HistoricalFigure[]): Promise<string[]> {
-        const candidates = allFigures.filter(f => f.id !== target.id).map(f => ({ id: f.id, name: f.name }));
+        const candidates = allFigures.filter(f => f.id !== target.id).map(({ id, name, birthYear, deathYear, category }) => ({ id, name, birthYear, deathYear, category }));
         if (candidates.length === 0) return [];
 
-        const prompt = `
-            I am analyzing: "${target.name}".
-            List of others: ${JSON.stringify(candidates)}
-            Identify significant connections (met, influenced, fought, participated in).
-            Return JSON object with property "relatedIds" (array of strings).
-        `;
+        const prompt = buildRelatedFiguresPrompt(target, candidates);
 
         try {
-            const result = await enqueueTaskWithRetry(() => this.callOpenRouter(prompt, "You are a JSON generator. Output valid JSON."));
+            const result = await enqueueTaskWithRetry(() => this.callOpenRouter(prompt));
             if (!Array.isArray(result.relatedIds) || !result.relatedIds.every((id: unknown) => typeof id === 'string')) {
                 throw new Error('The model returned an invalid relationship map.');
             }
@@ -370,16 +336,10 @@ export class OpenRouterService implements IAIService {
     }
 
     async discoverRelatedFigures(target: HistoricalFigure, existingNames: string[], startYear: number, endYear: number): Promise<HistoricalFigure[]> {
-        const prompt = `
-            Timeline focus: ${target.name}.
-            Find 5 NEW figures related to target within ${startYear}-${endYear}.
-            Exclude: ${JSON.stringify(existingNames)}.
-            Category from: ${CATEGORY_LIST.filter(c => c !== 'EVENTS').join(', ')}.
-            Return JSON array of objects: "name", "birthYear", "deathYear", "occupation", "description", "category".
-        `;
+        const prompt = buildDiscoveryPrompt(target, existingNames, startYear, endYear);
 
         try {
-            const rawData = await enqueueTaskWithRetry(() => this.callOpenRouter(prompt, "You are a JSON generator. Output valid JSON arrays."));
+            const rawData = await enqueueTaskWithRetry(() => this.callOpenRouter(prompt));
             if (!Array.isArray(rawData)) throw new Error('The model returned invalid discovery data.');
 
             return rawData.map((item: any, index: number) => ({
@@ -402,25 +362,20 @@ export class OpenRouterService implements IAIService {
     }
 
     async fetchRelationshipExplanation(source: HistoricalFigure, target: HistoricalFigure): Promise<RelationshipExplanation | null> {
-        const prompt = `
-            Explain relationship between ${source.name} and ${target.name}.
-            Return JSON: "summary" (string), "sections" (array of {title, content}).
-        `;
+        const prompt = buildRelationshipExplanationPrompt(source, target);
         try {
-            return await enqueueTaskWithRetry(() => this.callOpenRouter(prompt, "You are a JSON generator. Output valid JSON."));
+            return await generateRelationshipAssessment(correction =>
+                enqueueTaskWithRetry(() => this.callOpenRouter(correction ? `${prompt}\n${correction}` : prompt)));
         } catch (error) {
             console.error("OpenRouter fetchRelationshipExplanation error:", error);
-            return null;
+            throw error;
         }
     }
 
     async fetchFigureDeepDive(figure: HistoricalFigure): Promise<DeepDiveData | null> {
-        const prompt = `
-            Historical analysis of ${figure.name}.
-            Return JSON: "summary" (string), "famousQuote" (string), "sections" (array of {title, content}).
-        `;
+        const prompt = buildDeepDivePrompt(figure);
         try {
-            return await enqueueTaskWithRetry(() => this.callOpenRouter(prompt, "You are a JSON generator. Output valid JSON."));
+            return await enqueueTaskWithRetry(() => this.callOpenRouter(prompt));
         } catch (error) {
             console.error("OpenRouter fetchFigureDeepDive error:", error);
             return null;

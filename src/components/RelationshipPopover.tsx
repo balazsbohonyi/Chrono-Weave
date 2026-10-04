@@ -114,8 +114,16 @@ const RelationshipPopover: React.FC<RelationshipPopoverProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="relative w-full max-w-5xl max-h-[90vh] flex flex-col">
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-in fade-in duration-200"
+      onClick={event => { if (event.target === event.currentTarget) onClose(); }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={mode === 'relationship' ? 'Relationship explanation' : 'Historical details'}
+        className="relative w-full max-w-5xl max-h-[90vh] flex flex-col"
+      >
         
         {/* Close Button */}
         <button 
@@ -135,7 +143,6 @@ const RelationshipPopover: React.FC<RelationshipPopoverProps> = ({
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 relative">
                         <FigureCard 
                             figure={source} 
-                            label="Focus" 
                             color="emerald" 
                             detail={isRelationshipData(data) ? data.sourceDetail : undefined} 
                         />
@@ -148,34 +155,31 @@ const RelationshipPopover: React.FC<RelationshipPopoverProps> = ({
 
                         <FigureCard 
                             figure={target} 
-                            label="Connected To" 
                             color="blue" 
                             detail={isRelationshipData(data) ? data.targetDetail : undefined} 
                         />
                     </div>
                 ) : mode === 'single' && target ? (
-                    <div className="relative block w-full mb-2">
-                        {/* Header Image - Floated Right */}
+                    <div className={`grid grid-cols-1 gap-6 items-start ${target.imageUrl
+                        ? 'md:grid-cols-[minmax(0,3fr)_minmax(0,4fr)_7rem]'
+                        : 'md:grid-cols-[minmax(0,3fr)_minmax(0,4fr)]'}`}>
+                        <div className="min-w-0 space-y-2">
+                            <h2 className="text-2xl font-bold text-gray-900 leading-tight break-words">{target.name}</h2>
+                            <p className="text-sm text-emerald-800 font-bold uppercase tracking-wide">{target.occupation}</p>
+                            <p className="text-base text-gray-500 font-mono font-semibold">
+                                    {formatYear(target.birthYear)} — {formatYear(target.deathYear)}
+                            </p>
+                        </div>
+
+                        <MarkdownContent className="min-w-0 text-base text-gray-700 leading-relaxed font-sans">
+                            {target.shortDescription || (isDeepDiveData(data) ? data.summary : "Loading details...")}
+                        </MarkdownContent>
+
                         {target.imageUrl && (
-                            <div className="float-right ml-6 mb-2 w-28 h-28 bg-gray-200 rounded-md overflow-hidden shadow-sm border border-gray-100">
+                            <div className="w-28 h-28 bg-gray-200 rounded-md overflow-hidden shadow-sm border border-gray-100">
                                 <img src={target.imageUrl} alt={target.name} className="w-full h-full object-cover object-top" />
                             </div>
                         )}
-
-                        {/* Header Text */}
-                        <div className="block pt-2">
-                            <div className="flex flex-wrap items-baseline gap-x-2 mb-1">
-                                <h2 className="text-3xl font-bold text-gray-900 leading-tight">{target.name}</h2>
-                                <span className="text-base text-gray-500 font-mono font-semibold whitespace-nowrap">
-                                    {formatYear(target.birthYear)} — {formatYear(target.deathYear)}
-                                </span>
-                            </div>
-                            <p className="text-sm text-emerald-800 font-bold uppercase tracking-wide mb-2">{target.occupation}</p>
-                            
-                            <MarkdownContent className="text-base text-gray-700 leading-relaxed font-sans max-w-2xl">
-                                {target.shortDescription || (isDeepDiveData(data) ? data.summary : "Loading details...")}
-                            </MarkdownContent>
-                        </div>
                     </div>
                 ) : null}
             </div>
@@ -193,12 +197,10 @@ const RelationshipPopover: React.FC<RelationshipPopoverProps> = ({
 
 const FigureCard: React.FC<{ 
     figure: HistoricalFigure; 
-    label: string; 
     color: 'emerald' | 'blue';
     detail?: { description: string; imageUrl: string | null };
-}> = ({ figure, label, color, detail }) => {
+}> = ({ figure, color, detail }) => {
     const borderColor = color === 'emerald' ? 'border-emerald-200' : 'border-blue-200';
-    const badgeColor = color === 'emerald' ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800';
     const occupationColor = color === 'emerald' ? 'text-emerald-800' : 'text-blue-800';
 
     return (
@@ -212,10 +214,6 @@ const FigureCard: React.FC<{
 
             {/* Content */}
             <div className="block">
-                <span className={`inline-block mb-2 text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded ${badgeColor}`}>
-                    {label}
-                </span>
-                
                 <div className="flex flex-wrap items-baseline gap-x-2 mt-1">
                     <h3 className="font-bold text-gray-900 text-xl leading-tight">{figure.name}</h3>
                     <span className="text-sm text-gray-500 font-mono font-semibold whitespace-nowrap">

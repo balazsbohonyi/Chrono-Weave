@@ -27,8 +27,8 @@ The app uses Google Gemini, OpenRouter, or Ollama to generate historical data an
 - Visualize historical figures and events as bars on a horizontal timeline
 - Zoom and pan the canvas for detailed exploration
 - Color-coded by category (Artists, Scientists, Leaders, Writers, etc.)
-- Click on years to see all figures active during that period
-- Hover over figures to reveal action options
+- Ctrl+click (Command+click on macOS) to select a year; Alt+click to clear it
+- Click a figure to open its actions; press Escape or click away to dismiss them
 
 ### 🔗 Relationship Mapping
 - **Map Relationships**: Click "Map Relationships" to visualize connections between a figure and related historical figures
@@ -164,6 +164,10 @@ Both development and production modes work identically:
 **Connection Testing**: The Test button validates your API credentials and model without saving changes. Success/error messages appear as toast notifications.
 
 **Current Configuration Display**: The dialog shows which provider and model are currently active (from environment or localStorage).
+
+### AI prompt configuration
+
+Shared prompt wording lives in [`src/services/prompts.ts`](src/services/prompts.ts). Counts, word limits, chunking rules, event duration, and deep-dive sections live in [`src/constants.ts`](src/constants.ts). See the [AI prompt guide](docs/ai-prompts.md) for selection rules, generation targets, provider JSON handling, and cache behavior.
 
 ### Ollama setup
 

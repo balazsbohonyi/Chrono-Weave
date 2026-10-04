@@ -1,6 +1,8 @@
 import type { HistoricalFigure } from '../types';
 
-export const MIN_EVENT_DURATION = 3;
+import { MIN_EVENT_DURATION } from '../constants';
+
+export { MIN_EVENT_DURATION } from '../constants';
 
 export function isTimelineFigureVisible(figure: HistoricalFigure): boolean {
   return !!figure && figure.birthYear <= figure.deathYear &&

@@ -19,3 +19,5 @@ export const figure = { id: 'ada', name: person.name, birthYear: person.birthYea
 export const event = { name: 'Industrial Revolution', startYear: 1760, endYear: 1840, type: 'Industrial transformation', description: 'Expansion of mechanized production.', category: 'EVENTS' };
 export const sections = { summary: 'Historical summary.', sections: [{ title: 'Context', content: 'Historical context.' }] };
 export const chatResponse = (data: unknown) => Response.json({ message: { content: JSON.stringify(data) }, done: true });
+
+export const relationship = { ...sections, isRelevant: true, evidence: 'Ada Lovelace published notes on Charles Babbage\'s Analytical Engine.' };

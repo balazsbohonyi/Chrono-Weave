@@ -9,8 +9,6 @@ interface ActionBarProps {
     onInspect: (figure: HistoricalFigure) => void;
     isDiscovering: boolean;
     style: React.CSSProperties;
-    onMouseEnter: () => void;
-    onMouseLeave: () => void;
 }
 
 const ActionBar: React.FC<ActionBarProps> = ({
@@ -19,9 +17,7 @@ const ActionBar: React.FC<ActionBarProps> = ({
     onTrace,
     onInspect,
     isDiscovering,
-    style,
-    onMouseEnter,
-    onMouseLeave
+    style
 }) => {
 
     // Prevent events from reaching the canvas
@@ -39,10 +35,9 @@ const ActionBar: React.FC<ActionBarProps> = ({
 
     return (
         <div
+            data-figure-actions
             className="absolute z-[60] flex flex-col animate-in fade-in zoom-in-95 duration-200 origin-top-left cursor-default"
             style={style}
-            onMouseEnter={onMouseEnter}
-            onMouseLeave={onMouseLeave}
             onPointerDown={preventCanvasInteraction}
             onPointerUp={preventCanvasInteraction}
             onClick={preventCanvasInteraction}

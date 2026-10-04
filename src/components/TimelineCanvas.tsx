@@ -1,8 +1,7 @@
 
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { getTextColorForBackground } from '../utils/colors';
 import { FigureCategory, HistoricalFigure, LayoutData, ViewState } from '../types';
-import { CATEGORY_COLORS } from '../constants';
+import { CATEGORY_COLORS, CATEGORY_BAR_TEXT_COLORS } from '../constants';
 import { formatYear } from '../utils/formatters';
 import { isTimelineFigureVisible } from '../utils/timelineFigures';
 import ActionBar from './ActionBar';
@@ -395,13 +394,35 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
   const [cursorX, setCursorX] = useState<number | null>(null);
   const [hoverYearVal, setHoverYearVal] = useState<number | null>(null);
 
-  // Discovery Action Bar State
-  const [hoveredFigureId, setHoveredFigureId] = useState<string | null>(null);
+  // Figure actions stay open until Escape or an explicit click away.
+  const [actionFigureId, setActionFigureId] = useState<string | null>(null);
   const [actionBarCoords, setActionBarCoords] = useState<{top: number, left: number} | null>(null);
-  const currentMousePosRef = useRef({ x: 0, y: 0 });
-  
-  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!actionFigureId) return;
+    const dismiss = () => {
+      setActionFigureId(null);
+      setActionBarCoords(null);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') dismiss();
+    };
+    const handleClickAway = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (containerRef.current?.contains(target)) {
+        if (target.closest('[data-figure-actions]')) return;
+        if (target.closest('[data-figure-id]') && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) return;
+      }
+      dismiss();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('pointerdown', handleClickAway, true);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('pointerdown', handleClickAway, true);
+    };
+  }, [actionFigureId]);
 
   const floatingCardRef = useRef<HTMLDivElement>(null);
   const [activeCardWidth, setActiveCardWidth] = useState(FLOATING_CARD_WIDTH);
@@ -1082,14 +1103,12 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
             return;
         }
 
-        if (shouldConsumeForSearch) {
-            return;
-        }
-
         // HIT TEST FOR FIGURE
         // Because of pointer capture on container, the e.target will likely be the container.
         // We use elementFromPoint to find what is visually under the cursor.
         const figureId = hitElement?.closest('[data-figure-id]')?.getAttribute('data-figure-id');
+
+        if (shouldConsumeForSearch && !figureId) return;
         
         if (figureId) {
              const figure = figures.find(f => f.id === figureId);
@@ -1097,17 +1116,27 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
              if (figure && relationshipState) {
                  // If it's one of the related figures, trigger the click
                  if (relationshipState.relatedIds.includes(figureId)) {
+                    setActionFigureId(null);
+                    setActionBarCoords(null);
                     onRelationshipClick(figure);
                     return; 
                  }
-                 // If not related, we let it fall through to empty click (below) which clears state
+             }
+             if (figure && onDiscover && onTrace && onInspect && !isDiscovering) {
+                 if (relationshipState) onEmptyClick();
+                 const rect = containerRef.current!.getBoundingClientRect();
+                 setActionFigureId(figureId);
+                 setActionBarCoords({
+                     left: Math.max(0, Math.min(e.clientX - rect.left, rect.width - 240)),
+                     top: Math.max(0, Math.min(e.clientY - rect.top, rect.height - 140))
+                 });
+                 return;
              }
         }
 
-        // Preserve existing relationship-mode empty-click clearing. Outside
-        // relationship mode, an ordinary click is intentionally a no-op so it
-        // remains available for a future interaction.
-        if (relationshipState) {
+        setActionFigureId(null);
+        setActionBarCoords(null);
+        if (relationshipState || discoverySourceId) {
             onEmptyClick();
         }
     }
@@ -1115,7 +1144,6 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
 
   const handlePointerMove = (e: React.PointerEvent) => {
     e.preventDefault();
-    currentMousePosRef.current = { x: e.clientX, y: e.clientY };
 
     // Update stored pointer position
     if (activePointersRef.current.has(e.pointerId)) {
@@ -1210,52 +1238,6 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
     }
   };
 
-  const handleBarEnter = (e: React.PointerEvent, figureId: string) => {
-      if (isDiscovering || isBusy) return;
-      if (hideTimerRef.current) {
-          clearTimeout(hideTimerRef.current);
-          hideTimerRef.current = null;
-      }
-      if (hoveredFigureId !== figureId) {
-          if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
-          hoverTimerRef.current = setTimeout(() => {
-              setHoveredFigureId(figureId);
-              setActionBarCoords({
-                  left: currentMousePosRef.current.x,
-                  top: currentMousePosRef.current.y
-              });
-          }, 500); 
-      }
-  };
-
-  const handleBarLeave = () => {
-      if (isDiscovering || isBusy) return; 
-      if (hoverTimerRef.current) {
-          clearTimeout(hoverTimerRef.current);
-          hoverTimerRef.current = null;
-      }
-      hideTimerRef.current = setTimeout(() => {
-          setHoveredFigureId(null);
-          setActionBarCoords(null);
-      }, 200);
-  };
-
-  const handleActionBarEnter = () => {
-      if (hideTimerRef.current) {
-          clearTimeout(hideTimerRef.current);
-          hideTimerRef.current = null;
-      }
-  };
-
-  const handleActionBarLeave = () => {
-      if (isDiscovering) return;
-      hideTimerRef.current = setTimeout(() => {
-          setHoveredFigureId(null);
-          setActionBarCoords(null);
-      }, 200);
-  };
-
-
   
   const contentHeight = (totalRows + 1) * ROW_HEIGHT + 100;
   
@@ -1266,8 +1248,8 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
       ticks.push(y);
   }
 
-  const hoveredLayoutItem = hoveredFigureId ? layoutData.find(l => l.figure.id === hoveredFigureId) : null;
-  const isSearchMode = highlightedFigureIds.length > 0 && !isDiscovering && isSearchFocusActive;
+  const actionLayoutItem = actionFigureId ? layoutData.find(l => l.figure.id === actionFigureId) : null;
+  const isSearchMode = highlightedFigureIds.length > 0 && !isDiscovering && !relationshipState && isSearchFocusActive;
   const cursorClass = isDragging ? 'cursor-grabbing' : 'cursor-default';
 
   // Calculate screen position for red selected year line
@@ -1436,9 +1418,7 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
               barBackgroundColor = CATEGORY_COLORS['LEADERS & BADDIES'];
           }
           
-          // Calculate text color based on contrast ratio with background
-          const textColor = getTextColorForBackground(barBackgroundColor);
-          let textColorClass = textColor === 'white' ? 'text-white' : 'text-black';
+          let textColorClass = CATEGORY_BAR_TEXT_COLORS[figure.category] === 'black' ? 'text-black' : 'text-white';
           
           let containerOpacityClass = "opacity-100";
           let animationClass = "";
@@ -1453,7 +1433,7 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
           if (isSearchMode) {
               if (isFocused) {
                   barBackgroundColor = '#000000';
-                  textColorClass = `text-${getTextColorForBackground(barBackgroundColor)}`;
+                  textColorClass = 'text-white';
                   shadowClass = "shadow-2xl z-50";
                   animationClass = "animate-pulse-limited";
                   containerOpacityClass = "opacity-100";
@@ -1465,17 +1445,11 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
                    shadowClass = "shadow-md ring-2 ring-black/20";
               }
 
-              if (discoverySourceId === figure.id) {
-                  barBackgroundColor = '#4f46e5';
-                  textColorClass = `text-${getTextColorForBackground(barBackgroundColor)}`;
+              if (relationshipState && discoverySourceId === figure.id) {
                   shadowClass = "shadow-xl z-50 ring-4 ring-indigo-200";
               } else if (isTracingTarget) {
-                  barBackgroundColor = '#3b82f6';
-                  textColorClass = `text-${getTextColorForBackground(barBackgroundColor)}`;
                   shadowClass = "shadow-xl z-50";
               } else if (isNew) {
-                  barBackgroundColor = '#fbbf24';
-                  textColorClass = `text-${getTextColorForBackground(barBackgroundColor)}`;
                   shadowClass = "shadow-md z-30";
               }
           }
@@ -1520,8 +1494,6 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
                             width: `${Math.max(width, 4)}px`,
                             backgroundColor: barBackgroundColor
                         }}
-                        onPointerEnter={(e) => handleBarEnter(e, figure.id)}
-                        onPointerLeave={handleBarLeave}
                      />
 
                      {/* Floating Label */}
@@ -1533,8 +1505,6 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
                              left: `${labelLeft}px`,
                              top: `${labelContainerTop}px`,
                         }}
-                        onPointerEnter={(e) => handleBarEnter(e, figure.id)}
-                        onPointerLeave={handleBarLeave}
                      >
                          <span className="text-[22px] font-black text-black leading-none uppercase drop-shadow-sm filter-none whitespace-nowrap">
                              {figure.name}
@@ -1561,22 +1531,12 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
                 transform: 'translateZ(0)',
                 backfaceVisibility: 'hidden',
               }}
-              onPointerEnter={(e) => handleBarEnter(e, figure.id)}
-              onPointerLeave={handleBarLeave}
             >
               <div className="text-[22px] font-black text-black leading-tight mb-1 uppercase w-full text-left drop-shadow-sm whitespace-nowrap">
                   {figure.name}
               </div>
 
               <div className="relative w-full flex items-center">
-                  {isNew && !isSearchMode && (
-                      <div className="absolute -left-6 top-1/2 -translate-y-1/2 text-amber-500 drop-shadow-md z-50">
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 fill-current" viewBox="0 0 24 24">
-                            <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
-                          </svg>
-                      </div>
-                  )}
-
                   <div 
                     className={`h-[28px] flex items-center pl-4 pr-2 rounded-md transition-all duration-300 ${shadowClass}`}
                     style={{ 
@@ -1878,17 +1838,15 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
           </div>
       )}
 
-      {/* LAYER 5: Discovery Action Bar */}
-      {hoveredLayoutItem && actionBarCoords && onDiscover && onTrace && onInspect && !isDiscovering && !relationshipState && !isBusy && (
+      {/* LAYER 5: Figure Actions */}
+      {actionLayoutItem && actionBarCoords && onDiscover && onTrace && onInspect && !isDiscovering && !relationshipState && !isBusy && (
           <ActionBar 
-              figure={hoveredLayoutItem.figure}
+              figure={actionLayoutItem.figure}
               onDiscover={onDiscover}
               onTrace={onTrace}
               onInspect={onInspect}
               isDiscovering={!!isDiscovering}
               style={actionBarCoords}
-              onMouseEnter={handleActionBarEnter}
-              onMouseLeave={handleActionBarLeave}
           />
       )}
     </div>

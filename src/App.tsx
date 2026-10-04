@@ -10,6 +10,7 @@ import SettingsDialog from './components/SettingsDialog';
 import Legend from './components/Legend';
 import { HistoricalFigure, DeepDiveData, IAIService, RelationshipExplanation, FigureCategory } from './types';
 import { createAIService } from './services/aiService';
+import { assessRelationships, readRelationshipAssessment } from './services/relationshipAssessment';
 import { isConfigValid, providerNames } from './utils/providerConfig';
 import { filterTimelineFigures, isTimelineFigureVisible } from './utils/timelineFigures';
 import { readKnownRelationshipIds, readRelationshipMap, saveRelationshipMap, validRelatedIds } from './utils/relationshipCache';
@@ -249,6 +250,7 @@ const App: React.FC = () => {
         setSelectedYear(year);
         setSelectedFigures(sortedFigures);
         setRelationshipState(null);
+        if (sortedFigures.length > 0) setIsSidebarCollapsed(false);
     };
 
     const handleTraceRelationships = async (
@@ -269,24 +271,27 @@ const App: React.FC = () => {
         const remainingFigures = currentFigures.filter(candidate => !knownSet.has(candidate.id));
         const needsMapping = cached === null && remainingFigures.some(candidate => candidate.id !== figure.id);
         const effectiveY = mouseY ?? window.innerHeight / 2;
-        setRelationshipState(knownIds.length ? {
-            sourceY: effectiveY, relatedIds: knownIds, targetId: figure.id,
-            sourceFigure: figure, sourceImageUrl: figure.imageUrl || null,
-        } : null);
+        setRelationshipState(null);
         if (isDiscovering) {
             setHighlightedFigureIds([]);
             setIsSearchFocusActive(false);
         }
         setIsDiscovering(false);
-        setIsTracing(needsMapping);
+        setIsTracing(true);
 
         try {
             const aiRelatedIds = cached?.relatedIds ?? (needsMapping ? await aiService.fetchRelatedFigures(figure, remainingFigures, signal) : []);
             if (!isCurrent()) return;
-            const uniqueRelatedIds = validRelatedIds(figure, currentFigures, [
+            const proposedIds = validRelatedIds(figure, currentFigures, [
                 ...aiRelatedIds,
                 ...knownIds,
             ]);
+            const proposedSet = new Set(proposedIds);
+            const assessed = await assessRelationships(aiService, figure,
+                currentFigures.filter(candidate => proposedSet.has(candidate.id)), localStorage, signal);
+            if (!isCurrent()) return;
+            const uniqueRelatedIds = [...assessed.keys()];
+            setKnownRelationships(previous => new Map(previous).set(figure.id, new Set(uniqueRelatedIds)));
             saveRelationshipMap(figure, currentFigures, uniqueRelatedIds, localStorage, cached?.expansionAttempted);
 
             if (uniqueRelatedIds.length === 0) {
@@ -313,9 +318,7 @@ const App: React.FC = () => {
         } catch (error) {
             if (isCurrent()) {
                 const message = error instanceof Error ? error.message : 'Failed to trace connections.';
-                setToast(knownIds.length
-                    ? { message: `Showing ${knownIds.length} cached ${knownIds.length === 1 ? 'relationship' : 'relationships'} for ${figure.name}. Could not check additional connections: ${message}`, type: 'info' }
-                    : { message, type: 'error' });
+                setToast({ message: `Could not assess connections for ${figure.name}: ${message}`, type: 'error' });
             }
         } finally {
             if (isCurrent()) setIsTracing(false);
@@ -349,19 +352,26 @@ const App: React.FC = () => {
 
             const seenIds = new Set(figures.map(figure => figure.id));
             const seenNames = new Set(figures.map(figure => figure.name.trim().toLowerCase()));
-            const uniqueNewFigures = newFigures.filter(figure => {
+            const proposedNewFigures = newFigures.filter(figure => {
                 const name = figure.name.trim().toLowerCase();
-                if (!isTimelineFigureVisible(figure) || seenIds.has(figure.id) || seenNames.has(name)) return false;
+                if (!isTimelineFigureVisible(figure) || figure.deathYear < config.start || figure.birthYear > config.end ||
+                    seenIds.has(figure.id) || seenNames.has(name)) return false;
                 seenIds.add(figure.id);
                 seenNames.add(name);
                 return true;
             });
 
             let updatedFigures = figures;
-            const allRelatedIdsSet = new Set<string>([
+            const previousRelatedIdsSet = new Set<string>([
                 ...(knownRelationships.get(sourceFigure.id) || []), ...(cached?.relatedIds || []),
                 ...readKnownRelationshipIds(sourceFigure, figures, localStorage),
             ]);
+            const assessed = await assessRelationships(aiService, sourceFigure, [
+                ...figures.filter(figure => previousRelatedIdsSet.has(figure.id)), ...proposedNewFigures,
+            ], localStorage, signal);
+            if (!isCurrent()) return;
+            const uniqueNewFigures = proposedNewFigures.filter(figure => assessed.has(figure.id));
+            const allRelatedIdsSet = new Set(assessed.keys());
             let newBatchIds: string[] = [];
 
             if (uniqueNewFigures.length > 0) {
@@ -386,6 +396,7 @@ const App: React.FC = () => {
 
             const allRelatedIds = validRelatedIds(sourceFigure, updatedFigures, Array.from(allRelatedIdsSet));
             if (allRelatedIds.length === 0) {
+                setKnownRelationships(previous => new Map(previous).set(sourceFigure.id, new Set<string>()));
                 saveRelationshipMap(sourceFigure, updatedFigures, [], localStorage, true);
                 setDiscoverySourceId(null);
                 setHighlightedFigureIds([]);
@@ -455,11 +466,12 @@ const App: React.FC = () => {
             mode: 'relationship'
         });
 
+        const assessment = readRelationshipAssessment(sourceFigure, targetFigure, localStorage);
         const cacheKey = `chrono_rel_${sourceFigure.id}_${targetFigure.id}`;
         const reverseCacheKey = `chrono_rel_${targetFigure.id}_${sourceFigure.id}`;
         for (const key of [cacheKey, reverseCacheKey]) {
             const cached = localStorage.getItem(key);
-            if (!cached) continue;
+            if (!cached || !assessment) continue;
             try {
                 const parsed = JSON.parse(cached);
                 const parsedData = key === reverseCacheKey
@@ -469,7 +481,7 @@ const App: React.FC = () => {
                     isOpen: true,
                     target: targetFigure,
                     source: sourceFigure,
-                    data: parsedData,
+                    data: { ...parsedData, explanation: assessment },
                     loading: false,
                     mode: 'relationship'
                 });
@@ -480,12 +492,13 @@ const App: React.FC = () => {
         }
 
         try {
-            const [explanation, detailsMap] = await Promise.all([
-                aiService.fetchRelationshipExplanation(sourceFigure, targetFigure, signal),
+            const [assessed, detailsMap] = await Promise.all([
+                assessRelationships(aiService, sourceFigure, [targetFigure], localStorage, signal),
                 fetchBatchFigureDetails([sourceFigure, targetFigure])
             ]);
 
             if (!isCurrent()) return;
+            const explanation = assessed.get(targetFigure.id) ?? readRelationshipAssessment(sourceFigure, targetFigure, localStorage);
 
             const combinedData: RelationshipData = {
                 explanation,
@@ -539,6 +552,22 @@ const App: React.FC = () => {
                     loading: false,
                     mode: 'single'
                 });
+                // Biography text is cached separately from Wikipedia images.
+                // Show it immediately, then restore a missing header image.
+                if (!figure.imageUrl) {
+                    try {
+                        const detailsMap = await fetchBatchFigureDetails([figure]);
+                        const imageUrl = detailsMap.get(figure.id)?.imageUrl;
+                        if (isCurrent() && imageUrl) {
+                            setPopoverState(previous => ({
+                                ...previous,
+                                target: { ...figure, imageUrl }
+                            }));
+                        }
+                    } catch (error) {
+                        console.warn('Could not restore the biography image', error);
+                    }
+                }
                 return;
             } catch (e) {
                 localStorage.removeItem(cacheKey);
@@ -555,15 +584,13 @@ const App: React.FC = () => {
 
             if (deepDiveData) {
                 const detail = detailsMap.get(figure.id);
-                if (detail?.imageUrl) {
-                    figure.imageUrl = detail.imageUrl;
-                }
+                const target = detail?.imageUrl ? { ...figure, imageUrl: detail.imageUrl } : figure;
 
                 localStorage.setItem(cacheKey, JSON.stringify(deepDiveData));
 
                 setPopoverState({
                     isOpen: true,
-                    target: figure,
+                    target,
                     source: null,
                     data: deepDiveData,
                     loading: false,
@@ -584,9 +611,12 @@ const App: React.FC = () => {
     const handleEmptyClick = () => {
         cancelRelationshipAction();
         setRelationshipState(null);
+        setDiscoverySourceId(null);
+        setNewlyDiscoveredIds(new Set());
+        setHighlightedFigureIds([]);
+        setIsSearchFocusActive(false);
         setSelectedFigures([]);
         setSelectedYear(null);
-        setIsSidebarCollapsed(false); // Ensure sidebar is visible for global view
     };
 
     const handleSearch = (query: string) => {
@@ -641,12 +671,6 @@ const App: React.FC = () => {
         popoverVersion.current++;
         setPopoverState(prev => ({ ...prev, isOpen: false }));
     };
-
-    useEffect(() => {
-        if (selectedFigures.length > 0) {
-            setIsSidebarCollapsed(false);
-        }
-    }, [selectedFigures]);
 
     // Determine which figures to show in sidebar (Global list if no year selected, otherwise specific year)
     const activeSidebarFigures = useMemo(() => {

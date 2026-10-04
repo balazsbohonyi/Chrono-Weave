@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { OllamaService } from '../src/services/ollamaService';
-import { chatResponse, event, figure, localConfig, person, sections } from './helpers';
+import { chatResponse, event, figure, localConfig, person, sections, relationship } from './helpers';
 
 test('local model listing uses native API and never forwards an API key', async () => {
   const service = new OllamaService({ ...localConfig, baseUrl: 'http://localhost:11434/', apiKey: 'unused-key' }, async (url, init) => {
@@ -203,7 +203,7 @@ test('relationship mapping sends short references and translates them to actual 
   for (const ollamaMode of ['local', 'cloud'] as const) {
     const service = new OllamaService({ ...localConfig, ollamaMode }, async (_url, init) => {
       const prompt = JSON.parse(String(init?.body)).messages[1].content;
-      const catalog = JSON.parse(prompt.match(/Candidates: (.*)\. Return a JSON object/)[1]);
+      const catalog = JSON.parse(prompt.match(/^Candidates: (.*)$/m)[1]);
       assert.deepEqual(catalog.map((item: { id: string }) => item.id), ['c1', 'c2']);
       assert.ok(!prompt.includes(candidates[1].id));
       return chatResponse({ relatedIds: ['c2', 'c1', 'c2'] });
@@ -252,10 +252,25 @@ test('discovery filters existing names, duplicates, and out-of-range figures', a
 test('relationship explanations and biographies validate their structures', async () => {
   const service = new OllamaService(localConfig, async (_url, init) => {
     const prompt = String(init?.body);
-    return chatResponse(prompt.includes('famousQuote') ? { ...sections, famousQuote: '' } : sections);
+    return chatResponse(prompt.includes('famousQuote') ? { ...sections, famousQuote: '' } : relationship);
   });
-  assert.deepEqual(await service.fetchRelationshipExplanation(figure, figure), sections);
+  assert.deepEqual(await service.fetchRelationshipExplanation(figure, figure), relationship);
   assert.deepEqual(await service.fetchFigureDeepDive(figure), { ...sections, famousQuote: '' });
+});
+
+test('relationship assessment corrects omitted verdicts and accepts positives without presentation fields', async () => {
+  let calls = 0;
+  const service = new OllamaService(localConfig, async (_url, init) => {
+    calls++;
+    if (calls === 1) return chatResponse(sections);
+    const messages = JSON.parse(String(init?.body)).messages;
+    assert.match(messages.at(-1).content, /isRelevant as true or false/);
+    return chatResponse({ isRelevant: true, evidence: relationship.evidence });
+  });
+  const result = await service.fetchRelationshipExplanation(figure, { ...figure, id: 'other' });
+  assert.equal(calls, 2);
+  assert.equal(result.isRelevant, true);
+  assert.equal(result.sections[0].content, relationship.evidence);
 });
 
 test('quota failures are actionable, redacted, and not retried', async () => {
