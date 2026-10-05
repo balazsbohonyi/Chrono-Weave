@@ -54,7 +54,7 @@ export const CATEGORY_COLORS: Record<FigureCategory, string> = {
 
 // Year text inside timeline bars. Adjust alongside CATEGORY_COLORS.
 export const CATEGORY_BAR_TEXT_COLORS: Record<FigureCategory, 'white' | 'black'> = {
-  'ARTISTS': 'white',
+  'ARTISTS': 'black',
   'BUSINESS': 'black',
   'ENTERTAINERS': 'white',
   'EVENTS': 'black',
@@ -62,7 +62,7 @@ export const CATEGORY_BAR_TEXT_COLORS: Record<FigureCategory, 'white' | 'black'>
   'LEADERS & BADDIES': 'white',
   'SCIENTISTS': 'white',
   'THINKERS': 'white',
-  'WRITERS': 'black'
+  'WRITERS': 'white'
 };
 
 // Sorted Alphabetically
