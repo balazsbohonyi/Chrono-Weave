@@ -23,21 +23,21 @@ const Toast: React.FC<ToastProps> = ({ message, type = 'info', onClose }) => {
   if (!message) return null;
 
   const borderClasses = {
-    success: 'border-l-4 border-l-emerald-500 border-t border-r border-b border-emerald-200',
-    info: 'border-l-4 border-l-blue-500 border-t border-r border-b border-blue-200',
-    error: 'border-l-4 border-l-red-500 border-t border-r border-b border-red-200'
+    success: 'border-l-4 border-l-success-marker border-t border-r border-b border-success-border',
+    info: 'border-l-4 border-l-accent-marker border-t border-r border-b border-accent-border',
+    error: 'border-l-4 border-l-danger-marker border-t border-r border-b border-danger-border'
   };
 
   const bgClasses = {
-    success: 'bg-white text-gray-900',
-    info: 'bg-white text-blue-900',
-    error: 'bg-white text-red-600'
+    success: 'bg-surface text-content-primary',
+    info: 'bg-surface text-accent-emphasis',
+    error: 'bg-surface text-danger-text'
   };
 
   const iconColors = {
-    success: 'text-emerald-600',
-    info: 'text-blue-600',
-    error: 'text-red-600'
+    success: 'text-success-text',
+    info: 'text-accent-text',
+    error: 'text-danger-text'
   };
 
   return (

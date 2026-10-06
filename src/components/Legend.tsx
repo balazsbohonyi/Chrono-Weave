@@ -17,7 +17,7 @@ const Legend: React.FC<LegendProps> = ({ selectedCategories, onToggleCategory, i
       {/* Collapsible Content Area */}
       <div
         className={`
-          w-full bg-white/60 backdrop-blur-xl border-gray-200/50
+          w-full bg-surface/60 backdrop-blur-xl border-border/50
           transition-all duration-300 ease-in-out overflow-hidden pointer-events-auto
           ${isOpen ? 'max-h-40 opacity-100 border-b' : 'max-h-0 opacity-0 border-none'}
         `}
@@ -33,13 +33,13 @@ const Legend: React.FC<LegendProps> = ({ selectedCategories, onToggleCategory, i
                     <button
                         key={category}
                         onClick={() => onToggleCategory(category)}
-                        className={`flex items-center gap-2 transition-all duration-300 group outline-none rounded-md p-1.5 border border-transparent ${isDimmed ? 'opacity-50 hover:opacity-70' : 'opacity-100 bg-white/30 border-gray-200/30'}`}
+                        className={`flex items-center gap-2 transition-all duration-300 group outline-none rounded-md p-1.5 border border-transparent ${isDimmed ? 'opacity-50 hover:opacity-70' : 'opacity-100 bg-surface/30 border-border/30'}`}
                     >
                         <div 
                         className="h-4 w-8 rounded-sm"
                         style={{ backgroundColor: color }}
                         />
-                        <span className="text-[10px] font-bold tracking-widest text-gray-800 uppercase whitespace-nowrap">
+                        <span className="text-[10px] font-bold tracking-widest text-content-heading uppercase whitespace-nowrap">
                         {category}
                         </span>
                     </button>
@@ -48,10 +48,10 @@ const Legend: React.FC<LegendProps> = ({ selectedCategories, onToggleCategory, i
                 
                 {selectedCategories.size > 0 && (
                     <>
-                    <div className="h-6 w-px bg-gray-400/30 mx-2"></div>
+                    <div className="h-6 w-px bg-separator-muted/30 mx-2"></div>
                     <button
                         onClick={() => selectedCategories.forEach(c => onToggleCategory(c))} 
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-md transition-colors text-xs font-bold uppercase tracking-wider outline-none border border-blue-100"
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-accent-softest hover:bg-accent-soft text-accent-text rounded-md transition-colors text-xs font-bold uppercase tracking-wider outline-none border border-accent-soft"
                     >
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
                             <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
@@ -67,7 +67,7 @@ const Legend: React.FC<LegendProps> = ({ selectedCategories, onToggleCategory, i
       {/* Toggle Handle - Statically positioned in flex column to move with content */}
       <button
         onClick={onToggleOpen}
-        className="h-6 px-6 bg-white rounded-b-lg flex items-center justify-center text-gray-500 hover:text-blue-600 hover:bg-white transition-colors cursor-pointer pointer-events-auto shadow-sm border-none outline-none focus:outline-none focus:ring-0 ring-0"
+        className="h-6 px-6 bg-surface rounded-b-lg flex items-center justify-center text-content-muted hover:text-accent-text hover:bg-surface transition-colors cursor-pointer pointer-events-auto shadow-sm border-none outline-none focus:outline-none focus:ring-0 ring-0"
         title="Toggle Filters"
       >
           {isOpen ? (

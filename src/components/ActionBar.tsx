@@ -44,7 +44,7 @@ const ActionBar: React.FC<ActionBarProps> = ({
             onMouseDown={preventCanvasInteraction}
             onMouseUp={preventCanvasInteraction}
         >
-            <div className="bg-white/60 backdrop-blur-xl border border-blue-200/50 shadow-2xl rounded-lg overflow-hidden min-w-[140px] flex flex-col">
+            <div className="bg-surface/60 backdrop-blur-xl border border-accent-border/50 shadow-2xl rounded-lg overflow-hidden min-w-[140px] flex flex-col">
                 {actions.map((item) => (
                     <button
                         key={item.id}
@@ -54,12 +54,12 @@ const ActionBar: React.FC<ActionBarProps> = ({
                         className={`
                         w-full flex items-center gap-3 px-3 py-1.5 text-base font-normal transition-all text-left group
                         disabled:opacity-50 disabled:cursor-not-allowed
-                        text-blue-800 hover:bg-blue-100/40 hover:text-blue-900 border-b border-gray-100/30 last:border-b-0
+                        text-accent-heading hover:bg-accent-soft/40 hover:text-accent-emphasis border-b border-border-subtle/30 last:border-b-0
                     `}
                     >
-                        <div className="flex-shrink-0 text-blue-600 group-hover:text-blue-700 transition-colors">
+                        <div className="flex-shrink-0 text-accent-text group-hover:text-accent-text-hover transition-colors">
                             {item.isLoading ? (
-                                <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                                <div className="w-5 h-5 border-2 border-accent-text border-t-transparent rounded-full animate-spin"></div>
                             ) : (
                                 item.icon
                             )}

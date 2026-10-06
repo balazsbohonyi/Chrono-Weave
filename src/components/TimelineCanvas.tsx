@@ -559,7 +559,7 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
   return (
     <div 
       ref={containerRef}
-      className={`relative w-full h-full overflow-hidden select-none bg-[#f4ecd8] touch-none ${cursorClass}`}
+      className={`relative w-full h-full overflow-hidden select-none bg-canvas touch-none ${cursorClass}`}
       onPointerDown={handlePointerDown}
       onPointerUp={handlePointerUp}
       onPointerMove={handlePointerMove}
@@ -576,14 +576,14 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
             }}
         >
             {ticks.map(year => (
-                 <div key={year} className="absolute top-0 bottom-0 border-l border-black/20" style={{ left: (year - startYear) * BASE_PIXELS_PER_YEAR }} />
+                 <div key={year} className="absolute top-0 bottom-0 border-l border-timeline-grid/20" style={{ left: (year - startYear) * BASE_PIXELS_PER_YEAR }} />
             ))}
         </div>
 
       {/* LAYER 1: Red Ghost Line (Behind Everything) */}
       {selectedYearScreenX !== null && (
           <div
-              className="absolute top-0 bottom-0 w-[2px] bg-red-500 z-0 pointer-events-none"
+              className="absolute top-0 bottom-0 w-[2px] bg-danger-marker z-0 pointer-events-none"
               style={{ left: selectedYearScreenX }}
           />
       )}
@@ -591,7 +591,7 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
       {/* Red Label - Above Selection Rectangles */}
       {selectedYearScreenX !== null && (
           <div
-              className="absolute bg-red-600 text-white text-xs font-mono py-1 rounded shadow-lg z-[50] flex items-center"
+              className="absolute bg-danger-solid text-on-accent text-xs font-mono py-1 rounded shadow-lg z-[50] flex items-center"
               style={{ left: selectedYearScreenX + 12, bottom: '35px', paddingLeft: '8px', paddingRight: '4px', gap: '8px' }}
           >
               {formatYear(Math.floor(selectedYear!))}
@@ -606,10 +606,10 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
                   e.stopPropagation();
                   onEmptyClick();
                 }}
-                className="p-0.5 hover:bg-red-700/50 rounded transition-colors cursor-pointer flex-shrink-0"
+                className="p-0.5 hover:bg-danger-solid-hover/50 rounded transition-colors cursor-pointer flex-shrink-0"
                 type="button"
               >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 text-on-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
@@ -647,7 +647,7 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
             return (
               <div
                 key={`sel-rect-${figure.id}`}
-                className="absolute bg-white/95 backdrop-blur-sm rounded-lg shadow-lg ring-1 ring-black/5 pointer-events-none"
+                className="absolute bg-surface/95 backdrop-blur-sm rounded-lg shadow-lg ring-1 ring-ring/5 pointer-events-none"
                 style={{
                   left: `${left - padding}px`,
                   top: `${top + BAR_VERTICAL_OFFSET - 8}px`,
@@ -670,7 +670,7 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
           return (
             <div
               key={`sel-rect-${figure.id}`}
-              className="absolute bg-white/95 backdrop-blur-sm rounded-lg shadow-lg ring-1 ring-black/5 pointer-events-none"
+              className="absolute bg-surface/95 backdrop-blur-sm rounded-lg shadow-lg ring-1 ring-ring/5 pointer-events-none"
               style={{
                 left: `${left - hPadding}px`,
                 top: `${top - vPadding}px`,
@@ -713,7 +713,7 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
               barBackgroundColor = CATEGORY_COLORS['LEADERS & BADDIES'];
           }
           
-          let textColorClass = CATEGORY_BAR_TEXT_COLORS[figure.category] === 'black' ? 'text-black' : 'text-white';
+          let barTextColor = CATEGORY_BAR_TEXT_COLORS[figure.category] || CATEGORY_BAR_TEXT_COLORS['LEADERS & BADDIES'];
           
           let containerOpacityClass = "opacity-100";
           let animationClass = "";
@@ -727,8 +727,8 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
 
           if (isSearchMode) {
               if (isFocused) {
-                  barBackgroundColor = '#000000';
-                  textColorClass = 'text-white';
+                  barBackgroundColor = 'rgb(var(--color-timeline-search))';
+                  barTextColor = 'rgb(var(--color-timeline-search-text))';
                   shadowClass = "shadow-2xl z-50";
                   animationClass = "animate-pulse-limited";
                   containerOpacityClass = "opacity-100";
@@ -737,11 +737,11 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
               }
           } else {
               if (isHighlighted && !isSearchMode) {
-                   shadowClass = "shadow-md ring-2 ring-black/20";
+                   shadowClass = "shadow-md ring-2 ring-ring/20";
               }
 
               if (relationshipSourceId === figure.id) {
-                  shadowClass = "shadow-xl z-50 ring-4 ring-blue-200";
+                  shadowClass = "shadow-xl z-50 ring-4 ring-accent-border";
 
               } else if (isNew) {
                   shadowClass = "shadow-md z-30";
@@ -800,10 +800,10 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
                              top: `${labelContainerTop}px`,
                         }}
                      >
-                         <span className="text-[22px] font-black text-black leading-none uppercase drop-shadow-sm filter-none whitespace-nowrap">
+                         <span className="text-[22px] font-black text-timeline-label leading-none uppercase drop-shadow-sm filter-none whitespace-nowrap">
                              {figure.name}
                          </span>
-                         <span className="text-lg font-bold text-gray-700 leading-none mt-1 whitespace-nowrap">
+                         <span className="text-lg font-bold text-content-body leading-none mt-1 whitespace-nowrap">
                             {formatYear(figure.birthYear)} - {figure.deathYear >= new Date().getFullYear() ? '' : formatYear(figure.deathYear)} • <span className="capitalize opacity-90">{figure.occupation}</span>
                          </span>
                      </div>
@@ -826,7 +826,7 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
                 backfaceVisibility: 'hidden',
               }}
             >
-              <div className="text-[22px] font-black text-black leading-tight mb-1 uppercase w-full text-left drop-shadow-sm whitespace-nowrap">
+              <div className="text-[22px] font-black text-timeline-label leading-tight mb-1 uppercase w-full text-left drop-shadow-sm whitespace-nowrap">
                   {figure.name}
               </div>
 
@@ -838,13 +838,13 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
                         backgroundColor: barBackgroundColor 
                     }}
                   >
-                    <span className={`text-lg font-bold ${textColorClass} whitespace-nowrap`}>
+                    <span className="text-lg font-bold whitespace-nowrap" style={{ color: barTextColor }}>
                         {formatYear(figure.birthYear)} - {figure.deathYear >= new Date().getFullYear() ? '' : formatYear(figure.deathYear)}
                     </span>
                   </div>
               </div>
 
-              <div className="text-[18px] font-bold text-black mt-1 whitespace-nowrap w-auto text-left leading-tight opacity-90 group-hover:opacity-100 capitalize">
+              <div className="text-[18px] font-bold text-timeline-label mt-1 whitespace-nowrap w-auto text-left leading-tight opacity-90 group-hover:opacity-100 capitalize">
                 {figure.occupation}
               </div>
               
@@ -956,7 +956,7 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
                     <path
                         d={pathD}
                         fill="none"
-                        stroke="black"
+                        stroke="rgb(var(--color-timeline-connector))"
                         strokeWidth="1.5"
                         className="opacity-80"
                     />
@@ -964,7 +964,7 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
                     <path
                         d={arrowPath}
                         fill="none"
-                        stroke="black"
+                        stroke="rgb(var(--color-timeline-connector))"
                         strokeWidth="1.5"
                         className="opacity-80"
                         strokeLinecap="round"
@@ -977,7 +977,7 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
 
       {/* LAYER 3: Labels (Bottom) - Glossy */}
       <div
-            className="absolute bottom-0 left-0 h-6 bg-black/75 backdrop-blur-2xl pointer-events-none z-[70]"
+            className="absolute bottom-0 left-0 h-6 bg-timeline-axis/75 backdrop-blur-2xl pointer-events-none z-[70]"
             style={{ width: '100%' }}
       >
          <div style={{
@@ -991,9 +991,9 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
                 const left = (year - startYear) * BASE_PIXELS_PER_YEAR;
                 return (
                     <div key={year} className="absolute top-0 bottom-0" style={{ left }}>
-                        <div className="absolute top-0 w-[2px] h-[6px] bg-white" style={{ left: '-1px', transform: `scaleX(${1/viewState.scale})`, transformOrigin: 'center' }} />
+                        <div className="absolute top-0 w-[2px] h-[6px] bg-timeline-axis-label" style={{ left: '-1px', transform: `scaleX(${1/viewState.scale})`, transformOrigin: 'center' }} />
                         <span
-                             className="absolute top-[5px] text-[12px] font-sans-serif text-white font-bold whitespace-nowrap"
+                             className="absolute top-[5px] text-[12px] font-sans-serif text-timeline-axis-label font-bold whitespace-nowrap"
                              style={{ left: '0', transform: `scaleX(${1/viewState.scale}) translateX(-50%)`, transformOrigin: 'left center' }}
                         >
                             {formatYear(year)}
@@ -1006,7 +1006,7 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
 
        {/* LAYER 3b: Labels (Top) - Fixed Position below Header/Filters */}
        <div
-            className="absolute left-0 h-6 bg-black/70 backdrop-blur-2xl pointer-events-none z-[60] transition-[top] duration-300 ease-in-out"
+            className="absolute left-0 h-6 bg-timeline-axis/70 backdrop-blur-2xl pointer-events-none z-[60] transition-[top] duration-300 ease-in-out"
             style={{ width: '100%', top: axisTopOffset }}
       >
          <div style={{
@@ -1020,9 +1020,9 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
                 const left = (year - startYear) * BASE_PIXELS_PER_YEAR;
                 return (
                     <div key={year} className="absolute top-0 bottom-0" style={{ left }}>
-                        <div className="absolute bottom-0 w-[2px] h-[6px] bg-white" style={{ left: '-1px', transform: `scaleX(${1/viewState.scale})`, transformOrigin: 'center' }} />
+                        <div className="absolute bottom-0 w-[2px] h-[6px] bg-timeline-axis-label" style={{ left: '-1px', transform: `scaleX(${1/viewState.scale})`, transformOrigin: 'center' }} />
                         <span
-                             className="absolute top-[3px] text-[12px] font-sans-serif text-white font-bold whitespace-nowrap"
+                             className="absolute top-[3px] text-[12px] font-sans-serif text-timeline-axis-label font-bold whitespace-nowrap"
                              style={{ left: '0', transform: `scaleX(${1/viewState.scale}) translateX(-50%)`, transformOrigin: 'left center' }}
                         >
                             {formatYear(year)}
@@ -1036,11 +1036,11 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
       {/* LAYER 3.5: Cursor Line - Blue */}
       {cursorX !== null && (
         <div
-            className="absolute top-0 bottom-0 w-px bg-blue-500/70 z-30 pointer-events-none"
+            className="absolute top-0 bottom-0 w-px bg-accent-marker/70 z-30 pointer-events-none"
             style={{ left: cursorX }}
         >
             <div
-                className="absolute left-2 bg-blue-600 text-white text-xs font-mono px-2 py-1 rounded shadow-lg transition-all duration-300 z-[100]"
+                className="absolute left-2 bg-accent-solid text-on-accent text-xs font-mono px-2 py-1 rounded shadow-lg transition-all duration-300 z-[100]"
                 style={{ bottom: '35px' }}
             >
                 {formatYear(Math.floor(hoverYearVal || 0))}

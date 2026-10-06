@@ -61,8 +61,8 @@ const RelationshipPopover: React.FC<RelationshipPopoverProps> = ({
       if (isLoading) {
            return (
             <div className="flex flex-col items-center justify-center h-48 space-y-4">
-              <div className="w-10 h-10 border-3 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-              <p className="text-gray-500 font-sans text-lg animate-pulse">Consulting the archives...</p>
+              <div className="w-10 h-10 border-3 border-accent-marker border-t-transparent rounded-full animate-spin"></div>
+              <p className="text-content-muted font-sans text-lg animate-pulse">Consulting the archives...</p>
             </div>
           );
       }
@@ -72,19 +72,19 @@ const RelationshipPopover: React.FC<RelationshipPopoverProps> = ({
           return (
             <div className="animate-in slide-in-from-bottom-4 duration-500">
                {/* Summary */}
-               <div className="bg-blue-50/50 p-6 rounded-lg border border-blue-100 mb-8">
-                 <h3 className="text-sm font-bold uppercase text-blue-800 tracking-wider mb-2 font-sans">Relationship Summary</h3>
-                 <MarkdownContent className="text-gray-800 text-lg font-sans leading-relaxed">{content.summary}</MarkdownContent>
+               <div className="bg-summary-surface/50 p-6 rounded-lg border border-summary-border mb-8">
+                 <h3 className="text-sm font-bold uppercase text-accent-heading tracking-wider mb-2 font-sans">Relationship Summary</h3>
+                 <MarkdownContent className="text-summary-text text-lg font-sans leading-relaxed">{content.summary}</MarkdownContent>
                </div>
 
                {/* Sections */}
                <div className="grid grid-cols-1 gap-8">
                  {content.sections.map((section, idx) => (
                    <div key={idx} className="group">
-                     <h4 className="text-xl font-sans font-bold text-gray-900 mb-2">
+                     <h4 className="text-xl font-sans font-bold text-content-primary mb-2">
                        <MarkdownContent inline>{section.title}</MarkdownContent>
                      </h4>
-                     <MarkdownContent className="text-gray-700 leading-relaxed transition-colors font-sans">
+                     <MarkdownContent className="text-content-body leading-relaxed transition-colors font-sans">
                        {section.content}
                      </MarkdownContent>
                    </div>
@@ -99,9 +99,9 @@ const RelationshipPopover: React.FC<RelationshipPopoverProps> = ({
              <div className="animate-in slide-in-from-bottom-4 duration-500">
                 {/* Famous Quote */}
                 {data.famousQuote && (
-                    <div className="bg-blue-50/50 p-6 rounded-lg border border-blue-100 mb-8">
-                        <h3 className="text-sm font-bold uppercase text-blue-800 tracking-wider mb-4 font-sans">Famous Quote</h3>
-                        <MarkdownContent className="text-gray-800 text-lg italic leading-relaxed font-serif">
+                    <div className="bg-summary-surface/50 p-6 rounded-lg border border-summary-border mb-8">
+                        <h3 className="text-sm font-bold uppercase text-accent-heading tracking-wider mb-4 font-sans">Famous Quote</h3>
+                        <MarkdownContent className="text-summary-text text-lg italic leading-relaxed font-serif">
                             {data.famousQuote}
                         </MarkdownContent>
                     </div>
@@ -111,10 +111,10 @@ const RelationshipPopover: React.FC<RelationshipPopoverProps> = ({
                 <div className="grid grid-cols-1 gap-6">
                     {data.sections.map((section, idx) => (
                         <div key={idx} className="group">
-                            <h4 className="text-xl font-sans font-bold text-gray-900 mb-2">
+                            <h4 className="text-xl font-sans font-bold text-content-primary mb-2">
                                 <MarkdownContent inline>{section.title}</MarkdownContent>
                             </h4>
-                            <MarkdownContent className="text-gray-700 leading-relaxed font-sans text-base">
+                            <MarkdownContent className="text-content-body leading-relaxed font-sans text-base">
                                 {section.content}
                             </MarkdownContent>
                         </div>
@@ -125,7 +125,7 @@ const RelationshipPopover: React.FC<RelationshipPopoverProps> = ({
       }
 
       return (
-        <div className="text-center text-gray-500 italic">
+        <div className="text-center text-content-muted italic">
           Unable to retrieve historical data.
         </div>
       );
@@ -147,8 +147,9 @@ const RelationshipPopover: React.FC<RelationshipPopoverProps> = ({
         
         {/* Close Button */}
         <button 
+          type="button"
           onClick={onClose}
-          className="absolute -top-3 -right-3 p-1.5 bg-white text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-full shadow-lg border border-gray-200 transition-colors z-50"
+          className="close-button absolute -top-3 -right-3 z-50"
           aria-label="Close"
         >
           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -156,9 +157,9 @@ const RelationshipPopover: React.FC<RelationshipPopoverProps> = ({
           </svg>
         </button>
 
-        <div className="w-full h-full bg-white rounded-xl shadow-2xl flex flex-col overflow-hidden border border-gray-200">
+        <div className="w-full h-full bg-surface rounded-xl shadow-2xl flex flex-col overflow-hidden border border-border">
             {/* Header Section */}
-            <div className="bg-gray-50/80 border-b border-gray-200 p-6 flex-shrink-0">
+            <div className="bg-surface-dialog-header/80 border-b border-border p-6 flex-shrink-0">
                 {mode === 'relationship' && source && target ? (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 relative">
                         <FigureCard 
@@ -169,8 +170,8 @@ const RelationshipPopover: React.FC<RelationshipPopoverProps> = ({
                             disabled={isLoading}
                         />
                         
-                        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white border border-gray-200 rounded-full p-2 shadow-sm z-10 hidden md:block">
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-surface-connector border border-connector-border rounded-full p-2 shadow-sm z-10 hidden md:block">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-accent-marker" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
                             </svg>
                         </div>
@@ -188,19 +189,19 @@ const RelationshipPopover: React.FC<RelationshipPopoverProps> = ({
                         ? 'md:grid-cols-[minmax(0,3fr)_minmax(0,4fr)_7rem]'
                         : 'md:grid-cols-[minmax(0,3fr)_minmax(0,4fr)]'}`}>
                         <div className="min-w-0 space-y-2">
-                            <h2 className="text-2xl font-bold text-gray-900 leading-tight break-words">{target.name}</h2>
-                            <p className="text-sm text-emerald-800 font-bold uppercase tracking-wide">{target.occupation}</p>
-                            <p className="text-base text-gray-500 font-mono font-semibold">
+                            <h2 className="text-2xl font-bold text-content-primary leading-tight break-words">{target.name}</h2>
+                            <p className="text-sm text-success-heading font-bold uppercase tracking-wide">{target.occupation}</p>
+                            <p className="text-base text-content-muted font-mono font-semibold">
                                     {formatYear(target.birthYear)} — {formatYear(target.deathYear)}
                             </p>
                         </div>
 
-                        <MarkdownContent className="min-w-0 text-base text-gray-700 leading-relaxed font-sans">
+                        <MarkdownContent className="min-w-0 text-base text-content-body leading-relaxed font-sans">
                             {target.shortDescription || (isDeepDiveData(data) ? data.summary : "Loading details...")}
                         </MarkdownContent>
 
                         {target.imageUrl && (
-                            <div className="w-28 h-28 bg-gray-200 rounded-md overflow-hidden shadow-sm border border-gray-100">
+                            <div className="w-28 h-28 bg-surface-placeholder rounded-md overflow-hidden shadow-sm border border-border-subtle">
                                 <img src={target.imageUrl} alt={target.name} className="w-full h-full object-cover object-top" />
                             </div>
                         )}
@@ -209,7 +210,7 @@ const RelationshipPopover: React.FC<RelationshipPopoverProps> = ({
             </div>
 
             {/* Body */}
-            <div ref={bodyRef} className="flex-1 overflow-y-auto p-6 bg-white no-scrollbar">
+            <div ref={bodyRef} className="flex-1 overflow-y-auto p-6 bg-surface no-scrollbar">
                 {renderContent()}
                 <div className="h-4"></div>
             </div>
@@ -226,14 +227,14 @@ const FigureCard: React.FC<{
     onInspect: (figure: HistoricalFigure) => void;
     disabled: boolean;
 }> = ({ figure, color, detail, onInspect, disabled }) => {
-    const borderColor = color === 'emerald' ? 'border-emerald-200' : 'border-blue-200';
-    const occupationColor = color === 'emerald' ? 'text-emerald-800' : 'text-blue-800';
+    const borderColor = color === 'emerald' ? 'border-card-source-border' : 'border-card-target-border';
+    const occupationColor = color === 'emerald' ? 'text-success-heading' : 'text-accent-heading';
 
     return (
-        <div className={`bg-white rounded-xl p-5 border ${borderColor} shadow-sm relative block w-full group`}>
+        <div className={`bg-surface-card rounded-xl p-5 border ${borderColor} shadow-sm relative block w-full group`}>
             {/* Image Floated Right */}
             {(detail?.imageUrl || figure.imageUrl) && (
-                <div className="float-right ml-4 mb-2 w-24 h-24 bg-gray-200 rounded-[10px] overflow-hidden shadow-sm border border-gray-100">
+                <div className="float-right ml-4 mb-2 w-24 h-24 bg-surface-placeholder rounded-[10px] overflow-hidden shadow-sm border border-border-subtle">
                     <img src={detail?.imageUrl || figure.imageUrl} alt={figure.name} className="w-full h-full object-cover object-top" />
                 </div>
             )}
@@ -241,16 +242,16 @@ const FigureCard: React.FC<{
             {/* Content */}
             <div className="block">
                 <div className="flex flex-wrap items-baseline gap-x-2 mt-1">
-                    <h3 className="font-bold text-gray-900 text-xl leading-tight">{figure.name}</h3>
-                    <span className="text-sm text-gray-500 font-mono font-semibold whitespace-nowrap">
+                    <h3 className="font-bold text-content-primary text-xl leading-tight">{figure.name}</h3>
+                    <span className="text-sm text-card-muted font-mono font-semibold whitespace-nowrap">
                         {formatYear(figure.birthYear)} — {formatYear(figure.deathYear)}
                     </span>
                 </div>
                 
                 <p className={`text-xs ${occupationColor} font-bold uppercase tracking-wide mt-1 mb-2`}>{figure.occupation}</p>
                 
-                <div className="text-base text-gray-800 leading-relaxed font-sans">
-                    {detail ? <MarkdownContent>{detail.description}</MarkdownContent> : <span className="animate-pulse bg-gray-100 text-transparent rounded">Loading bio...</span>}
+                <div className="text-base text-content-heading leading-relaxed font-sans">
+                    {detail ? <MarkdownContent>{detail.description}</MarkdownContent> : <span className="animate-pulse bg-surface-muted text-transparent rounded">Loading bio...</span>}
                 </div>
             </div>
             <div className="absolute bottom-2 right-2 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto transition-opacity duration-300 z-10">
@@ -260,7 +261,7 @@ const FigureCard: React.FC<{
                     aria-label={`Read biography of ${figure.name}`}
                     title={`Read biography of ${figure.name}`}
                     disabled={disabled}
-                    className="p-2 rounded-lg border border-blue-100 bg-blue-50/60 text-blue-600 hover:bg-blue-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500 disabled:opacity-40 disabled:cursor-wait transition-colors"
+                    className="p-2 rounded-lg border border-action-border bg-action-surface/60 text-action-text hover:bg-action-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-marker disabled:opacity-40 disabled:cursor-wait transition-colors"
                     onClick={() => onInspect({ ...figure, imageUrl: detail?.imageUrl || figure.imageUrl, shortDescription: figure.shortDescription || detail?.description })}
                 >
                     <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
