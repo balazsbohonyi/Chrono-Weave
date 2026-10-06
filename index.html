@@ -6,16 +6,114 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" type="image/x-icon" href="/favicon.ico">
   <title>ChronoWeave Timeline</title>
+  <script>
+    // Apply the saved preference before styles or React render.
+    try {
+      document.documentElement.dataset.theme =
+        localStorage.getItem('chrono_theme') === 'dark' ? 'dark' : 'light';
+    } catch {
+      document.documentElement.dataset.theme = 'light';
+    }
+  </script>
+  <link rel="stylesheet" href="/src/styles/tokens.css" />
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
       theme: {
         extend: {
           colors: {
-            timeline: {
-              bar: '#86efac', // green-300
-              barDark: '#22c55e', // green-500
-            }
+            'canvas': 'rgb(var(--color-canvas) / <alpha-value>)',
+            'surface': 'rgb(var(--color-surface) / <alpha-value>)',
+            'surface-subtle': 'rgb(var(--color-surface-subtle) / <alpha-value>)',
+            'surface-muted': 'rgb(var(--color-surface-muted) / <alpha-value>)',
+            'surface-placeholder': 'rgb(var(--color-surface-placeholder) / <alpha-value>)',
+            'surface-card': 'rgb(var(--color-surface-card) / <alpha-value>)',
+            'surface-card-hover': 'rgb(var(--color-surface-card-hover) / <alpha-value>)',
+            'card-muted': 'rgb(var(--color-card-muted) / <alpha-value>)',
+            'card-border': 'rgb(var(--color-card-border) / <alpha-value>)',
+            'surface-dialog-header': 'rgb(var(--color-surface-dialog-header) / <alpha-value>)',
+            'surface-connector': 'rgb(var(--color-surface-connector) / <alpha-value>)',
+            'connector-border': 'rgb(var(--color-connector-border) / <alpha-value>)',
+            'card-source-border': 'rgb(var(--color-card-source-border) / <alpha-value>)',
+            'card-target-border': 'rgb(var(--color-card-target-border) / <alpha-value>)',
+            'summary-surface': 'rgb(var(--color-summary-surface) / <alpha-value>)',
+            'summary-text': 'rgb(var(--color-summary-text) / <alpha-value>)',
+            'summary-border': 'rgb(var(--color-summary-border) / <alpha-value>)',
+            'action-surface': 'rgb(var(--color-action-surface) / <alpha-value>)',
+            'action-surface-hover': 'rgb(var(--color-action-surface-hover) / <alpha-value>)',
+            'action-border': 'rgb(var(--color-action-border) / <alpha-value>)',
+            'action-text': 'rgb(var(--color-action-text) / <alpha-value>)',
+            'tab-selected': 'rgb(var(--color-tab-selected) / <alpha-value>)',
+            'tab-badge': 'rgb(var(--color-tab-badge) / <alpha-value>)',
+            'tab-badge-text': 'rgb(var(--color-tab-badge-text) / <alpha-value>)',
+            'close-surface': 'rgb(var(--color-close-surface) / <alpha-value>)',
+            'close-text': 'rgb(var(--color-close-text) / <alpha-value>)',
+            'close-border': 'rgb(var(--color-close-border) / <alpha-value>)',
+            'close-surface-hover': 'rgb(var(--color-close-surface-hover) / <alpha-value>)',
+            'close-text-hover': 'rgb(var(--color-close-text-hover) / <alpha-value>)',
+            'close-border-hover': 'rgb(var(--color-close-border-hover) / <alpha-value>)',
+            'separator': 'rgb(var(--color-separator) / <alpha-value>)',
+            'separator-muted': 'rgb(var(--color-separator-muted) / <alpha-value>)',
+            'border-subtle': 'rgb(var(--color-border-subtle) / <alpha-value>)',
+            'border': 'rgb(var(--color-border) / <alpha-value>)',
+            'border-strong': 'rgb(var(--color-border-strong) / <alpha-value>)',
+            'border-glass': 'rgb(var(--color-border-glass) / <alpha-value>)',
+            'content-primary': 'rgb(var(--color-content-primary) / <alpha-value>)',
+            'content-heading': 'rgb(var(--color-content-heading) / <alpha-value>)',
+            'content-body': 'rgb(var(--color-content-body) / <alpha-value>)',
+            'content-secondary': 'rgb(var(--color-content-secondary) / <alpha-value>)',
+            'content-muted': 'rgb(var(--color-content-muted) / <alpha-value>)',
+            'content-faint': 'rgb(var(--color-content-faint) / <alpha-value>)',
+            'accent-softest': 'rgb(var(--color-accent-softest) / <alpha-value>)',
+            'accent-soft': 'rgb(var(--color-accent-soft) / <alpha-value>)',
+            'accent-border': 'rgb(var(--color-accent-border) / <alpha-value>)',
+            'accent-border-strong': 'rgb(var(--color-accent-border-strong) / <alpha-value>)',
+            'accent-focus': 'rgb(var(--color-accent-focus) / <alpha-value>)',
+            'accent-marker': 'rgb(var(--color-accent-marker) / <alpha-value>)',
+            'accent-text': 'rgb(var(--color-accent-text) / <alpha-value>)',
+            'accent-text-hover': 'rgb(var(--color-accent-text-hover) / <alpha-value>)',
+            'accent-heading': 'rgb(var(--color-accent-heading) / <alpha-value>)',
+            'accent-emphasis': 'rgb(var(--color-accent-emphasis) / <alpha-value>)',
+            'accent-solid': 'rgb(var(--color-accent-solid) / <alpha-value>)',
+            'accent-solid-hover': 'rgb(var(--color-accent-solid-hover) / <alpha-value>)',
+            'on-accent': 'rgb(var(--color-on-accent) / <alpha-value>)',
+            'success-soft': 'rgb(var(--color-success-soft) / <alpha-value>)',
+            'success-border': 'rgb(var(--color-success-border) / <alpha-value>)',
+            'success-marker': 'rgb(var(--color-success-marker) / <alpha-value>)',
+            'success-text': 'rgb(var(--color-success-text) / <alpha-value>)',
+            'success-heading': 'rgb(var(--color-success-heading) / <alpha-value>)',
+            'danger-soft': 'rgb(var(--color-danger-soft) / <alpha-value>)',
+            'danger-border': 'rgb(var(--color-danger-border) / <alpha-value>)',
+            'danger-marker': 'rgb(var(--color-danger-marker) / <alpha-value>)',
+            'danger-text': 'rgb(var(--color-danger-text) / <alpha-value>)',
+            'danger-heading': 'rgb(var(--color-danger-heading) / <alpha-value>)',
+            'danger-solid': 'rgb(var(--color-danger-solid) / <alpha-value>)',
+            'danger-solid-hover': 'rgb(var(--color-danger-solid-hover) / <alpha-value>)',
+            'progress-track': 'rgb(var(--color-progress-track) / <alpha-value>)',
+            'progress-active': 'rgb(var(--color-progress-active) / <alpha-value>)',
+            'tooltip-surface': 'rgb(var(--color-tooltip-surface) / <alpha-value>)',
+            'tooltip-text': 'rgb(var(--color-tooltip-text) / <alpha-value>)',
+            'interaction': 'rgb(var(--color-interaction) / <alpha-value>)',
+            'overlay': 'rgb(var(--color-overlay) / <alpha-value>)',
+            'ring': 'rgb(var(--color-ring) / <alpha-value>)',
+            'timeline-label': 'rgb(var(--color-timeline-label) / <alpha-value>)',
+            'timeline-grid': 'rgb(var(--color-timeline-grid) / <alpha-value>)',
+            'timeline-connector': 'rgb(var(--color-timeline-connector) / <alpha-value>)',
+            'timeline-axis': 'rgb(var(--color-timeline-axis) / <alpha-value>)',
+            'timeline-axis-label': 'rgb(var(--color-timeline-axis-label) / <alpha-value>)',
+            'timeline-search': 'rgb(var(--color-timeline-search) / <alpha-value>)',
+            'timeline-search-text': 'rgb(var(--color-timeline-search-text) / <alpha-value>)',
+          },
+          boxShadow: {
+            sm: '0 1px 2px 0 rgb(var(--color-shadow) / 0.05)',
+            DEFAULT: '0 1px 3px 0 rgb(var(--color-shadow) / 0.1), 0 1px 2px -1px rgb(var(--color-shadow) / 0.1)',
+            md: '0 4px 6px -1px rgb(var(--color-shadow) / 0.1), 0 2px 4px -2px rgb(var(--color-shadow) / 0.1)',
+            lg: '0 10px 15px -3px rgb(var(--color-shadow) / 0.1), 0 4px 6px -4px rgb(var(--color-shadow) / 0.1)',
+            xl: '0 20px 25px -5px rgb(var(--color-shadow) / 0.1), 0 8px 10px -6px rgb(var(--color-shadow) / 0.1)',
+            '2xl': '0 25px 50px -12px rgb(var(--color-shadow) / 0.25)',
+          },
+          dropShadow: {
+            sm: '0 1px 1px rgb(var(--color-shadow) / 0.05)',
           },
           animation: {
             'pulse-limited': 'pulseLimited 3s ease-in-out 1 forwards', // 5 beats roughly

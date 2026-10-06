@@ -1,4 +1,11 @@
 /* Custom scrollbar hiding just in case */
+/* Theme changes are immediate; existing movement and opacity transitions remain. */
+:root[data-theme-switching] *,
+:root[data-theme-switching] *::before,
+:root[data-theme-switching] *::after {
+    transition-property: opacity, transform, translate, scale, rotate, top, right, bottom, left, width, height, max-height !important;
+}
+
 .no-scrollbar::-webkit-scrollbar {
     display: none;
 }
@@ -48,7 +55,7 @@ input[type=number] {
 .markdown-content h3 { font-size: 1.125em; }
 
 .markdown-content a {
-    color: #2563eb;
+    color: rgb(var(--color-accent-text));
     text-decoration: underline;
     text-underline-offset: 2px;
 }
@@ -56,14 +63,14 @@ input[type=number] {
 .markdown-content blockquote {
     margin: 0.75em 0;
     padding-left: 1em;
-    border-left: 3px solid #bfdbfe;
-    color: #4b5563;
+    border-left: 3px solid rgb(var(--color-accent-border));
+    color: rgb(var(--color-content-secondary));
 }
 
 .markdown-content code {
     padding: 0.1em 0.3em;
     border-radius: 0.25em;
-    background: #f3f4f6;
+    background: rgb(var(--color-surface-muted));
     font-family: ui-monospace, monospace;
     font-size: 0.875em;
 }
@@ -72,9 +79,9 @@ input[type=number] {
     margin: 0.75em 0;
     padding: 1em;
     overflow-x: auto;
-    border: 1px solid #e5e7eb;
+    border: 1px solid rgb(var(--color-border));
     border-radius: 0.5em;
-    background: #f9fafb;
+    background: rgb(var(--color-surface-subtle));
     white-space: pre;
 }
 
@@ -94,43 +101,62 @@ input[type=number] {
 
 .markdown-content :is(th, td) {
     padding: 0.5em 0.75em;
-    border: 1px solid #d1d5db;
+    border: 1px solid rgb(var(--color-border-strong));
     text-align: left;
     vertical-align: top;
 }
 
-.markdown-content th { background: #f9fafb; }
+.markdown-content th { background: rgb(var(--color-surface-subtle)); }
 .markdown-content img { max-width: 100%; height: auto; }
 .markdown-content input[type=checkbox] { margin-right: 0.5em; }
-.markdown-content hr { margin: 1em 0; border-top: 1px solid #e5e7eb; }
+.markdown-content hr { margin: 1em 0; border-top: 1px solid rgb(var(--color-border)); }
 .markdown-content > :first-child { margin-top: 0; }
 .markdown-content > :last-child { margin-bottom: 0; }
 @keyframes relationship-appear { from { opacity: 0; } to { opacity: 1; } }
-.relationship-overlay, .relationship-detail-backdrop { background: rgb(255 255 255 / 60%); backdrop-filter: blur(24px); }
+.relationship-overlay, .relationship-detail-backdrop { background: rgb(var(--color-surface) / 60%); backdrop-filter: blur(24px); }
 .relationship-overlay { position: fixed; inset: 0; z-index: 95; }
 .relationship-dialog { height: 100%; outline: none; }
-.relationship-close { position: fixed; top: 20px; right: 20px; z-index: 2; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; background: white; color: #2563eb; border: 1px solid #bfdbfe; box-shadow: 0 4px 16px #0002; }
-.relationship-close:hover { color: #1d4ed8; background: #eff6ff; }
+.close-button {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  padding: 0;
+  border-radius: 50%;
+  background: rgb(var(--color-close-surface));
+  color: rgb(var(--color-close-text));
+  border: 1px solid rgb(var(--color-close-border));
+  box-shadow: 0 4px 16px rgb(var(--color-shadow) / 0.1333333333);
+  transition: background-color 150ms, color 150ms, border-color 150ms;
+}
+.close-button:hover {
+  background: rgb(var(--color-close-surface-hover));
+  color: rgb(var(--color-close-text-hover));
+  border-color: rgb(var(--color-close-border-hover));
+}
+.close-button:focus-visible { outline: 3px solid rgb(var(--color-accent-focus)); outline-offset: 4px; }
+.relationship-close { position: fixed; top: 20px; right: 20px; z-index: 2; }
 .relationship-scroll { height: 100%; overflow-y: auto; overflow-x: hidden; padding: 48px 32px 56px; }
-.relationship-heading { text-align: center; color: #111827; margin: 0 auto 32px; }
-.relationship-heading > p { font-size: 12px; text-transform: uppercase; letter-spacing: .15em; color: #3b82f6; font-weight: 700; }
+.relationship-heading { text-align: center; color: rgb(var(--color-content-primary)); margin: 0 auto 32px; }
+.relationship-heading > p { font-size: 12px; text-transform: uppercase; letter-spacing: .15em; color: rgb(var(--color-accent-marker)); font-weight: 700; }
 .relationship-heading h1 { font-size: 26px; font-weight: 700; margin-top: 6px; }
 .relationship-diagram { position: relative; max-width: 1400px; margin: auto; padding: 8px; }
 .relationship-top { display: flex; flex-direction: column; align-items: center; gap: 56px; }
 .relationship-rows { display: flex; flex-direction: column; width: 100%; gap: 40px; }
 .relationship-row { display: flex; justify-content: center; align-items: stretch; gap: 32px; width: 100%; }
-.relationship-card { position: relative; z-index: 1; width: 100%; max-width: 320px; min-height: 116px; display: flex; align-items: center; gap: 12px; padding: 18px; text-align: left; background: rgb(255 255 255 / 96%); border: 1px solid #e5e7eb; border-radius: 12px; box-shadow: 0 8px 28px #0002; transition: box-shadow 150ms; }
+.relationship-card { position: relative; z-index: 1; width: 100%; max-width: 320px; min-height: 116px; display: flex; align-items: center; gap: 12px; padding: 18px; text-align: left; background: rgb(var(--color-surface-card) / 96%); border: 1px solid rgb(var(--color-card-border)); border-radius: 12px; box-shadow: 0 8px 28px rgb(var(--color-shadow) / 0.1333333333); transition: box-shadow 150ms; }
 .relationship-row > .relationship-card { width: calc((100% - (var(--relationship-columns) - 1) * 32px) / var(--relationship-columns)); }
-.relationship-card:hover { box-shadow: 0 8px 28px #0004; }
-.relationship-source { border-color: #93c5fd; box-shadow: 0 0 0 1px #93c5fd, 0 8px 28px #0002; }
+.relationship-card:hover { box-shadow: 0 8px 28px rgb(var(--color-shadow) / 0.2666666667); }
+.relationship-source { border-color: rgb(var(--color-accent-border-strong)); box-shadow: 0 0 0 1px rgb(var(--color-accent-border-strong)), 0 8px 28px rgb(var(--color-shadow) / 0.1333333333); }
 .relationship-card-text { flex: 1; min-width: 0; }
-.relationship-card h2 { font-size: 20px; font-weight: 700; line-height: 1.2; overflow-wrap: anywhere; color: #111827; }
-.relationship-dates { color: #6b7280; font-family: monospace; font-weight: 600; font-size: 13px; margin-top: 6px; }
-.relationship-occupation { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: #065f46; margin-top: 6px; overflow-wrap: anywhere; }
+.relationship-card h2 { font-size: 20px; font-weight: 700; line-height: 1.2; overflow-wrap: anywhere; color: rgb(var(--color-content-primary)); }
+.relationship-dates { color: rgb(var(--color-card-muted)); font-family: monospace; font-weight: 600; font-size: 13px; margin-top: 6px; }
+.relationship-occupation { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: rgb(var(--color-success-heading)); margin-top: 6px; overflow-wrap: anywhere; }
 .relationship-card img { width: 64px; height: 64px; object-fit: cover; object-position: top; border-radius: 10px; flex-shrink: 0; }
-.relationship-status { color: #374151; text-align: center; max-width: 560px; margin: 32px auto 0; font-size: 14px; }
-.relationship-retry { margin-top: 16px; padding: 9px 24px; background: white; color: #1d4ed8; font-weight: 700; border-radius: 8px; }
-.relationship-card:focus-visible, .relationship-close:focus-visible, .relationship-retry:focus-visible { outline: 3px solid #60a5fa; outline-offset: 4px; }
+.relationship-status { color: rgb(var(--color-content-body)); text-align: center; max-width: 560px; margin: 32px auto 0; font-size: 14px; }
+.relationship-retry { margin-top: 16px; padding: 9px 24px; background: rgb(var(--color-surface)); color: rgb(var(--color-accent-text-hover)); font-weight: 700; border-radius: 8px; }
+.relationship-card:focus-visible, .relationship-retry:focus-visible { outline: 3px solid rgb(var(--color-accent-focus)); outline-offset: 4px; }
 @media (max-width: 680px) {
   .relationship-scroll { padding: 68px 20px 40px; }
   .relationship-heading h1 { font-size: 22px; }

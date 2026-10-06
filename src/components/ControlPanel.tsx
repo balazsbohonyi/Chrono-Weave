@@ -1,5 +1,6 @@
 
 import React, { useState } from 'react';
+import { useTheme } from '../contexts/ThemeContext';
 
 interface ControlPanelProps {
   startYear: number;
@@ -35,6 +36,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   const [localStart, setLocalStart] = useState<string>(startYear.toString());
   const [localEnd, setLocalEnd] = useState<string>(endYear.toString());
   const [searchQuery, setSearchQuery] = useState("");
+  const { theme, toggleTheme } = useTheme();
+  const themeLabel = theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme';
 
   // Sync local state with props when they change (e.g. from cache load)
   React.useEffect(() => {
@@ -80,36 +83,36 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   };
 
   return (
-    <div className="fixed top-0 left-0 w-full z-50 flex items-center gap-4 bg-white/60 backdrop-blur-xl px-6 py-2 border-b border-gray-200/50 shadow-sm transition-all h-[52px]">
+    <div className="fixed top-0 left-0 w-full z-50 flex items-center gap-4 bg-surface/60 backdrop-blur-xl px-6 py-2 border-b border-border/50 shadow-sm transition-all h-[52px]">
       <div className="flex items-center gap-2">
         <input
           type="number"
           placeholder="Start"
           value={localStart}
           onChange={(e) => setLocalStart(e.target.value)}
-          className="w-[3.25rem] h-8 px-1 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-400 outline-none bg-white/80 placeholder-gray-400 text-center transition-all"
+          className="w-[3.25rem] h-8 px-1 text-sm border border-border-strong rounded-md focus:ring-2 focus:ring-accent-focus outline-none bg-surface/80 placeholder-content-faint text-center transition-all"
         />
-        <span className="text-gray-500 font-medium">–</span>
+        <span className="text-content-muted font-medium">–</span>
         <input
           type="number"
           placeholder="End"
           value={localEnd}
           onChange={(e) => setLocalEnd(e.target.value)}
-          className="w-[3.25rem] h-8 px-1 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-400 outline-none bg-white/80 placeholder-gray-400 text-center transition-all"
+          className="w-[3.25rem] h-8 px-1 text-sm border border-border-strong rounded-md focus:ring-2 focus:ring-accent-focus outline-none bg-surface/80 placeholder-content-faint text-center transition-all"
         />
       </div>
 
-      <div className="h-6 w-px bg-gray-400/30"></div>
+      <div className="h-6 w-px bg-separator-muted/30"></div>
 
       <div className="flex flex-col space-y-0">
         <button
           onClick={handleBuild}
           disabled={isBuilding}
-          className="h-8 px-4 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold uppercase tracking-wider rounded-lg shadow-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center min-w-[120px]"
+          className="h-8 px-4 bg-accent-solid hover:bg-accent-solid-hover text-on-accent text-xs font-bold uppercase tracking-wider rounded-lg shadow-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center min-w-[120px]"
         >
           {isBuilding ? (
             <>
-              <svg className="animate-spin -ml-1 mr-2 h-3 w-3 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <svg className="animate-spin -ml-1 mr-2 h-3 w-3 text-on-accent" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
               </svg>
@@ -121,10 +124,10 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
         </button>
       </div>
 
-      <div className="h-6 w-px bg-gray-400/30"></div>
+      <div className="h-6 w-px bg-separator-muted/30"></div>
 
       <div className={`relative flex items-center group flex-1 max-w-[250px] transition-opacity duration-300 ${!hasFigures ? 'opacity-50 grayscale' : 'opacity-100'}`}>
-        <div className="absolute left-3 text-gray-400 pointer-events-none z-10">
+        <div className="absolute left-3 text-content-faint pointer-events-none z-10">
           <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
           </svg>
@@ -138,17 +141,17 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
             onChange={handleInputChange}
             onKeyDown={handleSearchKeyDown}
             disabled={!hasFigures}
-            className="w-full h-8 pl-9 pr-10 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-400 outline-none bg-white/80 placeholder-gray-400 transition-all disabled:bg-gray-100 disabled:cursor-not-allowed"
+            className="w-full h-8 pl-9 pr-10 text-sm border border-border-strong rounded-md focus:ring-2 focus:ring-accent-focus outline-none bg-surface/80 placeholder-content-faint transition-all disabled:bg-surface-muted disabled:cursor-not-allowed"
           />
 
           {searchResultCount > 1 ? (
-            <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 bg-gray-100/80 rounded px-1 py-0.5 border border-gray-200">
-              <span className="text-xs text-gray-500 font-medium px-1 border-r border-gray-300 mr-1 min-w-[40px] text-center">
+            <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 bg-surface-muted/80 rounded px-1 py-0.5 border border-border">
+              <span className="text-xs text-content-muted font-medium px-1 border-r border-border-strong mr-1 min-w-[40px] text-center">
                 {currentResultIndex + 1} of {searchResultCount}
               </span>
               <button
                 onClick={onPrevResult}
-                className="p-1 hover:bg-white hover:text-blue-600 rounded text-gray-500 transition-colors"
+                className="p-1 hover:bg-surface hover:text-accent-text rounded text-content-muted transition-colors"
                 title="Previous Result"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -157,7 +160,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
               </button>
               <button
                 onClick={onNextResult}
-                className="p-1 hover:bg-white hover:text-blue-600 rounded text-gray-500 transition-colors"
+                className="p-1 hover:bg-surface hover:text-accent-text rounded text-content-muted transition-colors"
                 title="Next Result"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -165,11 +168,11 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                 </svg>
               </button>
 
-              <div className="w-px h-3 bg-gray-300 mx-1"></div>
+              <div className="w-px h-3 bg-separator mx-1"></div>
 
               <button
                 onClick={handleClearSearch}
-                className="p-1 text-gray-400 hover:text-red-500 rounded-full hover:bg-red-50 transition-colors"
+                className="p-1 text-content-faint hover:text-danger-marker rounded-full hover:bg-danger-soft transition-colors"
                 title="Clear Search"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -181,7 +184,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
             searchQuery && (
               <button
                 onClick={handleClearSearch}
-                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-content-faint hover:text-content-secondary rounded-full hover:bg-surface-muted"
                 aria-label="Clear search"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -193,11 +196,29 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
         </div>
       </div>
 
-      {/* Settings Toggle (Always Visible) */}
+      {/* Theme and settings controls stay visible while the timeline is busy. */}
       <div className="ml-auto flex items-center">
         <button
+          type="button"
+          onClick={toggleTheme}
+          className="p-2 text-content-muted hover:text-content-heading hover:bg-interaction/5 rounded-lg transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-marker focus-visible:outline-offset-2"
+          aria-label={themeLabel}
+          title={themeLabel}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+            {theme === 'light' ? (
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
+            ) : (
+              <>
+                <circle cx="12" cy="12" r="4" />
+                <path strokeLinecap="round" d="M12 2v2m0 16v2M2 12h2m16 0h2M4.93 4.93l1.42 1.42m11.3 11.3l1.42 1.42M4.93 19.07l1.42-1.42m11.3-11.3l1.42-1.42" />
+              </>
+            )}
+          </svg>
+        </button>
+        <button
           onClick={onOpenSettings}
-          className="p-2 text-gray-500 hover:text-gray-800 hover:bg-black/5 rounded-lg transition-colors"
+          className="p-2 text-content-muted hover:text-content-heading hover:bg-interaction/5 rounded-lg transition-colors"
           title="Settings"
         >
           <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">

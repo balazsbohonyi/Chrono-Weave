@@ -47,12 +47,12 @@ const FloatingToolbar: React.FC<FloatingToolbarProps> = ({ mode, setMode, onRese
   ];
 
   return (
-    <div className="fixed bottom-12 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1 bg-white/60 backdrop-blur-xl p-1.5 rounded-xl border border-white/40 shadow-xl ring-1 ring-black/5 animate-in slide-in-from-bottom-6 fade-in duration-300">
+    <div className="fixed bottom-12 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1 bg-surface/60 backdrop-blur-xl p-1.5 rounded-xl border border-border-glass/40 shadow-xl ring-1 ring-ring/5 animate-in slide-in-from-bottom-6 fade-in duration-300">
         {tools.map((tool) => (
              <button
                 key={tool.id}
                 onClick={() => setMode(tool.id as InteractionMode)}
-                className={`relative w-12 h-12 flex items-center justify-center rounded-lg transition-all duration-200 group outline-none ${mode === tool.id ? 'bg-white shadow-sm text-blue-600 ring-1 ring-black/5' : 'text-gray-500 hover:bg-black/5 hover:text-gray-900'}`}
+                className={`relative w-12 h-12 flex items-center justify-center rounded-lg transition-all duration-200 group outline-none ${mode === tool.id ? 'bg-surface shadow-sm text-accent-text ring-1 ring-ring/5' : 'text-content-muted hover:bg-interaction/5 hover:text-content-primary'}`}
                 title={`${tool.label} (${tool.shortcut})`}
              >
                 {tool.icon}
@@ -60,11 +60,11 @@ const FloatingToolbar: React.FC<FloatingToolbarProps> = ({ mode, setMode, onRese
              </button>
         ))}
         
-        <div className="w-px h-6 bg-gray-400/30 mx-1"></div>
+        <div className="w-px h-6 bg-separator-muted/30 mx-1"></div>
 
         <button
              onClick={onResetZoom}
-             className="relative w-12 h-12 flex items-center justify-center rounded-lg transition-all duration-200 text-gray-500 hover:bg-black/5 hover:text-gray-900 outline-none"
+             className="relative w-12 h-12 flex items-center justify-center rounded-lg transition-all duration-200 text-content-muted hover:bg-interaction/5 hover:text-content-primary outline-none"
              title="Reset Zoom (R)"
         >
              <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

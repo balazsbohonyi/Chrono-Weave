@@ -30,42 +30,30 @@ export const EVENT_DEEP_DIVE_SECTION_TITLES = [
   'Background', 'Main Developments', 'Key Participants', 'Historical Impact',
 ] as const;
 
-// Previous color scheme (commented out for reference):
-// export const CATEGORY_COLORS: Record<FigureCategory, string> = {
-//   'ARTISTS': '#b7e1f3',
-//   'BUSINESS': '#f9c908',
-//   'ENTERTAINERS': '#e879f9',
-//   'EXPLORERS': '#f35844',
-//   'LEADERS & BADDIES': '#000000',
-//   'SCIENTISTS': '#81599b',
-//   'THINKERS': '#aad356',
-//   'WRITERS': '#189aa8',
-//   'EVENTS': '#bdb48e'
-// };
-
+// Theme tokens keep category bars and legend swatches in sync.
 export const CATEGORY_COLORS: Record<FigureCategory, string> = {
-  'ARTISTS': '#60A5FA', // blue
-  'BUSINESS': '#FBBF24', // amber
-  'ENTERTAINERS': '#84CC16', // bright yellow-green
-  'EVENTS': '#A8B5C8', // medium slate gray (slightly muted)
-  'EXPLORERS': '#EF4444', // red
-  'LEADERS & BADDIES': '#1E293B', // dark slate
-  'SCIENTISTS': '#8B5CF6', // violet
-  'THINKERS': '#10B981', // emerald
-  'WRITERS': '#06B6D4' // cyan
+  'ARTISTS': 'rgb(var(--color-category-artists))',
+  'BUSINESS': 'rgb(var(--color-category-business))',
+  'ENTERTAINERS': 'rgb(var(--color-category-entertainers))',
+  'EVENTS': 'rgb(var(--color-category-events))',
+  'EXPLORERS': 'rgb(var(--color-category-explorers))',
+  'LEADERS & BADDIES': 'rgb(var(--color-category-leaders))',
+  'SCIENTISTS': 'rgb(var(--color-category-scientists))',
+  'THINKERS': 'rgb(var(--color-category-thinkers))',
+  'WRITERS': 'rgb(var(--color-category-writers))',
 };
 
-// Year text inside timeline bars. Adjust alongside CATEGORY_COLORS.
-export const CATEGORY_BAR_TEXT_COLORS: Record<FigureCategory, 'white' | 'black'> = {
-  'ARTISTS': 'black',
-  'BUSINESS': 'black',
-  'ENTERTAINERS': 'white',
-  'EVENTS': 'black',
-  'EXPLORERS': 'white',
-  'LEADERS & BADDIES': 'white',
-  'SCIENTISTS': 'white',
-  'THINKERS': 'white',
-  'WRITERS': 'white'
+// Each theme defines a contrasting year label for every category.
+export const CATEGORY_BAR_TEXT_COLORS: Record<FigureCategory, string> = {
+  'ARTISTS': 'rgb(var(--color-category-artists-text))',
+  'BUSINESS': 'rgb(var(--color-category-business-text))',
+  'ENTERTAINERS': 'rgb(var(--color-category-entertainers-text))',
+  'EVENTS': 'rgb(var(--color-category-events-text))',
+  'EXPLORERS': 'rgb(var(--color-category-explorers-text))',
+  'LEADERS & BADDIES': 'rgb(var(--color-category-leaders-text))',
+  'SCIENTISTS': 'rgb(var(--color-category-scientists-text))',
+  'THINKERS': 'rgb(var(--color-category-thinkers-text))',
+  'WRITERS': 'rgb(var(--color-category-writers-text))',
 };
 
 // Sorted Alphabetically

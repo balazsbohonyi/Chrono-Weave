@@ -580,7 +580,7 @@ const App: React.FC = () => {
     const isBusy = loading || isDiscovering || isTracing;
 
     return (
-        <div className="relative w-screen h-screen overflow-hidden font-sans text-gray-900 bg-[#f4ecd8]">
+        <div className="relative w-screen h-screen overflow-hidden font-sans text-content-primary bg-canvas">
             <div className="absolute inset-0" inert={!!relationshipState || popoverState.isOpen}>
             <ControlPanel
                 startYear={config.start}

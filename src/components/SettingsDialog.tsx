@@ -14,7 +14,7 @@ interface SettingsDialogProps {
   onShowToast: (message: string, type: 'success' | 'info' | 'error') => void;
 }
 
-const fieldClass = 'w-full h-10 px-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none bg-white';
+const fieldClass = 'w-full h-10 px-3 border border-border-strong rounded-md focus:ring-2 focus:ring-accent-marker outline-none bg-surface';
 const configLabel = (config: AppConfig) => providerNames[config.provider] +
   (config.provider === 'ollama' ? config.ollamaMode === 'cloud' ? ' Cloud' : ' (local server)' : '');
 
@@ -142,20 +142,24 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose, onSave
     : form.provider === 'gemini' ? 'https://aistudio.google.com/apikey' : 'https://openrouter.ai/keys';
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-      <div role="dialog" aria-modal="true" aria-labelledby="settings-title" className="bg-white rounded-xl shadow-2xl w-full max-w-md max-h-[90vh] flex flex-col overflow-hidden">
-        <div className="bg-gray-50 px-6 py-4 border-b border-gray-200 flex justify-between items-center shrink-0">
-          <h2 id="settings-title" className="text-lg font-bold text-gray-800">AI Settings</h2>
-          <button aria-label="Close settings" onClick={onClose} className="text-gray-500 hover:text-gray-800 text-xl">×</button>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-overlay/50 backdrop-blur-sm p-4">
+      <div role="dialog" aria-modal="true" aria-labelledby="settings-title" className="bg-surface rounded-xl shadow-2xl w-full max-w-md max-h-[90vh] flex flex-col overflow-hidden">
+        <div className="bg-surface-subtle px-6 py-4 border-b border-border flex justify-between items-center shrink-0">
+          <h2 id="settings-title" className="text-lg font-bold text-content-heading">AI Settings</h2>
+          <button type="button" aria-label="Close settings" onClick={onClose} className="close-button">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 6l12 12M6 18L18 6" />
+            </svg>
+          </button>
         </div>
-        <div className="px-6 py-3 bg-blue-50 border-b border-blue-100 text-sm text-gray-700 shrink-0">
+        <div className="px-6 py-3 bg-accent-softest border-b border-accent-soft text-sm text-content-body shrink-0">
           <span className="font-medium">Currently using:</span> {configLabel(currentConfig)} with model{' '}
           <span className="font-mono text-xs break-all">{currentConfig.model}</span>
         </div>
         <div className="min-h-0 overflow-y-auto">
         <div className="p-6 space-y-5">
           <div>
-            <label htmlFor="ai-provider" className="block text-sm font-medium text-gray-700 mb-1">AI Provider</label>
+            <label htmlFor="ai-provider" className="block text-sm font-medium text-content-body mb-1">AI Provider</label>
             <select id="ai-provider" value={form.provider} onChange={event => switchProfile(event.target.value as AIProvider)} className={fieldClass}>
               <option value="gemini">Google Gemini</option>
               <option value="openrouter">OpenRouter</option>
@@ -164,34 +168,34 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose, onSave
           </div>
           {isOllama && (
             <div>
-              <label htmlFor="ollama-mode" className="block text-sm font-medium text-gray-700 mb-1">Ollama connection</label>
+              <label htmlFor="ollama-mode" className="block text-sm font-medium text-content-body mb-1">Ollama connection</label>
               <select id="ollama-mode" value={form.ollamaMode} onChange={event => switchProfile('ollama', event.target.value as OllamaMode)} className={fieldClass}>
                 <option value="local">Local server</option>
                 <option value="cloud">Ollama Cloud</option>
               </select>
-              <p className="text-xs text-gray-500 mt-1">{isCloud ? 'Connect to Ollama Cloud using your API key.' : 'Use local models or cloud models through your signed-in Ollama installation.'}</p>
+              <p className="text-xs text-content-muted mt-1">{isCloud ? 'Connect to Ollama Cloud using your API key.' : 'Use local models or cloud models through your signed-in Ollama installation.'}</p>
             </div>
           )}
           {isOllama && !isCloud && (
             <div>
-              <label htmlFor="ollama-url" className="block text-sm font-medium text-gray-700 mb-1">Ollama server URL</label>
+              <label htmlFor="ollama-url" className="block text-sm font-medium text-content-body mb-1">Ollama server URL</label>
               <input id="ollama-url" type="url" value={form.baseUrl} onChange={event => update({ baseUrl: event.target.value })} placeholder="http://localhost:11434" className={fieldClass} />
-              <p className="text-xs text-gray-500 mt-1">No API key is required. Start Ollama and sign in there to use cloud models.</p>
+              <p className="text-xs text-content-muted mt-1">No API key is required. Start Ollama and sign in there to use cloud models.</p>
             </div>
           )}
           {(!isOllama || isCloud) && (
             <div>
-              <label htmlFor="ai-key" className="block text-sm font-medium text-gray-700 mb-1">{configLabel(form)} API Key</label>
+              <label htmlFor="ai-key" className="block text-sm font-medium text-content-body mb-1">{configLabel(form)} API Key</label>
               <input id="ai-key" type="password" autoComplete="off" value={form.apiKey} onChange={event => update({ apiKey: event.target.value })} placeholder={isCloud && hasEnvironmentKey ? 'Server API key configured (optional override)' : 'Enter your API key'} className={fieldClass} />
-              <p className="text-xs text-gray-500 mt-1">
-                Get a key from <a href={keyUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{isCloud ? 'Ollama' : providerNames[form.provider]}</a>.
+              <p className="text-xs text-content-muted mt-1">
+                Get a key from <a href={keyUrl} target="_blank" rel="noopener noreferrer" className="text-accent-text hover:underline">{isCloud ? 'Ollama' : providerNames[form.provider]}</a>.
               </p>
-              {isCloud && <p className="text-xs text-gray-500 mt-1">Your key is saved in this browser when you click Save. {hasEnvironmentKey && 'Leave blank to use the server’s configured key.'}</p>}
-              {isCloud && relayError && <p role="status" className="text-xs text-red-600 mt-1">{relayError}</p>}
+              {isCloud && <p className="text-xs text-content-muted mt-1">Your key is saved in this browser when you click Save. {hasEnvironmentKey && 'Leave blank to use the server’s configured key.'}</p>}
+              {isCloud && relayError && <p role="status" className="text-xs text-danger-text mt-1">{relayError}</p>}
             </div>
           )}
           <div>
-            <label htmlFor="ai-model" className="block text-sm font-medium text-gray-700 mb-1">Model ID</label>
+            <label htmlFor="ai-model" className="block text-sm font-medium text-content-body mb-1">Model ID</label>
             {isOllama ? (
               <>
                 <select id="ai-model" value={manualModel ? '' : form.model} onChange={event => {
@@ -204,38 +208,38 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose, onSave
                 </select>
                 {(manualModel || !form.model) && (
                   <div className="mt-2">
-                    <label htmlFor="ai-custom-model" className="block text-sm font-medium text-gray-700 mb-1">Custom model ID</label>
+                    <label htmlFor="ai-custom-model" className="block text-sm font-medium text-content-body mb-1">Custom model ID</label>
                     <input id="ai-custom-model" type="text" value={form.model} onChange={event => update({ model: event.target.value })} placeholder={defaultModel(form.provider, form.ollamaMode)} className={fieldClass} />
                   </div>
                 )}
                 <div className="flex justify-between items-center gap-2 mt-2">
-                  <span role="status" className="text-xs text-gray-500">{isListing ? 'Loading models…' : `${models.length} models available. You can also enter a name.`}</span>
-                  <button onClick={() => setRefresh(value => value + 1)} disabled={isListing} className="text-sm text-blue-600 hover:underline disabled:opacity-50">Refresh models</button>
+                  <span role="status" className="text-xs text-content-muted">{isListing ? 'Loading models…' : `${models.length} models available. You can also enter a name.`}</span>
+                  <button onClick={() => setRefresh(value => value + 1)} disabled={isListing} className="text-sm text-accent-text hover:underline disabled:opacity-50">Refresh models</button>
                 </div>
-                {listError && <p role="status" className="text-xs text-red-600 mt-2">{listError}</p>}
-                {isCloud && <p className="text-xs text-gray-500 mt-1">Use the cloud catalog’s exact model ID; local “-cloud” aliases can differ.</p>}
+                {listError && <p role="status" className="text-xs text-danger-text mt-2">{listError}</p>}
+                {isCloud && <p className="text-xs text-content-muted mt-1">Use the cloud catalog’s exact model ID; local “-cloud” aliases can differ.</p>}
               </>
             ) : <>
               <input id="ai-model" type="text" value={form.model} onChange={event => update({ model: event.target.value })} placeholder={defaultModel(form.provider)} className={fieldClass} />
-              <p className="text-xs text-gray-500 mt-1">Default: {defaultModel(form.provider)}</p>
+              <p className="text-xs text-content-muted mt-1">Default: {defaultModel(form.provider)}</p>
             </>}
           </div>
           {isOllama && <div>
-            <label htmlFor="ollama-reasoning" className="flex items-center gap-2 text-sm font-medium text-gray-700">
-              <input id="ollama-reasoning" type="checkbox" checked={form.ollamaReasoning === true} onChange={event => update({ ollamaReasoning: event.target.checked })} className="h-4 w-4 accent-blue-600" />
+            <label htmlFor="ollama-reasoning" className="flex items-center gap-2 text-sm font-medium text-content-body">
+              <input id="ollama-reasoning" type="checkbox" checked={form.ollamaReasoning === true} onChange={event => update({ ollamaReasoning: event.target.checked })} className="h-4 w-4 accent-accent-solid" />
               Enable reasoning
             </label>
-            <p className="text-xs text-gray-500 mt-1">Off by default for faster replies. Enable for harder questions with a model that supports reasoning. GPT-OSS always reasons: off uses low effort, on uses medium effort.</p>
+            <p className="text-xs text-content-muted mt-1">Off by default for faster replies. Enable for harder questions with a model that supports reasoning. GPT-OSS always reasons: off uses low effort, on uses medium effort.</p>
           </div>}
         </div>
-        {(isTesting || testResult) && <div role="status" aria-live="polite" className={`mx-6 mb-4 p-3 rounded-md text-sm break-words ${testResult?.success ? 'bg-emerald-50 text-emerald-800' : testResult ? 'bg-red-50 text-red-800' : 'bg-blue-50 text-blue-800'}`}>
+        {(isTesting || testResult) && <div role="status" aria-live="polite" className={`mx-6 mb-4 p-3 rounded-md text-sm break-words ${testResult?.success ? 'bg-success-soft text-success-heading' : testResult ? 'bg-danger-soft text-danger-heading' : 'bg-accent-softest text-accent-heading'}`}>
           {isTesting ? `Waiting for ${form.model} to generate a test response. ${isCloud ? 'The cloud test stops after 60 seconds.' : 'This can take up to three minutes, including model loading.'}` : testResult?.message}
         </div>}
         </div>
-        <div className="bg-gray-50 px-6 py-4 border-t border-gray-200 flex justify-end gap-3 shrink-0">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">Cancel</button>
-          <button onClick={isTesting ? cancelTest : handleTest} disabled={!isValid && !isTesting} className="px-4 py-2 text-sm text-blue-700 bg-blue-50 rounded-md disabled:opacity-50 disabled:cursor-not-allowed">{isTesting ? 'Stop test' : 'Test connection'}</button>
-          <button onClick={handleSave} disabled={!isValid || isTesting} className="px-4 py-2 text-sm text-white bg-blue-600 rounded-md disabled:opacity-50 disabled:cursor-not-allowed">Save</button>
+        <div className="bg-surface-subtle px-6 py-4 border-t border-border flex justify-end gap-3 shrink-0">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-content-body hover:bg-surface-muted rounded-md">Cancel</button>
+          <button onClick={isTesting ? cancelTest : handleTest} disabled={!isValid && !isTesting} className="px-4 py-2 text-sm text-accent-text-hover bg-accent-softest rounded-md disabled:opacity-50 disabled:cursor-not-allowed">{isTesting ? 'Stop test' : 'Test connection'}</button>
+          <button onClick={handleSave} disabled={!isValid || isTesting} className="px-4 py-2 text-sm text-on-accent bg-accent-solid rounded-md disabled:opacity-50 disabled:cursor-not-allowed">Save</button>
         </div>
       </div>
     </div>

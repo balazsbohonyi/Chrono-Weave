@@ -30,12 +30,12 @@ const SidebarCardActions: React.FC<SidebarCardActionsProps> = ({ figure, onDisco
                         onClick={action.onClick}
                         disabled={action.isLoading}
                         className={`p-2 rounded-md border transition-colors ${action.isLoading
-                                ? 'bg-blue-50 text-blue-400 border-blue-100 cursor-wait'
-                                : 'bg-blue-50 hover:bg-blue-100 text-blue-600 border-blue-100'
+                                ? 'bg-action-surface text-accent-focus border-action-border cursor-wait'
+                                : 'bg-action-surface hover:bg-action-surface-hover text-action-text border-action-border'
                             }`}
                     >
                         {action.isLoading ? (
-                            <div className="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin"></div>
+                            <div className="w-5 h-5 border-2 border-accent-focus border-t-transparent rounded-full animate-spin"></div>
                         ) : (
                             action.icon
                         )}
