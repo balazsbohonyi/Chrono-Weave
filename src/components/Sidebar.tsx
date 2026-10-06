@@ -4,18 +4,15 @@ import { HistoricalFigure, FigureCategory } from '../types';
 import { fetchBatchFigureDetails } from '../services/wikiService';
 import { formatYear } from '../utils/formatters';
 
-import Tooltip from './Tooltip';
-import { useFigureActions } from '../hooks/useFigureActions';
 import SidebarCardActions from './SidebarCardActions';
 
 interface SidebarProps {
     selectedFigures: HistoricalFigure[];
     currentYear: number | null;
-    onTraceRelationships: (figure: HistoricalFigure, mouseY: number) => Promise<void>;
+    onTraceRelationships: (figure: HistoricalFigure) => Promise<void>;
     onDiscover: (figure: HistoricalFigure) => void;
     onInspect: (figure: HistoricalFigure) => void;
     activeTracingFigureId?: string;
-    onUpdateSourceY?: (y: number) => void;
     isCollapsed: boolean;
     onToggleCollapse: () => void;
     selectedCategories: Set<FigureCategory>;
@@ -34,7 +31,6 @@ const Sidebar: React.FC<SidebarProps> = ({
     onDiscover,
     onInspect,
     activeTracingFigureId,
-    onUpdateSourceY,
     isCollapsed,
     onToggleCollapse,
     selectedCategories,
@@ -49,7 +45,6 @@ const Sidebar: React.FC<SidebarProps> = ({
 
     // Refs for tracking positions
     const scrollContainerRef = useRef<HTMLDivElement>(null);
-    const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
     // Filter selected figures based on Global Categories First
     const categoryFilteredFigures = useMemo(() => {
@@ -123,54 +118,11 @@ const Sidebar: React.FC<SidebarProps> = ({
         }
     }, [viewMode]);
 
-    // Scroll tracking effect
-    useEffect(() => {
-        if (!activeTracingFigureId || !onUpdateSourceY) return;
-
-        const container = scrollContainerRef.current;
-
-        let rAF: number;
-
-        const handleUpdate = () => {
-            const card = cardRefs.current.get(activeTracingFigureId);
-            if (!card) return;
-
-            const rect = card.getBoundingClientRect();
-            let y = rect.top + rect.height / 2;
-
-            const minY = 80;
-            const maxY = window.innerHeight - 80;
-
-            y = Math.max(minY, Math.min(maxY, y));
-
-            onUpdateSourceY(y);
-        };
-
-        const onScroll = () => {
-            cancelAnimationFrame(rAF);
-            rAF = requestAnimationFrame(handleUpdate);
-        };
-
-        if (container) {
-            container.addEventListener('scroll', onScroll);
-        }
-        window.addEventListener('resize', onScroll);
-        handleUpdate();
-
-        return () => {
-            if (container) {
-                container.removeEventListener('scroll', onScroll);
-            }
-            window.removeEventListener('resize', onScroll);
-            cancelAnimationFrame(rAF);
-        };
-    }, [activeTracingFigureId, onUpdateSourceY, displayFigures]);
-
-    const handleTrace = async (fig: HistoricalFigure, clientY: number) => {
+    const handleTrace = async (fig: HistoricalFigure) => {
         if (tracingId) return;
         setTracingId(fig.id);
         try {
-            await onTraceRelationships(fig, clientY);
+            await onTraceRelationships(fig);
         } finally {
             setTracingId(null);
         }
@@ -263,7 +215,6 @@ const Sidebar: React.FC<SidebarProps> = ({
                     return (
                         <div
                             key={fig.id}
-                            ref={(el) => { if (el) cardRefs.current.set(fig.id, el); else cardRefs.current.delete(fig.id); }}
                             className={`relative bg-white/90 backdrop-blur-sm rounded-xl shadow-sm border border-gray-200 animate-in fade-in slide-in-from-right-4 duration-500 group transition-colors hover:bg-white ${isActiveSource ? 'ring-2 ring-blue-500' : ''}`}
                         >
                             <div className="p-4">

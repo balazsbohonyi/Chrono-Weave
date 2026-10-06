@@ -5,7 +5,7 @@ import { useFigureActions } from '../hooks/useFigureActions';
 interface ActionBarProps {
     figure: HistoricalFigure;
     onDiscover: (figure: HistoricalFigure) => void;
-    onTrace: (figure: HistoricalFigure, clientY: number) => void;
+    onTrace: (figure: HistoricalFigure) => void;
     onInspect: (figure: HistoricalFigure) => void;
     isDiscovering: boolean;
     style: React.CSSProperties;

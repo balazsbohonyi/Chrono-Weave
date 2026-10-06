@@ -203,11 +203,15 @@ Page load restores a cached timeline, or leaves an empty timeline for you to bui
 
 For Linux/WSL server commands, downloading and switching models, and cloud examples, follow the [Ollama setup guide](docs/ollama.md).
 
-Relationship maps, biographies, and relationship explanations are cached in browser localStorage and reused across providers/models. Remapping the same figure on the same canvas restores its connections after clearing curves or reloading. Known relationship pairs and explanations can also be reused from either figure. Changing timeline figures requires a new search for remaining candidates; unchanged known pairs stay available even if that search fails. An empty map automatically tries **Expand Timeline** once for that source and canvas. If no connections are found, a message replaces the floating source card; explicit **Expand Timeline** can retry. Switching models affects uncached requests and explicit timeline builds.
+Relationship maps, biographies, and relationship explanations are cached in browser localStorage and reused across providers/models. Remapping the same figure on the same canvas restores its connections after closing the overlay or reloading. Known relationship pairs and explanations can also be reused from either figure. Changing timeline figures requires a new search for remaining candidates; unchanged known pairs stay available even if that search fails. An empty map automatically tries **Expand Timeline** once for that source and canvas. If no connections are found, the overlay keeps the focus card visible and shows a message; explicit **Expand Timeline** can retry. Switching models affects uncached requests and explicit timeline builds.
 
 Events lasting less than three years are omitted from new and cached timelines. Short events are filtered without failing the build or changing their historical dates.
 
 AI content in relationship and biography dialogs renders Markdown, including emphasis, lists, links, quotations, tables, and code. Existing cached responses receive the same formatting without regeneration.
+
+Relationship explanations use a conversational historical style: a short summary followed by several paragraphs about the pair's circumstances, shared actions or influence, and consequences. The shared prompt targets 2–4 sections and 250–450 words where the facts support that depth. Relevance checks stay factual and separate from the reader-facing prose. Older positive relationship explanations refresh on their next use; timelines, relationship maps, biographies, and cached rejections remain intact.
+
+Figure, event, and discovery descriptions, plus biographies and event analyses, use the same warm, clear voice for curious readers. Their existing word limits and section structures remain in place. Descriptions focus on what people did and why it mattered, using supported details rather than generic praise or invented scenes.
 
 To run the focused configuration, service, and relay tests, install [Bun](https://bun.sh) and run `bun test`. Run `npm run typecheck` and `npm run build` for TypeScript and production checks.
 

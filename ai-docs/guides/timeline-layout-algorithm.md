@@ -1,7 +1,7 @@
 # ChronoWeave Timeline Layout Algorithm Documentation
 
 ## Purpose
-This document provides a comprehensive reference for the timeline layout algorithm used in ChronoWeave's TimelineCanvas component. It establishes common terminology for future development discussions and identifies current limitations in the collision detection system.
+This document describes the layout rendered by `TimelineCanvas`. The layout calculation and short-event helpers live in `src/utils/timelineLayout.ts`; cluster placement and saved metadata validation live in `src/utils/discoveryClusters.ts`. The older line references below predate this extraction.
 
 ---
 
@@ -91,7 +91,7 @@ The layout algorithm is a **three-pass collision detection system** executed in 
 ```
 Filter out events < 3 years
   ↓
-Sort by priority (discovered figures first, then by birthYear)
+Reserve retained cluster placements; place new cluster members near their source; sort remaining figures by birthYear
   ↓
 PASS 1: Place all bars (figures, standard events, short events)
   ↓
@@ -161,7 +161,7 @@ const occupiedYears = maxWidth / 10 + 5;  // Convert to years + margin
 **Occupied Width Calculation** [TimelineCanvas.tsx:130-165](d:\develop\projects\ChronoWeave\components\TimelineCanvas.tsx#L130-L165):
 ```typescript
 // For floating labels - includes name, date, and occupation
-const textMeasurement = calculateTextWidth(fig, true, true);
+const textMeasurement = calculateTextWidth(fig);
 const MIN_FLOATING_WIDTH_PX = 200; // min-w-[200px] constraint
 const contentWidthPx = Math.max(textMeasurement.totalWidthPx, MIN_FLOATING_WIDTH_PX);
 const paddingPx = 8; // pl-2
@@ -172,6 +172,14 @@ return (totalWidthPx / BASE_PIXELS_PER_YEAR) + 5; // +5 years buffer
 ---
 
 ## Three-Pass Layout System
+
+### Retained expansion clusters
+
+`KEEP_DISCOVERY_CLUSTERS` in `src/constants.ts` controls retention. Each expansion records only the source and verified newly added figures. Existing related figures are shown in the relationship overlay without becoming members. Retained members reserve their previous rows before new members and ordinary figures are placed. Shared members keep a single original placement. Short-event labels are retained along with bar rows.
+
+Membership and placements are stored under `chrono_timeline_clusters`, scoped to the saved figures' identities and dates. A successful rebuild resets them; a failed rebuild preserves them. With retention disabled, metadata is ignored on load and the temporary cluster is released when the relationship overlay closes. Detail dialogs do not release placement.
+
+The relationship cards appear in a separate scrollable overlay opened immediately by mapping or expansion, with progress feedback while loading. The source is centered alone above alternating three/two-card or four/three-card rows of connected figures. There are no relationship curves on the overlay or canvas, and no floating launcher. Relationship detail cards reveal floating biography icons on hover or keyboard focus without adding height; closing either biography restores the same explanation and its scroll position. The overlay scrollbar is hidden while scrolling remains available.
 
 ### Pass 1: Bar Placement
 **Location**: [TimelineCanvas.tsx:197-272](d:\develop\projects\ChronoWeave\src\components\TimelineCanvas.tsx#L197-L272)

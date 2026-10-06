@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { assessRelationships, generateRelationshipAssessment, parseRelationshipAssessment, readRelationshipAssessment, RelationshipAssessmentError } from '../src/services/relationshipAssessment';
 import { figure, MemoryStorage, relationship, sections } from './helpers';
+import { RELATIONSHIP_NARRATIVE_VERSION } from '../src/constants';
 
 test('a discovery claim does not admit Bunyan–Watts when the assessment finds only shared tradition', async () => {
   const source = { ...figure, id: 'bunyan', name: 'John Bunyan', birthYear: 1628, deathYear: 1688 };
@@ -61,6 +62,41 @@ test('explicit rejections need no evidence or narrative sections and are reusabl
   assert.equal((await assessRelationships(service, figure, [target], storage)).size, 0);
   assert.equal(readRelationshipAssessment(figure, target, storage)?.isRelevant, false);
   assert.equal(readRelationshipAssessment(figure, target, storage)?.sections.length, 1);
+});
+
+test('older positive prose is refreshed once without clearing timeline, map, or biography caches', async () => {
+  const storage = new MemoryStorage();
+  const target = { ...figure, id: 'babbage', name: 'Charles Babbage' };
+  await assessRelationships({ fetchRelationshipExplanation: async () => relationship }, figure, [target], storage);
+  const cacheKey = 'chrono_assessment_ada_babbage';
+  const legacy = JSON.parse(storage.getItem(cacheKey)!);
+  delete legacy.narrativeVersion;
+  storage.setItem(cacheKey, JSON.stringify(legacy));
+  for (const key of ['chrono_timeline_data', 'chrono_map_ada', 'chrono_deepdive_ada']) storage.setItem(key, 'preserved');
+  assert.equal(readRelationshipAssessment(figure, target, storage), null);
+
+  const expanded = { ...relationship, summary: 'A fuller story of their work. The explanation describes why it mattered.',
+    sections: [{ title: 'Working on the engine', content: 'The setting for their work.\n\nTheir contributions and its consequences.' }] };
+  let calls = 0;
+  const service = { fetchRelationshipExplanation: async () => { calls++; return expanded; } };
+  assert.deepEqual((await assessRelationships(service, figure, [target], storage)).get(target.id), expanded);
+  assert.deepEqual(readRelationshipAssessment(figure, target, storage), expanded);
+  assert.equal(JSON.parse(storage.getItem(cacheKey)!).narrativeVersion, RELATIONSHIP_NARRATIVE_VERSION);
+  await assessRelationships(service, figure, [target], storage);
+  assert.equal(calls, 1);
+  for (const key of ['chrono_timeline_data', 'chrono_map_ada', 'chrono_deepdive_ada']) assert.equal(storage.getItem(key), 'preserved');
+});
+
+test('legacy negative verdicts remain cached when only the narrative style changes', async () => {
+  const storage = new MemoryStorage();
+  const target = { ...figure, id: 'unrelated' };
+  await assessRelationships({ fetchRelationshipExplanation: async () => ({ ...relationship, isRelevant: false, evidence: '' }) }, figure, [target], storage);
+  const cacheKey = 'chrono_assessment_ada_unrelated';
+  const legacy = JSON.parse(storage.getItem(cacheKey)!);
+  delete legacy.narrativeVersion;
+  storage.setItem(cacheKey, JSON.stringify(legacy));
+  assert.equal(readRelationshipAssessment(figure, target, storage)?.isRelevant, false);
+  await assessRelationships({ fetchRelationshipExplanation: async () => { throw new Error('Should reuse the rejection'); } }, figure, [target], storage);
 });
 
 test('presentation differences do not invalidate explicit evidence-bearing positives', () => {

@@ -8,9 +8,55 @@ import {
   EVENT_DEEP_DIVE_SECTION_TITLES,
   HISTORICAL_EVENTS_COUNT,
   HISTORICAL_FIGURES_COUNT,
+  SHORT_DESCRIPTION_MAX_WORDS,
+  DEEP_DIVE_SUMMARY_MAX_WORDS,
 } from '../src/constants';
 import type { IAIService } from '../src/types';
 import { chatResponse, event, figure, localConfig, person, sections, relationship } from './helpers';
+import { buildPeoplePrompt, buildEventsPrompt, buildDiscoveryPrompt, buildDeepDivePrompt, buildRelatedFiguresPrompt, buildRelationshipExplanationPrompt } from '../src/services/prompts';
+
+test('reader-facing tasks share the historical storytelling voice without changing their output structures', () => {
+  const eventFigure = { ...figure, name: event.name, category: 'EVENTS' as const };
+  const shortPrompts = [buildPeoplePrompt(1800, 1900, 10), buildEventsPrompt(1800, 1900, 10), buildDiscoveryPrompt(figure, [], 1800, 1900)];
+  const biographies = [buildDeepDivePrompt(figure), buildDeepDivePrompt(eventFigure)];
+  for (const prompt of [...shortPrompts, ...biographies]) {
+    assert.match(prompt, /Write for a curious reader in warm, clear, natural language/);
+    assert.match(prompt, /Use active verbs and concrete details, without invented dialogue, feelings, motives, scenes, or quotations/);
+    assert.match(prompt, /note.*uncertain|uncertain.*plainly|uncertainty naturally/);
+  }
+  for (const prompt of shortPrompts) {
+    assert.match(prompt, new RegExp(`description \\(max ${SHORT_DESCRIPTION_MAX_WORDS} words\\)`));
+    assert.match(prompt, /Return a JSON array/);
+  }
+  for (const prompt of biographies) {
+    assert.match(prompt, new RegExp(`summary \\(string, max ${DEEP_DIVE_SUMMARY_MAX_WORDS} words\\)`));
+    assert.match(prompt, /each content is a substantial, focused paragraph/);
+    assert.match(prompt, /rather than dramatic embellishment/);
+  }
+  assert.match(biographies[0], /reliably attribute its wording/);
+  assert.match(biographies[1], /Set famousQuote to an empty string/);
+  assert.match(shortPrompts[2], /actual family tie, shared episode, work, or role in everyday language/);
+  // ID selection has no reader-facing prose and must retain its narrow output.
+  const mapping = buildRelatedFiguresPrompt(figure, []);
+  assert.doesNotMatch(mapping, /Write for a curious reader/);
+  assert.match(mapping, /relatedIds \(array of strings\)/);
+});
+
+test('relationship narratives request depth and natural prose while retaining factual and rejection safeguards', () => {
+  const prompt = buildRelationshipExplanationPrompt(figure, { ...figure, id: 'babbage', name: 'Charles Babbage' });
+  assert.match(prompt, /2-3 sentences/);
+  assert.match(prompt, /2-4 objects/);
+  assert.match(prompt, /250-450 words/);
+  assert.match(prompt, /at least four substantive paragraphs/);
+  assert.match(prompt, /escaped newline pairs \(\\n\\n\)/);
+  assert.match(prompt, /separate from the reader-facing summary and sections/);
+  assert.match(prompt, /warm, clear, natural language/);
+  assert.match(prompt, /without invented dialogue, feelings, motives, scenes, or quotations/);
+  assert.match(prompt, /Do not confuse a parent with a sibling or an uncle with a father/);
+  assert.match(prompt, /For isRelevant=false, keep the summary and one limitation section concise/);
+  assert.match(prompt, /Shared eras, places, professions, similar ideas, or multi-step chains through unrelated intermediaries do not qualify/);
+  assert.doesNotMatch(prompt, /each content is a paragraph/);
+});
 
 test('providers share task instructions while retaining their API response mechanisms', { timeout: 30_000 }, async () => {
   const previousFetch = globalThis.fetch;
@@ -70,6 +116,7 @@ test('providers share task instructions while retaining their API response mecha
     }
     assert.match(shared[0].prompt, new RegExp(`Aim for ${HISTORICAL_FIGURES_COUNT} distinct`));
     assert.match(shared[1].prompt, new RegExp(`return up to ${HISTORICAL_EVENTS_COUNT}`));
+    assert.ok(shared.every(request => request.prompt.includes('Write for a curious reader in warm, clear, natural language')));
     for (const title of DEEP_DIVE_SECTION_TITLES) assert.ok(shared[4].prompt.includes(title));
     for (const title of EVENT_DEEP_DIVE_SECTION_TITLES) assert.ok(shared[5].prompt.includes(title));
     assert.match(shared[5].prompt, /Set famousQuote to an empty string/);

@@ -49,6 +49,18 @@ export interface LayoutData {
   labelYearOffset?: number; // How many years from birthYear the label starts
 }
 
+export interface DiscoveryCluster {
+  sourceId: string;
+  memberIds: string[];
+}
+
+export type ClusterPlacement = Pick<LayoutData, 'level' | 'labelLevel' | 'labelYearOffset'>;
+
+export interface DiscoveryClusterState {
+  clusters: DiscoveryCluster[];
+  placements: Record<string, ClusterPlacement>;
+}
+
 export interface DeepDiveData {
   summary: string;
   famousQuote: string;

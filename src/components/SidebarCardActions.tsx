@@ -7,7 +7,7 @@ interface SidebarCardActionsProps {
     figure: HistoricalFigure;
     onDiscover: (figure: HistoricalFigure) => void;
     onInspect: (figure: HistoricalFigure) => void;
-    onTrace: (figure: HistoricalFigure, clientY: number) => Promise<void>;
+    onTrace: (figure: HistoricalFigure) => Promise<void>;
     isTracing: boolean;
 }
 
@@ -15,7 +15,7 @@ const SidebarCardActions: React.FC<SidebarCardActionsProps> = ({ figure, onDisco
     const actions = useFigureActions({
         figure,
         onDiscover,
-        onTrace: (f, y) => onTrace(f, y),
+        onTrace,
         onInspect,
         isDiscovering: false,
         isTracing
@@ -26,6 +26,7 @@ const SidebarCardActions: React.FC<SidebarCardActionsProps> = ({ figure, onDisco
             {actions.map(action => (
                 <Tooltip key={action.id} text={action.label}>
                     <button
+                        aria-label={action.label}
                         onClick={action.onClick}
                         disabled={action.isLoading}
                         className={`p-2 rounded-md border transition-colors ${action.isLoading

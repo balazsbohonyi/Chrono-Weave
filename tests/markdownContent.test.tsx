@@ -44,7 +44,7 @@ test('model Markdown cannot inject HTML, event handlers or JavaScript links', ()
 test('both dialog modes render model Markdown from existing data without changing its stored text', () => {
   const sections = [{ title: '**Scientific influence**', content: '1. **Mechanics**\n2. *Astronomy*' }];
   const data = { summary: '**Historical summary**', famousQuote: '*A quotation.*', sections };
-  const props = { isOpen: true, isLoading: false, onClose: () => undefined, target: figure };
+  const props = { isOpen: true, isLoading: false, onClose: () => undefined, onInspect: () => undefined, target: figure };
   const biography = renderToStaticMarkup(<RelationshipPopover {...props} source={null} mode="single" data={data} />);
   assert.match(biography, /<strong>Historical summary<\/strong>/);
   assert.match(biography, /<em>A quotation\.<\/em>/);
@@ -58,5 +58,7 @@ test('both dialog modes render model Markdown from existing data without changin
   assert.match(relationship, /<ol>/);
   assert.doesNotMatch(relationship, />Focus<|>Connected To</);
   assert.match(relationship, /role="dialog" aria-modal="true" aria-label="Relationship explanation"/);
+  assert.equal((relationship.match(/data-biography-id=/g) || []).length, 2);
+  assert.equal((relationship.match(/aria-label="Read biography of /g) || []).length, 2);
   assert.equal(sections[0].content, '1. **Mechanics**\n2. *Astronomy*');
 });

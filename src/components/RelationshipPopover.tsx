@@ -1,9 +1,10 @@
 
-import React, { useEffect } from 'react';
+import React, { useLayoutEffect, useRef } from 'react';
 import { HistoricalFigure, DeepDiveData } from '../types';
 import { RelationshipData } from '../App';
 import { formatYear } from '../utils/formatters';
 import MarkdownContent from './MarkdownContent';
+import { useModalFocus } from '../hooks/useModalFocus';
 
 interface RelationshipPopoverProps {
   isOpen: boolean;
@@ -12,6 +13,7 @@ interface RelationshipPopoverProps {
   data: RelationshipData | DeepDiveData | null;
   isLoading: boolean;
   onClose: () => void;
+  onInspect: (figure: HistoricalFigure) => void;
   mode?: 'relationship' | 'single';
 }
 
@@ -22,16 +24,32 @@ const RelationshipPopover: React.FC<RelationshipPopoverProps> = ({
   data,
   isLoading,
   onClose,
+  onInspect,
   mode = 'relationship'
 }) => {
   
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    if (isOpen) window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const biographyReturn = useRef<{ figureId: string; scrollTop: number } | null>(null);
+  useModalFocus(dialogRef, isOpen, onClose);
+
+  useLayoutEffect(() => {
+    if (!isOpen) {
+      biographyReturn.current = null;
+      return;
+    }
+    const previous = mode === 'relationship' ? biographyReturn.current : null;
+    if (bodyRef.current) bodyRef.current.scrollTop = previous?.scrollTop ?? 0;
+    const biographyButton = previous && [...(dialogRef.current?.querySelectorAll<HTMLButtonElement>('[data-biography-id]') ?? [])]
+      .find(button => button.dataset.biographyId === previous.figureId);
+    (biographyButton || dialogRef.current?.querySelector<HTMLButtonElement>('[aria-label="Close"]'))?.focus({ preventScroll: true });
+    if (previous) biographyReturn.current = null;
+  }, [isOpen, mode, source?.id, target?.id]);
+
+  const openBiography = (figure: HistoricalFigure) => {
+    biographyReturn.current = { figureId: figure.id, scrollTop: bodyRef.current?.scrollTop ?? 0 };
+    onInspect(figure);
+  };
 
   if (!isOpen) return null;
 
@@ -115,10 +133,12 @@ const RelationshipPopover: React.FC<RelationshipPopoverProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-in fade-in duration-200"
+      className="relationship-detail-backdrop fixed inset-0 z-[100] flex items-center justify-center p-4 animate-in fade-in duration-200"
       onClick={event => { if (event.target === event.currentTarget) onClose(); }}
     >
       <div
+        ref={dialogRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label={mode === 'relationship' ? 'Relationship explanation' : 'Historical details'}
@@ -145,6 +165,8 @@ const RelationshipPopover: React.FC<RelationshipPopoverProps> = ({
                             figure={source} 
                             color="emerald" 
                             detail={isRelationshipData(data) ? data.sourceDetail : undefined} 
+                            onInspect={openBiography}
+                            disabled={isLoading}
                         />
                         
                         <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white border border-gray-200 rounded-full p-2 shadow-sm z-10 hidden md:block">
@@ -157,6 +179,8 @@ const RelationshipPopover: React.FC<RelationshipPopoverProps> = ({
                             figure={target} 
                             color="blue" 
                             detail={isRelationshipData(data) ? data.targetDetail : undefined} 
+                            onInspect={openBiography}
+                            disabled={isLoading}
                         />
                     </div>
                 ) : mode === 'single' && target ? (
@@ -185,7 +209,7 @@ const RelationshipPopover: React.FC<RelationshipPopoverProps> = ({
             </div>
 
             {/* Body */}
-            <div className="flex-1 overflow-y-auto p-6 bg-white no-scrollbar">
+            <div ref={bodyRef} className="flex-1 overflow-y-auto p-6 bg-white no-scrollbar">
                 {renderContent()}
                 <div className="h-4"></div>
             </div>
@@ -199,12 +223,14 @@ const FigureCard: React.FC<{
     figure: HistoricalFigure; 
     color: 'emerald' | 'blue';
     detail?: { description: string; imageUrl: string | null };
-}> = ({ figure, color, detail }) => {
+    onInspect: (figure: HistoricalFigure) => void;
+    disabled: boolean;
+}> = ({ figure, color, detail, onInspect, disabled }) => {
     const borderColor = color === 'emerald' ? 'border-emerald-200' : 'border-blue-200';
     const occupationColor = color === 'emerald' ? 'text-emerald-800' : 'text-blue-800';
 
     return (
-        <div className={`bg-white rounded-xl p-5 border ${borderColor} shadow-sm relative block w-full`}>
+        <div className={`bg-white rounded-xl p-5 border ${borderColor} shadow-sm relative block w-full group`}>
             {/* Image Floated Right */}
             {(detail?.imageUrl || figure.imageUrl) && (
                 <div className="float-right ml-4 mb-2 w-24 h-24 bg-gray-200 rounded-[10px] overflow-hidden shadow-sm border border-gray-100">
@@ -226,6 +252,21 @@ const FigureCard: React.FC<{
                 <div className="text-base text-gray-800 leading-relaxed font-sans">
                     {detail ? <MarkdownContent>{detail.description}</MarkdownContent> : <span className="animate-pulse bg-gray-100 text-transparent rounded">Loading bio...</span>}
                 </div>
+            </div>
+            <div className="absolute bottom-2 right-2 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto transition-opacity duration-300 z-10">
+                <button
+                    type="button"
+                    data-biography-id={figure.id}
+                    aria-label={`Read biography of ${figure.name}`}
+                    title={`Read biography of ${figure.name}`}
+                    disabled={disabled}
+                    className="p-2 rounded-lg border border-blue-100 bg-blue-50/60 text-blue-600 hover:bg-blue-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500 disabled:opacity-40 disabled:cursor-wait transition-colors"
+                    onClick={() => onInspect({ ...figure, imageUrl: detail?.imageUrl || figure.imageUrl, shortDescription: figure.shortDescription || detail?.description })}
+                >
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.25v13.5m0-13.5C10.8 5.48 9.25 5 7.5 5S4.17 5.48 3 6.25v13.5C4.17 18.98 5.75 18.5 7.5 18.5s3.3.48 4.5 1.25m0-13.5C13.2 5.48 14.75 5 16.5 5s3.33.48 4.5 1.25v13.5c-1.17-.77-2.75-1.25-4.5-1.25s-3.3.48-4.5 1.25" />
+                    </svg>
+                </button>
             </div>
         </div>
     );

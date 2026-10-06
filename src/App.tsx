@@ -4,16 +4,20 @@ import TimelineCanvas from './components/TimelineCanvas';
 import ControlPanel from './components/ControlPanel';
 import Sidebar from './components/Sidebar';
 import RelationshipPopover from './components/RelationshipPopover';
+import RelationshipOverlay, { RelationshipOverlayState } from './components/RelationshipOverlay';
+import { KEEP_DISCOVERY_CLUSTERS } from './constants';
+import { addDiscoveryCluster, CLUSTER_STORAGE_KEY, emptyClusters, restoreClusters, serializeClusters } from './utils/discoveryClusters';
 import Toast from './components/Toast';
 import ProgressOverlay from './components/ProgressOverlay';
 import SettingsDialog from './components/SettingsDialog';
 import Legend from './components/Legend';
-import { HistoricalFigure, DeepDiveData, IAIService, RelationshipExplanation, FigureCategory } from './types';
+import { HistoricalFigure, DeepDiveData, IAIService, RelationshipExplanation, FigureCategory, DiscoveryClusterState, ClusterPlacement, LayoutData } from './types';
 import { createAIService } from './services/aiService';
 import { assessRelationships, readRelationshipAssessment } from './services/relationshipAssessment';
 import { isConfigValid, providerNames } from './utils/providerConfig';
-import { filterTimelineFigures, isTimelineFigureVisible } from './utils/timelineFigures';
-import { readKnownRelationshipIds, readRelationshipMap, saveRelationshipMap, validRelatedIds } from './utils/relationshipCache';
+import { filterTimelineFigures } from './utils/timelineFigures';
+import { saveRelationshipMap } from './utils/relationshipCache';
+import { resolveRelationshipAction } from './services/relationshipActions';
 
 import { fetchBatchFigureDetails } from './services/wikiService';
 import { useEnvironment } from './contexts/EnvironmentContext';
@@ -36,10 +40,28 @@ const App: React.FC = () => {
     const [currentSearchIndex, setCurrentSearchIndex] = useState(0);
     const [isSearchFocusActive, setIsSearchFocusActive] = useState(false);
 
-    const [figureLevels, setFigureLevels] = useState<Map<string, number>>(new Map());
+    const [clusterState, setClusterState] = useState<DiscoveryClusterState>(emptyClusters);
+    const overlayInvoker = useRef<HTMLElement | null>(null);
+    const currentPlacements = useRef<Record<string, ClusterPlacement>>({});
+    const [cacheLoaded, setCacheLoaded] = useState(false);
+    const handlePlacementsResolved = useCallback((layout: LayoutData[]) => {
+        const resolved = Object.fromEntries(layout.map(({ figure, level, labelLevel, labelYearOffset }) => [figure.id, { level, labelLevel, labelYearOffset }]));
+        currentPlacements.current = resolved;
+        setClusterState(previous => {
+            const placements = { ...previous.placements };
+            let changed = false;
+            for (const id of new Set(previous.clusters.flatMap(cluster => cluster.memberIds))) {
+                if (!resolved[id]) continue;
+                if (JSON.stringify(placements[id]) !== JSON.stringify(resolved[id])) {
+                    placements[id] = resolved[id];
+                    changed = true;
+                }
+            }
+            return changed ? { ...previous, placements } : previous;
+        });
+    }, []);
 
     const [newlyDiscoveredIds, setNewlyDiscoveredIds] = useState<Set<string>>(new Set());
-    const [discoverySourceId, setDiscoverySourceId] = useState<string | null>(null);
     const [isDiscovering, setIsDiscovering] = useState(false);
     const [isTracing, setIsTracing] = useState(false);
 
@@ -64,13 +86,7 @@ const App: React.FC = () => {
 
     const [knownRelationships, setKnownRelationships] = useState<Map<string, Set<string>>>(new Map());
 
-    const [relationshipState, setRelationshipState] = useState<{
-        sourceY: number;
-        relatedIds: string[];
-        targetId: string;
-        sourceFigure: HistoricalFigure;
-        sourceImageUrl: string | null;
-    } | null>(null);
+    const [relationshipState, setRelationshipState] = useState<RelationshipOverlayState | null>(null);
 
     const [popoverState, setPopoverState] = useState<{
         isOpen: boolean;
@@ -88,10 +104,14 @@ const App: React.FC = () => {
         mode: 'relationship'
     });
 
+    const relationshipDetailReturn = useRef<typeof popoverState | null>(null);
 
-
-
-
+    useEffect(() => {
+        if (relationshipState || popoverState.isOpen || !overlayInvoker.current) return;
+        const invoker = overlayInvoker.current;
+        overlayInvoker.current = null;
+        if (invoker.isConnected && !invoker.closest('[inert]')) invoker.focus({ preventScroll: true });
+    }, [relationshipState, popoverState.isOpen]);
     const serviceRef = useRef(aiService);
     const operationController = useRef(new AbortController());
     const operationVersion = useRef(0);
@@ -102,6 +122,7 @@ const App: React.FC = () => {
     const popoverVersion = useRef(0);
 
     const invalidateFigureOperations = () => {
+        relationshipDetailReturn.current = null;
         operationVersion.current++;
         popoverVersion.current++;
         traceVersion.current++;
@@ -128,16 +149,18 @@ const App: React.FC = () => {
         };
     };
 
-    const cancelRelationshipAction = () => {
+    const dismissRelationships = useCallback(() => {
         traceVersion.current++;
         traceController.current?.abort();
+        popoverVersion.current++;
+        relationshipDetailReturn.current = null;
         setIsTracing(false);
         setIsDiscovering(false);
-        if (isDiscovering) {
-            setHighlightedFigureIds([]);
-            setIsSearchFocusActive(false);
-        }
-    };
+        setRelationshipState(null);
+        setPopoverState(previous => ({ ...previous, isOpen: false }));
+        setNewlyDiscoveredIds(new Set());
+        if (!KEEP_DISCOVERY_CLUSTERS) setClusterState(emptyClusters());
+    }, []);
 
     // Storage Keys
     const TIMELINE_DATA_KEY = 'chrono_timeline_data';
@@ -156,6 +179,7 @@ const App: React.FC = () => {
                     const visibleFigures = filterTimelineFigures(parsedData);
                     setFigures(visibleFigures);
                     setConfig(parsedConfig);
+                    setClusterState(restoreClusters(localStorage.getItem(CLUSTER_STORAGE_KEY), visibleFigures, KEEP_DISCOVERY_CLUSTERS));
                     if (visibleFigures.length !== parsedData.length) {
                         localStorage.setItem(TIMELINE_DATA_KEY, JSON.stringify(visibleFigures));
                     }
@@ -168,14 +192,17 @@ const App: React.FC = () => {
         return false;
     }, []);
 
-    const saveTimelineToCache = useCallback((customConfig: { start: number, end: number }, data: HistoricalFigure[]) => {
+    useEffect(() => {
+        if (!cacheLoaded || !figures.length) return;
         try {
-            localStorage.setItem(TIMELINE_DATA_KEY, JSON.stringify(data));
-            localStorage.setItem(TIMELINE_CONFIG_KEY, JSON.stringify(customConfig));
-        } catch (e) {
-            console.error("Failed to save timeline to cache", e);
+            localStorage.setItem(TIMELINE_DATA_KEY, JSON.stringify(figures));
+            localStorage.setItem(TIMELINE_CONFIG_KEY, JSON.stringify(config));
+            if (KEEP_DISCOVERY_CLUSTERS) localStorage.setItem(CLUSTER_STORAGE_KEY, serializeClusters(figures, clusterState));
+            else localStorage.removeItem(CLUSTER_STORAGE_KEY);
+        } catch (error) {
+            console.error('Failed to save timeline to cache', error);
         }
-    }, []);
+    }, [cacheLoaded, config, figures, clusterState]);
 
     const buildTimeline = useCallback(async (start: number, end: number) => {
         if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start >= end) {
@@ -193,8 +220,7 @@ const App: React.FC = () => {
         buildController.current = controller;
         const service = serviceRef.current;
         setLoading(true);
-        setIsDiscovering(false);
-        setIsTracing(false);
+        dismissRelationships();
         setPopoverState(previous => ({ ...previous, isOpen: false, loading: false }));
         try {
             const data = filterTimelineFigures(await service.fetchHistoricalFigures(start, end, controller.signal));
@@ -211,12 +237,11 @@ const App: React.FC = () => {
             setCurrentSearchIndex(0);
             setIsSearchFocusActive(false);
             setNewlyDiscoveredIds(new Set());
-            setDiscoverySourceId(null);
             setKnownRelationships(new Map());
             setIsSidebarCollapsed(false);
             setSelectedCategories(new Set());
             setIsLegendOpen(false);
-            saveTimelineToCache(nextConfig, data);
+            setClusterState(emptyClusters());
         } catch (error) {
             if (!controller.signal.aborted && buildVersion.current === version) {
                 setToast({ message: error instanceof Error ? error.message : 'Failed to load timeline data.', type: 'error' });
@@ -224,10 +249,11 @@ const App: React.FC = () => {
         } finally {
             if (!controller.signal.aborted && buildVersion.current === version) setLoading(false);
         }
-    }, [getEffectiveConfig, saveTimelineToCache]);
+    }, [getEffectiveConfig]);
 
     useEffect(() => {
         loadTimelineFromCache();
+        setCacheLoaded(true);
         return () => invalidateOperations();
     }, [loadTimelineFromCache]);
 
@@ -237,6 +263,7 @@ const App: React.FC = () => {
         invalidateOperations();
         serviceRef.current = service;
         setAiService(service);
+        dismissRelationships();
         setLoading(false);
         setIsDiscovering(false);
         setIsTracing(false);
@@ -246,209 +273,70 @@ const App: React.FC = () => {
 
 
     const handleYearClick = (year: number, sortedFigures: HistoricalFigure[]) => {
-        cancelRelationshipAction();
+        dismissRelationships();
         setSelectedYear(year);
         setSelectedFigures(sortedFigures);
-        setRelationshipState(null);
         if (sortedFigures.length > 0) setIsSidebarCollapsed(false);
     };
 
-    const handleTraceRelationships = async (
-        figure: HistoricalFigure,
-        mouseY: number | null,
-        currentFigures: HistoricalFigure[] = figures,
-        forcedRelatedIds: string[] = []
-    ) => {
+    const runRelationshipAction = async (sourceFigure: HistoricalFigure, action: 'map' | 'expand') => {
+        if (!relationshipState) overlayInvoker.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        relationshipDetailReturn.current = null;
+        popoverVersion.current++;
+        setPopoverState(previous => ({ ...previous, isOpen: false }));
         const { signal, isCurrent } = beginRelationshipAction();
+        const requestId = traceVersion.current;
         setToast(null);
-        const cached = readRelationshipMap(figure, currentFigures, localStorage);
-        const knownIds = validRelatedIds(figure, currentFigures, [
-            ...readKnownRelationshipIds(figure, currentFigures, localStorage),
-            ...(knownRelationships.get(figure.id) || new Set<string>()),
-            ...forcedRelatedIds,
-        ]);
-        const knownSet = new Set(knownIds);
-        const remainingFigures = currentFigures.filter(candidate => !knownSet.has(candidate.id));
-        const needsMapping = cached === null && remainingFigures.some(candidate => candidate.id !== figure.id);
-        const effectiveY = mouseY ?? window.innerHeight / 2;
-        setRelationshipState(null);
-        if (isDiscovering) {
-            setHighlightedFigureIds([]);
-            setIsSearchFocusActive(false);
-        }
-        setIsDiscovering(false);
-        setIsTracing(true);
-
+        setIsTracing(action === 'map');
+        setIsDiscovering(action === 'expand');
+        // Disable search auto-framing so the existing camera stays put throughout.
+        setIsSearchFocusActive(false);
+        setRelationshipState({ sourceFigure, relatedIds: [], action, status: 'loading', requestId });
+        const update = (next: Partial<RelationshipOverlayState>) => {
+            if (isCurrent()) setRelationshipState(previous => previous?.requestId === requestId ? { ...previous, ...next } : previous);
+        };
         try {
-            const aiRelatedIds = cached?.relatedIds ?? (needsMapping ? await aiService.fetchRelatedFigures(figure, remainingFigures, signal) : []);
-            if (!isCurrent()) return;
-            const proposedIds = validRelatedIds(figure, currentFigures, [
-                ...aiRelatedIds,
-                ...knownIds,
-            ]);
-            const proposedSet = new Set(proposedIds);
-            const assessed = await assessRelationships(aiService, figure,
-                currentFigures.filter(candidate => proposedSet.has(candidate.id)), localStorage, signal);
-            if (!isCurrent()) return;
-            const uniqueRelatedIds = [...assessed.keys()];
-            setKnownRelationships(previous => new Map(previous).set(figure.id, new Set(uniqueRelatedIds)));
-            saveRelationshipMap(figure, currentFigures, uniqueRelatedIds, localStorage, cached?.expansionAttempted);
-
-            if (uniqueRelatedIds.length === 0) {
-                if (cached?.expansionAttempted) {
-                    setToast({ message: `Relationships could not be mapped for ${figure.name} with the figures on this canvas. Try Expand Timeline or a different year range.`, type: 'info' });
-                } else {
-                    setToast({ message: `No relationships found for ${figure.name} on the canvas. Expanding the timeline to look for related figures...`, type: 'info' });
-                    await handleDiscover(figure, { fromMapping: true, sourceY: mouseY ?? window.innerHeight / 2 });
-                }
-                return;
-            }
-
-            const detailsMap = await fetchBatchFigureDetails([figure]);
-            if (!isCurrent()) return;
-            const sourceDetails = detailsMap.get(figure.id);
-            setRelationshipState({
-                sourceY: effectiveY,
-                relatedIds: uniqueRelatedIds,
-                targetId: figure.id,
-                sourceFigure: figure,
-                sourceImageUrl: sourceDetails?.imageUrl || null
+            const { relatedIds, newFigures, expansionAttempted } = await resolveRelationshipAction({
+                service: aiService, source: sourceFigure, figures, action, config,
+                knownIds: [...(knownRelationships.get(sourceFigure.id) || [])],
+                storage: localStorage, signal,
+                onExpansionFallback: () => {
+                    if (!isCurrent()) return;
+                    update({ message: 'No connections found on the timeline. Looking for new related figures...' });
+                    setIsTracing(false);
+                    setIsDiscovering(true);
+                },
             });
-
+            if (!isCurrent()) return;
+            const updatedFigures = [...figures, ...newFigures];
+            saveRelationshipMap(sourceFigure, updatedFigures, relatedIds, localStorage, expansionAttempted);
+            setKnownRelationships(previous => new Map(previous).set(sourceFigure.id, new Set(relatedIds)));
+            if (newFigures.length) {
+                const newIds = newFigures.map(figure => figure.id);
+                setClusterState(previous => addDiscoveryCluster(previous, sourceFigure.id, newIds, currentPlacements.current));
+                setFigures(updatedFigures);
+                setNewlyDiscoveredIds(new Set(newIds));
+                setToast({ message: `Discovered ${newFigures.length} new figures: ${newFigures.map(figure => figure.name).join(', ')}`, type: 'success' });
+            }
+            update({ relatedIds, status: relatedIds.length ? 'results' : 'empty', message: relatedIds.length ? undefined : `No new verified connections for ${sourceFigure.name} in this period.` });
         } catch (error) {
             if (isCurrent()) {
-                const message = error instanceof Error ? error.message : 'Failed to trace connections.';
-                setToast({ message: `Could not assess connections for ${figure.name}: ${message}`, type: 'error' });
+                const message = error instanceof Error ? error.message : 'Could not assess historical connections. Please try again.';
+                update({ status: 'error', message });
+                setToast({ message, type: 'error' });
             }
         } finally {
-            if (isCurrent()) setIsTracing(false);
+            if (isCurrent()) {
+                setIsDiscovering(false);
+                setIsTracing(false);
+            }
         }
     };
 
-    const handleUpdateSourceY = useCallback((y: number) => {
-        setRelationshipState(prev => {
-            if (!prev) return null;
-            if (Math.abs(prev.sourceY - y) < 0.5) return prev;
-            return { ...prev, sourceY: y };
-        });
-    }, []);
+    const handleTraceRelationships = (figure: HistoricalFigure) => runRelationshipAction(figure, 'map');
+    const handleDiscover = (figure: HistoricalFigure) => runRelationshipAction(figure, 'expand');
 
-    const handleDiscover = async (sourceFigure: HistoricalFigure, options: { fromMapping?: boolean; sourceY?: number } = {}) => {
-        const { signal, isCurrent } = beginRelationshipAction();
-        const cached = readRelationshipMap(sourceFigure, figures, localStorage);
-        setRelationshipState(null);
-        setIsTracing(false);
-        setIsDiscovering(true);
-        setSelectedYear(null);
-
-        setHighlightedFigureIds([sourceFigure.id]);
-        setCurrentSearchIndex(0);
-        setIsSearchFocusActive(true);
-
-        try {
-            const existingNames = figures.map(f => f.name);
-            const newFigures = await aiService.discoverRelatedFigures(sourceFigure, existingNames, config.start, config.end, signal);
-            if (!isCurrent()) return;
-
-            const seenIds = new Set(figures.map(figure => figure.id));
-            const seenNames = new Set(figures.map(figure => figure.name.trim().toLowerCase()));
-            const proposedNewFigures = newFigures.filter(figure => {
-                const name = figure.name.trim().toLowerCase();
-                if (!isTimelineFigureVisible(figure) || figure.deathYear < config.start || figure.birthYear > config.end ||
-                    seenIds.has(figure.id) || seenNames.has(name)) return false;
-                seenIds.add(figure.id);
-                seenNames.add(name);
-                return true;
-            });
-
-            let updatedFigures = figures;
-            const previousRelatedIdsSet = new Set<string>([
-                ...(knownRelationships.get(sourceFigure.id) || []), ...(cached?.relatedIds || []),
-                ...readKnownRelationshipIds(sourceFigure, figures, localStorage),
-            ]);
-            const assessed = await assessRelationships(aiService, sourceFigure, [
-                ...figures.filter(figure => previousRelatedIdsSet.has(figure.id)), ...proposedNewFigures,
-            ], localStorage, signal);
-            if (!isCurrent()) return;
-            const uniqueNewFigures = proposedNewFigures.filter(figure => assessed.has(figure.id));
-            const allRelatedIdsSet = new Set(assessed.keys());
-            let newBatchIds: string[] = [];
-
-            if (uniqueNewFigures.length > 0) {
-                updatedFigures = [...figures, ...uniqueNewFigures];
-                newBatchIds = uniqueNewFigures.map(f => f.id);
-
-                newBatchIds.forEach(id => allRelatedIdsSet.add(id));
-
-                const namesList = uniqueNewFigures.map(f => f.name).join(", ");
-                setToast({
-                    message: `Discovered ${uniqueNewFigures.length} new figures: ${namesList}`,
-                    type: 'success'
-                });
-            } else {
-                setToast({
-                    message: options.fromMapping
-                        ? `Relationships could not be mapped for ${sourceFigure.name} with the figures on this canvas, and no new related figures were found in this period.`
-                        : `No new significant connections found for ${sourceFigure.name} in this period.`,
-                    type: 'info'
-                });
-            }
-
-            const allRelatedIds = validRelatedIds(sourceFigure, updatedFigures, Array.from(allRelatedIdsSet));
-            if (allRelatedIds.length === 0) {
-                setKnownRelationships(previous => new Map(previous).set(sourceFigure.id, new Set<string>()));
-                saveRelationshipMap(sourceFigure, updatedFigures, [], localStorage, true);
-                setDiscoverySourceId(null);
-                setHighlightedFigureIds([]);
-                setIsSearchFocusActive(false);
-                return;
-            }
-            const detailsMap = await fetchBatchFigureDetails([sourceFigure]);
-            if (!isCurrent()) return;
-            const sourceDetails = detailsMap.get(sourceFigure.id);
-
-            setFigures(updatedFigures);
-            setKnownRelationships(prev => {
-                const next = new Map(prev);
-                next.set(sourceFigure.id, new Set(allRelatedIds));
-                return next;
-            });
-
-            // Save new discovery to cache
-            saveTimelineToCache(config, updatedFigures);
-            saveRelationshipMap(sourceFigure, updatedFigures, allRelatedIds, localStorage, true);
-
-            setNewlyDiscoveredIds(new Set(newBatchIds));
-
-            setRelationshipState({
-                sourceY: options.sourceY ?? window.innerHeight / 2,
-                relatedIds: allRelatedIds,
-                targetId: sourceFigure.id,
-                sourceFigure: sourceFigure,
-                sourceImageUrl: sourceDetails?.imageUrl || null
-            });
-
-            setDiscoverySourceId(sourceFigure.id);
-            setHighlightedFigureIds([]);
-            setCurrentSearchIndex(0);
-            setIsSearchFocusActive(false);
-
-            const allRelatedFigures = updatedFigures.filter(f => allRelatedIdsSet.has(f.id));
-            const sidebarList = [sourceFigure, ...allRelatedFigures.filter(f => f.id !== sourceFigure.id)];
-            setSelectedFigures(sidebarList);
-
-        } catch (error) {
-            if (isCurrent()) {
-                setHighlightedFigureIds([]);
-                setIsSearchFocusActive(false);
-                setToast({ message: error instanceof Error ? error.message : "Failed to discover connections.", type: "error" });
-            }
-        } finally {
-            if (isCurrent()) setIsDiscovering(false);
-        }
-    };
-
-    const handleRelationshipBarClick = async (targetFigure: HistoricalFigure) => {
+    const handleRelationshipCardClick = async (targetFigure: HistoricalFigure) => {
         if (!relationshipState) return;
 
         const sourceFigure = relationshipState.sourceFigure;
@@ -524,7 +412,8 @@ const App: React.FC = () => {
         }
     };
 
-    const handleInspectFigure = async (figure: HistoricalFigure) => {
+    const handleInspectFigure = async (figure: HistoricalFigure, returnToRelationship = false) => {
+        relationshipDetailReturn.current = returnToRelationship ? popoverState : null;
         const version = operationVersion.current;
         const request = ++popoverVersion.current;
         const signal = operationController.current.signal;
@@ -609,10 +498,7 @@ const App: React.FC = () => {
     };
 
     const handleEmptyClick = () => {
-        cancelRelationshipAction();
-        setRelationshipState(null);
-        setDiscoverySourceId(null);
-        setNewlyDiscoveredIds(new Set());
+        dismissRelationships();
         setHighlightedFigureIds([]);
         setIsSearchFocusActive(false);
         setSelectedFigures([]);
@@ -667,10 +553,12 @@ const App: React.FC = () => {
         });
     }, []);
 
-    const closePopover = () => {
+    const closePopover = useCallback(() => {
         popoverVersion.current++;
-        setPopoverState(prev => ({ ...prev, isOpen: false }));
-    };
+        const previousRelationship = relationshipDetailReturn.current;
+        relationshipDetailReturn.current = null;
+        setPopoverState(prev => previousRelationship ?? { ...prev, isOpen: false });
+    }, []);
 
     // Determine which figures to show in sidebar (Global list if no year selected, otherwise specific year)
     const activeSidebarFigures = useMemo(() => {
@@ -693,6 +581,7 @@ const App: React.FC = () => {
 
     return (
         <div className="relative w-screen h-screen overflow-hidden font-sans text-gray-900 bg-[#f4ecd8]">
+            <div className="absolute inset-0" inert={!!relationshipState || popoverState.isOpen}>
             <ControlPanel
                 startYear={config.start}
                 endYear={config.end}
@@ -723,24 +612,23 @@ const App: React.FC = () => {
                     endYear={config.end}
                     onHoverYear={setHoverYear}
                     onYearClick={handleYearClick}
-                    onRelationshipClick={handleRelationshipBarClick}
                     onEmptyClick={handleEmptyClick}
                     selectedYear={selectedYear}
-                    relationshipState={relationshipState}
+                    clusters={clusterState.clusters}
+                    clusterPlacements={clusterState.placements}
+                    onPlacementsResolved={handlePlacementsResolved}
+                    modalActive={!!relationshipState || popoverState.isOpen}
+                    relationshipSourceId={relationshipState?.sourceFigure.id}
                     highlightedFigureIds={highlightedFigureIds}
                     focusedFigureId={focusedFigureId}
                     isSearchFocusActive={isSearchFocusActive}
                     newlyDiscoveredIds={newlyDiscoveredIds}
-                    discoverySourceId={discoverySourceId}
                     onDiscover={handleDiscover}
-                    onTrace={(f, clientY) => handleTraceRelationships(f, clientY)}
+                    onTrace={handleTraceRelationships}
                     onInspect={handleInspectFigure}
                     isDiscovering={isDiscovering}
-                    onLayoutChange={setFigureLevels}
                     onCanvasInteraction={handleCanvasInteraction}
                     isBusy={isBusy}
-                    isSidebarCollapsed={isSidebarCollapsed}
-                    hasSidebarSelection={activeSidebarFigures.length > 0}
                     selectedCategories={selectedCategories}
                     isLegendCollapsed={!isLegendOpen}
                 />
@@ -750,28 +638,32 @@ const App: React.FC = () => {
                 <ProgressOverlay title="CONSULTING THE ARCHIVES" />
             )}
 
-            {isDiscovering && (
-                <ProgressOverlay title="Tracing Connections" subtitle="Expanding Timeline Graph..." />
-            )}
-
-            {isTracing && (
-                <ProgressOverlay title="Analyzing Social Graph" subtitle="Identifying significant connections..." />
-            )}
-
             <Sidebar
                 selectedFigures={sortedSidebarFigures}
                 currentYear={selectedYear}
-                onTraceRelationships={(f, y) => handleTraceRelationships(f, y)}
+                onTraceRelationships={handleTraceRelationships}
                 onDiscover={handleDiscover}
                 onInspect={handleInspectFigure}
                 activeTracingFigureId={relationshipState?.sourceFigure.id}
-                onUpdateSourceY={handleUpdateSourceY}
                 isCollapsed={isSidebarCollapsed}
                 onToggleCollapse={() => setIsSidebarCollapsed(prev => !prev)}
                 selectedCategories={selectedCategories}
                 isLegendOpen={isLegendOpen}
                 isGlobalView={selectedYear === null}
             />
+
+            </div>
+
+            {relationshipState && <RelationshipOverlay
+                key={relationshipState.requestId}
+                state={relationshipState}
+                figures={figures}
+                detailOpen={popoverState.isOpen}
+                onClose={dismissRelationships}
+                onRetry={() => runRelationshipAction(relationshipState.sourceFigure, relationshipState.action)}
+                onInspect={handleInspectFigure}
+                onRelationship={handleRelationshipCardClick}
+            />}
 
             <RelationshipPopover
                 isOpen={popoverState.isOpen}
@@ -780,6 +672,7 @@ const App: React.FC = () => {
                 data={popoverState.data}
                 isLoading={popoverState.loading}
                 onClose={closePopover}
+                onInspect={figure => handleInspectFigure(figure, true)}
                 mode={popoverState.mode}
             />
 

@@ -13,7 +13,7 @@ export interface ActionItem {
 interface UseFigureActionsProps {
     figure: HistoricalFigure;
     onDiscover: (figure: HistoricalFigure) => void;
-    onTrace: (figure: HistoricalFigure, clientY: number) => void;
+    onTrace: (figure: HistoricalFigure) => void;
     onInspect: (figure: HistoricalFigure) => void;
     isDiscovering: boolean;
     isTracing?: boolean;
@@ -55,7 +55,7 @@ export const useFigureActions = ({
             ),
             onClick: (e: React.MouseEvent) => {
                 e.stopPropagation();
-                onTrace(figure, e.clientY);
+                onTrace(figure);
             },
             isLoading: isTracing,
             isVisible: true
