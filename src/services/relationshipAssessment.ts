@@ -1,5 +1,6 @@
 import type { HistoricalFigure, IAIService, RelationshipExplanation } from '../types';
 import { buildCorrectionPrompt } from './prompts';
+import { RELATIONSHIP_NARRATIVE_VERSION } from '../constants';
 
 export class RelationshipAssessmentError extends Error {}
 
@@ -56,7 +57,11 @@ export function readRelationshipAssessment(source: HistoricalFigure, target: His
   try {
     const cached = JSON.parse(storage.getItem(key(source, target)) || 'null');
     if (!cached || cached.scope !== scope(source, target)) return null;
-    return parseRelationshipAssessment(cached.explanation);
+    const explanation = parseRelationshipAssessment(cached.explanation);
+    // Old verdicts against a connection remain useful. Positive results also
+    // supply the dialog's prose, so regenerate them after a narrative change.
+    if (explanation.isRelevant && cached.narrativeVersion !== RELATIONSHIP_NARRATIVE_VERSION) return null;
+    return explanation;
   } catch { return null; }
 }
 
@@ -84,7 +89,7 @@ export async function assessRelationships(
       }
       signal?.throwIfAborted();
       try {
-        storage.setItem(key(source, candidate), JSON.stringify({ scope: scope(source, candidate), explanation }));
+        storage.setItem(key(source, candidate), JSON.stringify({ scope: scope(source, candidate), narrativeVersion: RELATIONSHIP_NARRATIVE_VERSION, explanation }));
       } catch { /* Storage failure must not bypass or fail the assessment. */ }
     }
     if (explanation.isRelevant) accepted.set(candidate.id, explanation);

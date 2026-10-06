@@ -80,7 +80,7 @@ This updates the plan; implementation hasn’t started.
 - The cloud relay runs inside the Vite development and preview servers; it has no separate startup command.
 - Events shorter than three years are filtered out of both generated and cached timelines without date validation errors or changing dates. Empty event batches are allowed; reversed dates still require correction.
 - **Map Relationships** caches connected figure IDs for the source and the current timeline figures, alongside the existing explanation and biography caches. Closing dialogs, clearing curves and reloading reuse the map. Changes to timeline figures require a fresh map.
-- An empty map automatically invokes **Expand Timeline** within the current range. If expansion finds nothing, show a message with no floating source card or curves. Remember the completed empty expansion for that source and canvas; explicit **Expand Timeline** can retry. Successful discovery caches its connections against the expanded timeline.
+- An empty map automatically invokes **Expand Timeline** within the current range. If expansion finds nothing, keep the focus card visible in the connections overlay and show a message. Remember the completed empty expansion for that source and canvas; explicit **Expand Timeline** can retry. Successful discovery caches its connections against the expanded timeline.
 - Failed or superseded mapping and expansion requests do not commit empty cache results or stale timeline changes.
 
 Local setup, cloud-through-local and direct-cloud examples, cache behavior and troubleshooting are documented in [the Ollama guide](../../docs/ollama.md). Verification evidence is tracked in [ISA.md](../../ISA.md).

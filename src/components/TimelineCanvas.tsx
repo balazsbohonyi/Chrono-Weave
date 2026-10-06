@@ -1,10 +1,10 @@
 
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { FigureCategory, HistoricalFigure, LayoutData, ViewState } from '../types';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { FigureCategory, HistoricalFigure, LayoutData, ViewState, DiscoveryCluster, ClusterPlacement } from '../types';
 import { CATEGORY_COLORS, CATEGORY_BAR_TEXT_COLORS } from '../constants';
 import { formatYear } from '../utils/formatters';
-import { isTimelineFigureVisible } from '../utils/timelineFigures';
 import ActionBar from './ActionBar';
+import { calculateTextWidth, calculateTimelineLayout } from '../utils/timelineLayout';
 
 interface TimelineCanvasProps {
   figures: HistoricalFigure[];
@@ -12,30 +12,23 @@ interface TimelineCanvasProps {
   endYear: number;
   onHoverYear: (year: number | null) => void;
   onYearClick: (year: number, figures: HistoricalFigure[]) => void;
-  onRelationshipClick: (figure: HistoricalFigure) => void;
   onEmptyClick: () => void;
   selectedYear: number | null;
-  relationshipState?: {
-    sourceY: number;
-    relatedIds: string[];
-    targetId: string;
-    sourceFigure: HistoricalFigure;
-    sourceImageUrl: string | null;
-  } | null;
+  clusters: DiscoveryCluster[];
+  clusterPlacements: Record<string, ClusterPlacement>;
+  onPlacementsResolved: (layout: LayoutData[]) => void;
+  modalActive: boolean;
+  relationshipSourceId?: string;
   highlightedFigureIds: string[];
   focusedFigureId?: string | null;
   isSearchFocusActive?: boolean;
   newlyDiscoveredIds?: Set<string>;
-  discoverySourceId?: string | null;
   onDiscover?: (figure: HistoricalFigure) => void;
-  onTrace?: (figure: HistoricalFigure, clientY: number) => void;
+  onTrace?: (figure: HistoricalFigure) => void;
   onInspect?: (figure: HistoricalFigure) => void;
   isDiscovering?: boolean;
-  onLayoutChange?: (levels: Map<string, number>) => void;
   onCanvasInteraction?: () => void;
   isBusy?: boolean;
-  isSidebarCollapsed: boolean;
-  hasSidebarSelection: boolean;
   selectedCategories: Set<FigureCategory>;
   isLegendCollapsed: boolean;
 }
@@ -43,303 +36,11 @@ interface TimelineCanvasProps {
 // Config
 const BASE_PIXELS_PER_YEAR = 10; 
 const ROW_HEIGHT = 180; 
-const BAR_CENTER_OFFSET = 45; 
 const AXIS_INTERVAL = 50; 
-const SIDEBAR_OPEN_WIDTH = 544; 
-const FLOATING_CARD_WIDTH = 320; 
 const MOUSE_WHEEL_IMPULSE_THRESHOLD_PX = 40;
 const TRACKPAD_STICKY_MS = 300;
 const IS_MAC_PLATFORM = typeof navigator !== 'undefined'
   && /Mac|iPhone|iPad|iPod/i.test(navigator.platform);
-
-// Helper for line intersection checks (p1->p2 vs p3->p4)
-function linesIntersect(p1: {x:number, y:number}, p2: {x:number, y:number}, p3: {x:number, y:number}, p4: {x:number, y:number}): boolean {
-    const {x: x1, y: y1} = p1;
-    const {x: x2, y: y2} = p2;
-    const {x: x3, y: y3} = p3;
-    const {x: x4, y: y4} = p4;
-
-    const denom = (y4 - y3) * (x2 - x1) - (x4 - x3) * (y2 - y1);
-    if (denom === 0) return false;
-
-    const ua = ((x4 - x3) * (y1 - y3) - (y4 - y3) * (x1 - x3)) / denom;
-    const ub = ((x2 - x1) * (y1 - y3) - (y2 - y1) * (x1 - x3)) / denom;
-
-    // We use a slightly smaller range than 0-1 to allow touching endpoints but not crossing "bodies"
-    return (ua > 0.05 && ua < 0.95) && (ub > 0.05 && ub < 0.95);
-}
-
-// Font size constants (matching Tailwind classes)
-const FONT_SIZE_NAME = 22;      // text-[22px]
-const FONT_SIZE_DATE = 18;      // text-lg
-const FONT_SIZE_OCCUPATION = 18; // text-[18px]
-
-// Character width multipliers (empirically derived)
-const CHAR_WIDTH_UPPERCASE = 0.82;  // font-black uppercase → ~18px per char
-const CHAR_WIDTH_BOLD = 0.78;       // font-bold → ~14px per char
-const CHAR_WIDTH_CAPITALIZE = 0.75; // font-bold capitalized → ~13.5px per char
-
-interface TextMeasurement {
-  nameWidthPx: number;
-  dateWidthPx: number;
-  occupationWidthPx: number;
-  totalWidthPx: number;
-  totalWidthYears: number;
-}
-
-/**
- * Calculate accurate text width for a figure/event label
- * @param fig - The historical figure
- * @param isUppercase - Whether name is rendered in uppercase
- * @param includeDate - Whether to include date width
- * @returns Object with pixel and year-space widths
- */
-function calculateTextWidth(
-  fig: HistoricalFigure,
-  isUppercase: boolean,
-  includeDate: boolean = true
-): TextMeasurement {
-  // Name width (always uppercase in rendering)
-  const nameWidthPx = Math.ceil(fig.name.length * FONT_SIZE_NAME * CHAR_WIDTH_UPPERCASE);
-
-  // Occupation width (capitalized)
-  const occupationWidthPx = Math.ceil(fig.occupation.length * FONT_SIZE_OCCUPATION * CHAR_WIDTH_CAPITALIZE);
-
-  // Date width - CRITICAL: This was missing for floating labels!
-  let dateWidthPx = 0;
-  if (includeDate) {
-    const startYStr = formatYear(fig.birthYear);
-    const endYStr = fig.deathYear >= new Date().getFullYear() ? '' : formatYear(fig.deathYear);
-    // Format: "YYYY - YYYY" or "YYYY BC - YYYY" with " - " separator
-    const dateTextLength = startYStr.length + (endYStr ? endYStr.length + 3 : 2);
-    dateWidthPx = Math.ceil(dateTextLength * FONT_SIZE_DATE * CHAR_WIDTH_BOLD) + 60; // +60px padding
-  }
-
-  // Date and occupation are on the same line for floating labels, so add them together
-  // Format: "YYYY - YYYY • occupation" - add bullet separator width (~15px)
-  const dateAndOccupationWidthPx = dateWidthPx + occupationWidthPx + 15;
-
-  const totalWidthPx = Math.max(nameWidthPx, dateAndOccupationWidthPx);
-  const totalWidthYears = totalWidthPx / BASE_PIXELS_PER_YEAR;
-
-  return {
-    nameWidthPx,
-    dateWidthPx,
-    occupationWidthPx,
-    totalWidthPx,
-    totalWidthYears
-  };
-}
-
-/**
- * Calculate total occupied width for collision detection
- * Accounts for bar width, text content, and padding
- */
-function calculateOccupiedWidth(
-  fig: HistoricalFigure,
-  forFloatingLabel: boolean = false
-): number {
-  const duration = fig.deathYear - fig.birthYear;
-  const isEvent = fig.category === 'EVENTS';
-  const isShort = duration < 15;
-
-  // For short events in PASS 1: only the tiny bar matters
-  if (!forFloatingLabel && isEvent && isShort) {
-    return duration;
-  }
-
-  // For floating labels - FIX: Now includes date width!
-  if (forFloatingLabel) {
-    const textMeasurement = calculateTextWidth(fig, true, true);
-
-    // Account for min-w-[200px] constraint (line 1124)
-    const MIN_FLOATING_WIDTH_PX = 200;
-    const contentWidthPx = Math.max(textMeasurement.totalWidthPx, MIN_FLOATING_WIDTH_PX);
-
-    // Add padding: pl-2 = 8px
-    const paddingPx = 8;
-    const totalWidthPx = contentWidthPx + paddingPx;
-
-    return (totalWidthPx / BASE_PIXELS_PER_YEAR) + 5; // +5 years buffer
-  }
-
-  // For standard elements
-  const textMeasurement = calculateTextWidth(fig, true, true);
-  const barWidthPx = Math.max(duration * BASE_PIXELS_PER_YEAR, 40);
-  const paddingPx = 4; // px-1 = 4px total horizontal padding
-  const maxContentWidthPx = Math.max(textMeasurement.totalWidthPx, barWidthPx) + paddingPx;
-
-  return (maxContentWidthPx / BASE_PIXELS_PER_YEAR) + 5;
-}
-
-// Helper functions for simplified short event placement
-
-function tryPlaceLabelInGap(
-    figure: HistoricalFigure,
-    gapLevel: number,
-    horizontalOffset: number,
-    labelWidth: number,
-    barLevel: number,
-    occupiedGaps: { start: number; end: number }[][],
-    placedVectors: { x1: number; y1: number; x2: number; y2: number }[]
-): { success: boolean; visualY?: number } {
-    const LABEL_MARGIN = 10;
-
-    // Don't allow negative gap levels (gap -0.5 would be above row 0, which doesn't exist)
-    if (gapLevel < 0) {
-        return { success: false };
-    }
-
-    const gapIndex = Math.floor(gapLevel);
-    const labelStart = figure.birthYear + horizontalOffset;
-    const labelEnd = labelStart + labelWidth;
-
-    // Check box collision with existing gaps
-    let hasOverlap = false;
-    if (gapIndex >= 0 && gapIndex < occupiedGaps.length) {
-        const gapIntervals = occupiedGaps[gapIndex];
-        hasOverlap = gapIntervals.some(interval =>
-            (labelStart < interval.end + LABEL_MARGIN) &&
-            (labelEnd + LABEL_MARGIN > interval.start)
-        );
-    }
-
-    if (hasOverlap) {
-        return { success: false };
-    }
-
-    // Check connector crossing with existing vectors
-    // Center labels vertically in gaps - use same offset for both directions
-    const visualOffset = 175; // Centered in gap (empirically determined)
-    const visualY = gapIndex * ROW_HEIGHT + visualOffset;
-
-    const barVecX = figure.birthYear * BASE_PIXELS_PER_YEAR;
-    const barVecY = barLevel * ROW_HEIGHT + 80;
-    const labelVecX = labelStart * BASE_PIXELS_PER_YEAR;
-
-    const hasVectorCrossing = placedVectors.some(vec =>
-        linesIntersect(
-            { x: barVecX, y: barVecY },
-            { x: labelVecX, y: visualY },
-            { x: vec.x1, y: vec.y1 },
-            { x: vec.x2, y: vec.y2 }
-        )
-    );
-
-    if (hasVectorCrossing) {
-        return { success: false };
-    }
-
-    return { success: true, visualY };
-}
-
-function removeBarInterval(
-    level: number,
-    barStartYear: number,
-    occupiedRows: { start: number; end: number; type: 'bar' | 'label' }[][]
-): boolean {
-    if (level < 0 || level >= occupiedRows.length) {
-        console.error(`removeBarInterval: Invalid level ${level}`);
-        return false;
-    }
-
-    const intervals = occupiedRows[level];
-    const barIndex = intervals.findIndex(
-        interval => interval.type === 'bar' && Math.abs(interval.start - barStartYear) < 0.1
-    );
-
-    if (barIndex === -1) {
-        console.error(`removeBarInterval: Bar not found at level ${level}, start ${barStartYear}`);
-        return false;
-    }
-
-    intervals.splice(barIndex, 1);
-    return true;
-}
-
-function findNextAvailableRow(
-    figure: HistoricalFigure,
-    startLevel: number,
-    occupiedRows: { start: number; end: number; type: 'bar' | 'label' }[][],
-    barWidth: number
-): number {
-    const MARGIN = 6;
-    const MAX_ROWS_TO_SEARCH = 20;
-
-    const collisionEnd = figure.birthYear + barWidth;
-
-    for (let searchLevel = startLevel; searchLevel < startLevel + MAX_ROWS_TO_SEARCH; searchLevel++) {
-        if (searchLevel < occupiedRows.length) {
-            const intervals = occupiedRows[searchLevel];
-            const hasOverlap = intervals.some(interval =>
-                (figure.birthYear < interval.end + MARGIN) &&
-                (collisionEnd + MARGIN > interval.start)
-            );
-
-            if (!hasOverlap) {
-                return searchLevel;
-            }
-        } else {
-            return searchLevel;
-        }
-    }
-
-    return -1;
-}
-
-function addBarInterval(
-    level: number,
-    barStartYear: number,
-    barWidth: number,
-    occupiedRows: { start: number; end: number; type: 'bar' | 'label' }[][]
-): void {
-    while (occupiedRows.length <= level) {
-        occupiedRows.push([]);
-    }
-
-    occupiedRows[level].push({
-        start: barStartYear,
-        end: barStartYear + barWidth,
-        type: 'bar'
-    });
-}
-
-function recordLabelInterval(
-    gapLevel: number,
-    labelStart: number,
-    labelWidth: number,
-    occupiedGaps: { start: number; end: number }[][]
-): void {
-    const gapIndex = Math.floor(gapLevel);
-
-    while (occupiedGaps.length <= gapIndex) {
-        occupiedGaps.push([]);
-    }
-
-    occupiedGaps[gapIndex].push({
-        start: labelStart,
-        end: labelStart + labelWidth
-    });
-}
-
-function recordConnectorVector(
-    figure: HistoricalFigure,
-    barLevel: number,
-    labelYearOffset: number,
-    labelVisualY: number,
-    placedVectors: { x1: number; y1: number; x2: number; y2: number }[]
-): void {
-    const barVecX = figure.birthYear * BASE_PIXELS_PER_YEAR;
-    const barVecY = barLevel * ROW_HEIGHT + 80;
-    const labelVecX = (figure.birthYear + labelYearOffset) * BASE_PIXELS_PER_YEAR;
-
-    placedVectors.push({
-        x1: barVecX,
-        y1: barVecY,
-        x2: labelVecX,
-        y2: labelVisualY
-    });
-}
 
 const TimelineCanvas: React.FC<TimelineCanvasProps> = ({ 
   figures, 
@@ -347,23 +48,23 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
   endYear,
   onHoverYear,
   onYearClick,
-  onRelationshipClick,
   onEmptyClick,
   selectedYear,
-  relationshipState,
+  clusters,
+  clusterPlacements,
+  onPlacementsResolved,
+  modalActive,
+  relationshipSourceId,
   highlightedFigureIds,
   focusedFigureId,
   isSearchFocusActive = false,
   newlyDiscoveredIds = new Set<string>(),
-  discoverySourceId = null,
   onDiscover,
   onTrace,
   onInspect,
   isDiscovering = false,
-  onLayoutChange,
   onCanvasInteraction,
   isBusy = false,
-  hasSidebarSelection,
   selectedCategories,
   isLegendCollapsed
 }) => {
@@ -383,6 +84,7 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
   // Multi-pointer tracking for touchscreen pinch-to-zoom
   const activePointersRef = useRef<Map<number, { clientX: number; clientY: number }>>(new Map());
   const lastPinchDistanceRef = useRef<number | null>(null);
+  const pinchedRef = useRef(false);
 
   // Wheel events do not expose their source device. Large vertical-only pixel
   // impulses are treated as mouse-wheel notches; finer or horizontal events
@@ -405,9 +107,10 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
       setActionBarCoords(null);
     };
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') dismiss();
+      if (event.key === 'Escape' && !modalActive) dismiss();
     };
     const handleClickAway = (event: PointerEvent) => {
+      if (modalActive) return;
       const target = event.target;
       if (!(target instanceof Element)) return;
       if (containerRef.current?.contains(target)) {
@@ -422,422 +125,27 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
       window.removeEventListener('keydown', handleKeyDown);
       document.removeEventListener('pointerdown', handleClickAway, true);
     };
-  }, [actionFigureId]);
+  }, [actionFigureId, modalActive]);
 
-  const floatingCardRef = useRef<HTMLDivElement>(null);
-  const [activeCardWidth, setActiveCardWidth] = useState(FLOATING_CARD_WIDTH);
-
-  useLayoutEffect(() => {
-      if (relationshipState && floatingCardRef.current) {
-          setActiveCardWidth(floatingCardRef.current.getBoundingClientRect().width);
-      }
-  }, [relationshipState, figures]); 
-
-  // --- SIDEBAR ANIMATION STATE ---
-  const targetSidebarWidth = hasSidebarSelection ? SIDEBAR_OPEN_WIDTH : 20;
-
-  const animatedWidthRef = useRef(targetSidebarWidth);
-  const [animatedSidebarWidth, setAnimatedSidebarWidth] = useState(targetSidebarWidth);
+  const { layoutData, totalRows } = useMemo(
+    () => calculateTimelineLayout(figures, clusters, clusterPlacements),
+    [figures, clusters, clusterPlacements]
+  );
 
   useEffect(() => {
-    const startVal = animatedWidthRef.current;
-    const endVal = targetSidebarWidth;
-    
-    if (Math.abs(startVal - endVal) < 0.5) {
-        animatedWidthRef.current = endVal;
-        setAnimatedSidebarWidth(endVal);
-        return;
+    if (relationshipSourceId) {
+      setActionFigureId(null);
+      setActionBarCoords(null);
     }
-
-    let startTime: number;
-    let rAF: number;
-    const duration = 300; 
-
-    const step = (timestamp: number) => {
-      if (!startTime) startTime = timestamp;
-      const progress = timestamp - startTime;
-      const percent = Math.min(progress / duration, 1);
-      const ease = -(Math.cos(Math.PI * percent) - 1) / 2;
-      const newVal = startVal + (endVal - startVal) * ease;
-      
-      animatedWidthRef.current = newVal;
-      setAnimatedSidebarWidth(newVal);
-
-      if (progress < duration) {
-        rAF = requestAnimationFrame(step);
-      } else {
-        animatedWidthRef.current = endVal;
-        setAnimatedSidebarWidth(endVal);
-      }
-    };
-
-    rAF = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(rAF);
-  }, [targetSidebarWidth]);
-
-
-  // 1. Calculate Layout (Multi-Pass)
-  const { layoutData, totalRows } = useMemo(() => {
-    const priorityIds = new Set<string>();
-    if (discoverySourceId) priorityIds.add(discoverySourceId);
-    newlyDiscoveredIds.forEach(id => priorityIds.add(id));
-
-    const priorityFigures: HistoricalFigure[] = [];
-    const standardFigures: HistoricalFigure[] = [];
-
-    figures.forEach(fig => {
-        // Keep the canvas consistent with filtering of generated and cached timelines.
-        if (!isTimelineFigureVisible(fig)) {
-            return;
-        }
-        if (priorityIds.has(fig.id)) {
-            priorityFigures.push(fig);
-        } else {
-            standardFigures.push(fig);
-        }
-    });
-
-    priorityFigures.sort((a, b) => a.birthYear - b.birthYear);
-    standardFigures.sort((a, b) => a.birthYear - b.birthYear);
-
-    // Merge: Priority -> Standard (Mixed)
-    const sortedFigures = [...priorityFigures, ...standardFigures];
-    
-    // --- PASS 1: Place Bars ---
-    // We map occupied intervals per level (row)
-    const occupiedRows: { start: number, end: number, type: 'bar' | 'label' }[][] = [];
-    // We also map "Gaps" between rows. Gap K is between Row K and Row K+1.
-    const occupiedGaps: { start: number, end: number }[][] = [];
-
-    const tempLayout: LayoutData[] = [];
-    const MARGIN = 6; 
-
-    const getOccupiedWidth = (fig: HistoricalFigure, forFloatingLabel = false) => {
-        return calculateOccupiedWidth(fig, forFloatingLabel);
-    };
-
-    sortedFigures.forEach(fig => {
-        const width = getOccupiedWidth(fig);
-        const collisionEnd = fig.birthYear + width;
-
-        let placedLevel = -1;
-        
-        // Find first row that fits
-        for (let r = 0; r < occupiedRows.length; r++) {
-            const intervals = occupiedRows[r];
-            const hasOverlap = intervals.some(interval => {
-                return (fig.birthYear < interval.end + MARGIN) && (collisionEnd + MARGIN > interval.start);
-            });
-
-            if (!hasOverlap) {
-                placedLevel = r;
-                intervals.push({ start: fig.birthYear, end: collisionEnd, type: 'bar' });
-                break;
-            }
-        }
-
-        if (placedLevel === -1) {
-            placedLevel = occupiedRows.length;
-            occupiedRows.push([{ start: fig.birthYear, end: collisionEnd, type: 'bar' }]);
-        }
-
-        tempLayout.push({ figure: fig, level: placedLevel });
-    });
-
-    // --- PASS 2: Place Floating Labels for Short Events (Gaps Only, with Bar Relocation) ---
-    const placedVectors: { x1: number, y1: number, x2: number, y2: number }[] = [];
-    
-    const MAX_RELOCATION_ATTEMPTS = 10;
-
-    tempLayout.forEach(item => {
-        const { figure, level } = item;
-        const duration = figure.deathYear - figure.birthYear;
-        const isEvent = figure.category === 'EVENTS';
-        const isShort = duration < 15;
-
-        if (!isEvent || !isShort) return;
-
-        const labelWidth = getOccupiedWidth(figure, true);
-        // Label positioned at center of bar + 10 years offset
-        const barCenter = duration / 2;
-        const horizontalOffset = barCenter + 3;
-
-        let currentBarLevel = level;
-        let placementSuccessful = false;
-        let relocationAttempts = 0;
-
-        while (!placementSuccessful && relocationAttempts < MAX_RELOCATION_ATTEMPTS) {
-            // Try gap above first (-0.5)
-            const aboveGapLevel = currentBarLevel - 0.5;
-            const abovePlacement = tryPlaceLabelInGap(
-                figure, aboveGapLevel, horizontalOffset, labelWidth,
-                currentBarLevel, occupiedGaps, placedVectors
-            );
-
-            if (abovePlacement.success) {
-                item.level = currentBarLevel;
-                item.labelLevel = aboveGapLevel;
-                item.labelYearOffset = horizontalOffset;
-
-                recordLabelInterval(aboveGapLevel, figure.birthYear + horizontalOffset, labelWidth, occupiedGaps);
-                recordConnectorVector(figure, currentBarLevel, horizontalOffset, abovePlacement.visualY!, placedVectors);
-
-                placementSuccessful = true;
-                break;
-            }
-
-            // Try gap below (+0.5)
-            const belowGapLevel = currentBarLevel + 0.5;
-            const belowPlacement = tryPlaceLabelInGap(
-                figure, belowGapLevel, horizontalOffset, labelWidth,
-                currentBarLevel, occupiedGaps, placedVectors
-            );
-
-            if (belowPlacement.success) {
-                item.level = currentBarLevel;
-                item.labelLevel = belowGapLevel;
-                item.labelYearOffset = horizontalOffset;
-
-                recordLabelInterval(belowGapLevel, figure.birthYear + horizontalOffset, labelWidth, occupiedGaps);
-                recordConnectorVector(figure, currentBarLevel, horizontalOffset, belowPlacement.visualY!, placedVectors);
-
-                placementSuccessful = true;
-                break;
-            }
-
-            // BOTH GAPS BLOCKED: Relocate bar to next available row
-            const barWidth = getOccupiedWidth(figure, false);
-            const newBarLevel = findNextAvailableRow(
-                figure, currentBarLevel + 1, occupiedRows, barWidth
-            );
-
-            if (newBarLevel === -1) {
-                // No available rows - create new row at bottom
-                currentBarLevel = occupiedRows.length;
-                occupiedRows.push([{
-                    start: figure.birthYear,
-                    end: figure.birthYear + barWidth,
-                    type: 'bar'
-                }]);
-                relocationAttempts++;
-                continue;
-            }
-
-            // Remove old bar interval
-            removeBarInterval(currentBarLevel, figure.birthYear, occupiedRows);
-
-            // Add new bar interval
-            addBarInterval(newBarLevel, figure.birthYear, barWidth, occupiedRows);
-
-            currentBarLevel = newBarLevel;
-            relocationAttempts++;
-        }
-
-        // Emergency fallback if exhausted attempts
-        if (!placementSuccessful) {
-            console.warn(`Failed to place label for ${figure.name} after ${MAX_RELOCATION_ATTEMPTS} relocations`);
-
-            // Create new row for bar and place label in gap below
-            const emergencyBarLevel = occupiedRows.length;
-            const emergencyGapLevel = emergencyBarLevel + 0.5;
-
-            item.level = emergencyBarLevel;
-            item.labelLevel = emergencyGapLevel;
-            item.labelYearOffset = horizontalOffset;
-
-            // Add bar interval to new row
-            occupiedRows.push([{
-                start: figure.birthYear,
-                end: figure.birthYear + getOccupiedWidth(figure, false),
-                type: 'bar'
-            }]);
-
-            // Record label in gap below the new row
-            recordLabelInterval(emergencyGapLevel, figure.birthYear + horizontalOffset, labelWidth, occupiedGaps);
-
-            // Record connector vector (bar to label below)
-            const visualOffset = 175; // Same as tryPlaceLabelInGap
-            const visualY = emergencyBarLevel * ROW_HEIGHT + visualOffset;
-            recordConnectorVector(figure, emergencyBarLevel, horizontalOffset, visualY, placedVectors);
-        }
-    });
-
-    // --- PASS 3: Post-Placement Overlap Detection & Resolution ---
-    interface OverlapInfo {
-      figureId: string;
-      layoutIndex: number;
-      overlapsWith: string[];
-      isFloatingLabel: boolean;
-    }
-
-    function detectOverlaps(): OverlapInfo[] {
-      const overlaps: OverlapInfo[] = [];
-      const OVERLAP_THRESHOLD = 2; // Years
-
-      tempLayout.forEach((item, index) => {
-        const { figure, level, labelLevel, labelYearOffset } = item;
-        const duration = figure.deathYear - figure.birthYear;
-        const isEvent = figure.category === 'EVENTS';
-        const isShort = duration < 15;
-        const hasFloatingLabel = isEvent && isShort && labelLevel !== undefined;
-
-        const overlapsWith: string[] = [];
-
-        if (hasFloatingLabel) {
-          // Check floating label overlaps
-          const labelWidth = calculateOccupiedWidth(figure, true);
-          const labelStart = figure.birthYear + (labelYearOffset ?? 0);
-          const labelEnd = labelStart + labelWidth;
-          const labelRow = Math.floor(labelLevel ?? level);
-
-          tempLayout.forEach((other, otherIndex) => {
-            if (index === otherIndex) return;
-
-            const otherDuration = other.figure.deathYear - other.figure.birthYear;
-            const otherIsEvent = other.figure.category === 'EVENTS';
-            const otherIsShort = otherDuration < 15;
-
-            // Check against other floating labels
-            if (otherIsEvent && otherIsShort && other.labelLevel !== undefined) {
-              const otherLabelRow = Math.floor(other.labelLevel);
-              if (Math.abs(labelRow - otherLabelRow) < 1) {
-                const otherLabelWidth = calculateOccupiedWidth(other.figure, true);
-                const otherLabelStart = other.figure.birthYear + (other.labelYearOffset ?? 0);
-                const otherLabelEnd = otherLabelStart + otherLabelWidth;
-
-                if ((labelStart < otherLabelEnd + OVERLAP_THRESHOLD) &&
-                    (labelEnd + OVERLAP_THRESHOLD > otherLabelStart)) {
-                  overlapsWith.push(other.figure.id);
-                }
-              }
-            }
-
-            // Skip checking against standard elements - floating labels are in gaps,
-            // which are vertically separated from row content
-            // Only check against other floating labels (already done above)
-          });
-        } else {
-          // Check standard element overlaps
-          const width = calculateOccupiedWidth(figure, false);
-          const end = figure.birthYear + width;
-
-          tempLayout.forEach((other, otherIndex) => {
-            if (index === otherIndex) return;
-            if (Math.abs(level - other.level) > 0.6) return; // Not in same row
-
-            const otherDuration = other.figure.deathYear - other.figure.birthYear;
-            const otherIsEvent = other.figure.category === 'EVENTS';
-            const otherIsShort = otherDuration < 15;
-
-            if (otherIsEvent && otherIsShort && other.labelLevel !== undefined) return;
-
-            const otherWidth = calculateOccupiedWidth(other.figure, false);
-            const otherEnd = other.figure.birthYear + otherWidth;
-
-            if ((figure.birthYear < otherEnd + OVERLAP_THRESHOLD) &&
-                (end + OVERLAP_THRESHOLD > other.figure.birthYear)) {
-              overlapsWith.push(other.figure.id);
-            }
-          });
-        }
-
-        if (overlapsWith.length > 0) {
-          overlaps.push({
-            figureId: figure.id,
-            layoutIndex: index,
-            overlapsWith,
-            isFloatingLabel: hasFloatingLabel
-          });
-        }
-      });
-
-      return overlaps;
-    }
-
-    function resolveOverlaps(overlaps: OverlapInfo[]): void {
-      // Prioritize floating labels (easier to move)
-      const sortedOverlaps = [...overlaps].sort((a, b) => {
-        if (a.isFloatingLabel && !b.isFloatingLabel) return -1;
-        if (!a.isFloatingLabel && b.isFloatingLabel) return 1;
-        return 0;
-      });
-
-      sortedOverlaps.forEach(overlap => {
-        const item = tempLayout[overlap.layoutIndex];
-        const { figure, level } = item;
-
-        if (overlap.isFloatingLabel) {
-          // Try to relocate floating label to opposite gap
-          const labelWidth = calculateOccupiedWidth(figure, true);
-          const barCenter = (figure.deathYear - figure.birthYear) / 2;
-          const horizontalOffset = barCenter + 3;
-
-          const currentLabelLevel = item.labelLevel ?? level;
-          const isCurrentlyAbove = currentLabelLevel < level;
-          const newGapLevel = isCurrentlyAbove ? level + 0.5 : level - 0.5;
-
-          const newPlacement = tryPlaceLabelInGap(
-            figure, newGapLevel, horizontalOffset, labelWidth,
-            level, occupiedGaps, placedVectors
-          );
-
-          if (newPlacement.success) {
-            // Remove old gap interval
-            const oldGapIndex = Math.floor(currentLabelLevel);
-            if (oldGapIndex >= 0 && oldGapIndex < occupiedGaps.length) {
-              const labelStart = figure.birthYear + (item.labelYearOffset ?? horizontalOffset);
-              const intervals = occupiedGaps[oldGapIndex];
-              const intervalIndex = intervals.findIndex(
-                interval => Math.abs(interval.start - labelStart) < 0.1
-              );
-              if (intervalIndex !== -1) {
-                intervals.splice(intervalIndex, 1);
-              }
-            }
-
-            // Update placement
-            item.labelLevel = newGapLevel;
-            item.labelYearOffset = horizontalOffset;
-            recordLabelInterval(newGapLevel, figure.birthYear + horizontalOffset, labelWidth, occupiedGaps);
-            recordConnectorVector(figure, level, horizontalOffset, newPlacement.visualY!, placedVectors);
-          } else {
-            console.warn(`Could not resolve overlap for floating label: ${figure.name}`);
-          }
-        } else {
-          console.warn(`Detected overlap for standard element: ${figure.name}`);
-        }
-      });
-    }
-
-    // Execute overlap detection and resolution
-    const detectedOverlaps = detectOverlaps();
-    if (detectedOverlaps.length > 0) {
-      console.log(`Detected ${detectedOverlaps.length} overlaps, attempting resolution...`);
-      resolveOverlaps(detectedOverlaps);
-    }
-
-    // Determine total rows for canvas height. 
-    // We check both regular rows and if any gaps push beyond the visual bounds
-    const maxRowIndex = occupiedRows.length;
-    const maxGapIndex = occupiedGaps.length;
-    const effectiveTotalRows = Math.max(maxRowIndex, maxGapIndex + 0.5); 
-
-    return { layoutData: tempLayout, totalRows: Math.ceil(effectiveTotalRows) };
-  }, [figures, discoverySourceId, newlyDiscoveredIds]);
+  }, [relationshipSourceId]);
 
   useEffect(() => {
-      if (onLayoutChange) {
-          const levelMap = new Map<string, number>();
-          layoutData.forEach(({ figure, level }) => {
-              levelMap.set(figure.id, level);
-          });
-          onLayoutChange(levelMap);
-      }
-  }, [layoutData, onLayoutChange]);
+      onPlacementsResolved(layoutData);
+  }, [layoutData, onPlacementsResolved]);
 
   // 2. Auto-Zoom logic
   useEffect(() => {
-    if (focusedFigureId && containerRef.current && !isDiscovering && isSearchFocusActive) {
+    if (focusedFigureId && containerRef.current && !isDiscovering && !modalActive && isSearchFocusActive) {
         const item = layoutData.find(l => l.figure.id === focusedFigureId);
         
         if (item) {
@@ -868,7 +176,7 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
         return;
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [layoutData, focusedFigureId, isDiscovering, isSearchFocusActive]);
+  }, [layoutData, focusedFigureId, isDiscovering, isSearchFocusActive, modalActive]);
 
   const contentWidth = (endYear - startYear) * BASE_PIXELS_PER_YEAR;
 
@@ -880,6 +188,7 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
     if (!el) return;
 
     const handleWheel = (e: WheelEvent) => {
+      if (modalActive) return;
       // Keep wheel scrolling and browser zoom contained within the timeline.
       e.preventDefault();
 
@@ -954,7 +263,7 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
 
     el.addEventListener('wheel', handleWheel, { passive: false });
     return () => el.removeEventListener('wheel', handleWheel);
-  }, [highlightedFigureIds, onCanvasInteraction, contentWidth]);
+  }, [highlightedFigureIds, onCanvasInteraction, contentWidth, modalActive]);
 
   // Cleanup trackpad detection timer
   useEffect(() => {
@@ -993,12 +302,14 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
     if (e.button !== 1) e.preventDefault();
 
     // Track all active pointers for multi-touch
+    if (activePointersRef.current.size === 0) pinchedRef.current = false;
     activePointersRef.current.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
     if (containerRef.current) {
       containerRef.current.setPointerCapture(e.pointerId);
     }
 
     if (activePointersRef.current.size === 2) {
+      pinchedRef.current = true;
       // Two pointers: start pinch mode, cancel any drag
       setIsDragging(false);
       const pointers = [...activePointersRef.current.values()] as { clientX: number; clientY: number }[];
@@ -1047,16 +358,16 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
     setIsDragging(false);
     lastPinchDistanceRef.current = null;
 
-    if (isBusy) return;
-
     const dist = Math.hypot(e.clientX - dragStartPos.current.x, e.clientY - dragStartPos.current.y);
 
-    if (dist < 5 && e.button === 0) {
+    if (dist < 5 && e.button === 0 && !pinchedRef.current) {
         // Check if we clicked on the close button
         const hitElement = document.elementFromPoint(e.clientX, e.clientY);
         if (hitElement?.closest('button[data-close-selection]')) {
             return;
         }
+
+        if (isBusy) return;
 
         const shouldConsumeForSearch = wasSearchFocusedOnDown.current;
         wasSearchFocusedOnDown.current = false;
@@ -1079,11 +390,10 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
             return;
         }
 
-        // The platform-specific modifier selects a year unless relationship
-        // mode owns the canvas. Search focus was already dismissed on pointer
-        // down, so the shortcut can execute on the same click.
+        // The platform-specific modifier selects a year. Search focus was
+        // already dismissed on pointer down, so the shortcut works immediately.
         if (hasExactSelectionModifier) {
-            if (relationshipState || hoverYearVal === null) {
+            if (hoverYearVal === null) {
                 return;
             }
 
@@ -1112,18 +422,7 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
         
         if (figureId) {
              const figure = figures.find(f => f.id === figureId);
-             // If we found a figure and we are in relationship mode...
-             if (figure && relationshipState) {
-                 // If it's one of the related figures, trigger the click
-                 if (relationshipState.relatedIds.includes(figureId)) {
-                    setActionFigureId(null);
-                    setActionBarCoords(null);
-                    onRelationshipClick(figure);
-                    return; 
-                 }
-             }
              if (figure && onDiscover && onTrace && onInspect && !isDiscovering) {
-                 if (relationshipState) onEmptyClick();
                  const rect = containerRef.current!.getBoundingClientRect();
                  setActionFigureId(figureId);
                  setActionBarCoords({
@@ -1136,9 +435,6 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
 
         setActionFigureId(null);
         setActionBarCoords(null);
-        if (relationshipState || discoverySourceId) {
-            onEmptyClick();
-        }
     }
   };
 
@@ -1249,7 +545,7 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
   }
 
   const actionLayoutItem = actionFigureId ? layoutData.find(l => l.figure.id === actionFigureId) : null;
-  const isSearchMode = highlightedFigureIds.length > 0 && !isDiscovering && !relationshipState && isSearchFocusActive;
+  const isSearchMode = highlightedFigureIds.length > 0 && !isDiscovering && isSearchFocusActive;
   const cursorClass = isDragging ? 'cursor-grabbing' : 'cursor-default';
 
   // Calculate screen position for red selected year line
@@ -1363,7 +659,7 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
           }
 
           // For standard figures: use centralized width calculation
-          const measurement = calculateTextWidth(figure, true, true);
+          const measurement = calculateTextWidth(figure);
           const barWidth = Math.max(duration * BASE_PIXELS_PER_YEAR, 10);
           const maxWidth = Math.max(measurement.totalWidthPx, barWidth);
 
@@ -1402,7 +698,6 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
           const left = (figure.birthYear - startYear) * BASE_PIXELS_PER_YEAR;
           const top = level * ROW_HEIGHT + 60; 
 
-          const isTracingTarget = relationshipState?.relatedIds.includes(figure.id);
           const isNew = newlyDiscoveredIds.has(figure.id);
           const isFocused = focusedFigureId === figure.id;
           const isHighlighted = highlightedFigureIds.includes(figure.id);
@@ -1445,10 +740,9 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
                    shadowClass = "shadow-md ring-2 ring-black/20";
               }
 
-              if (relationshipState && discoverySourceId === figure.id) {
-                  shadowClass = "shadow-xl z-50 ring-4 ring-indigo-200";
-              } else if (isTracingTarget) {
-                  shadowClass = "shadow-xl z-50";
+              if (relationshipSourceId === figure.id) {
+                  shadowClass = "shadow-xl z-50 ring-4 ring-blue-200";
+
               } else if (isNew) {
                   shadowClass = "shadow-md z-30";
               }
@@ -1681,48 +975,6 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
           })}
       </svg>
 
-      {/* LAYER 3: Relationship SVG Overlay */}
-      {relationshipState && relationshipState.relatedIds.length > 0 && (
-        <svg className="absolute inset-0 pointer-events-none z-40 w-full h-full overflow-visible">
-            {relationshipState.relatedIds.map(id => {
-                const layoutItem = layoutData.find(l => l.figure.id === id);
-                if (!layoutItem) return null;
-                
-                const { figure, level } = layoutItem;
-                const duration = figure.deathYear - figure.birthYear;
-                const worldWidth = Math.max(duration * BASE_PIXELS_PER_YEAR, 4);
-                const worldLeft = (figure.birthYear - startYear) * BASE_PIXELS_PER_YEAR;
-                const worldTop = level * ROW_HEIGHT + 60;
-                
-                const screenX = (worldLeft * viewState.scale) + viewState.translateX;
-                const screenY = (worldTop * viewState.scale) + viewState.translateY;
-                const screenWidth = worldWidth * viewState.scale;
-                
-                const targetX = screenX + screenWidth; 
-                const targetY = screenY + (BAR_CENTER_OFFSET * viewState.scale);
-                const startX = window.innerWidth - animatedSidebarWidth - activeCardWidth;
-                const startY = relationshipState.sourceY;
-                
-                const pathD = `M ${startX} ${startY} C ${startX - 250} ${startY}, ${targetX + 250} ${targetY}, ${targetX} ${targetY}`;
-                
-                return (
-                    <g key={id}>
-                        <path 
-                            d={pathD} 
-                            fill="none" 
-                            stroke="#3b82f6" 
-                            strokeWidth="2px" 
-                            className="animate-pulse"
-                        />
-                        <circle cx={startX} cy={startY} r="3" fill="#3b82f6" />
-                        <circle cx={targetX} cy={targetY} r="8" fill="#dbeafe" />
-                        <circle cx={targetX} cy={targetY} r="4" fill="#3b82f6" />
-                    </g>
-                );
-            })}
-        </svg>
-      )}
-
       {/* LAYER 3: Labels (Bottom) - Glossy */}
       <div
             className="absolute bottom-0 left-0 h-6 bg-black/75 backdrop-blur-2xl pointer-events-none z-[70]"
@@ -1796,50 +1048,8 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
         </div>
       )}
 
-      {/* LAYER 4: Floating Source Card */}
-      {relationshipState && relationshipState.relatedIds.length > 0 && (
-          <div 
-            ref={floatingCardRef}
-            className="absolute z-50 pointer-events-auto flex items-center gap-2 p-4 bg-white/90 backdrop-blur-md border border-gray-200 rounded-xl shadow-2xl w-fit"
-            style={{
-                right: `${animatedSidebarWidth}px`, 
-                top: `${relationshipState.sourceY}px`,
-                maxWidth: `${FLOATING_CARD_WIDTH}px`,
-                transform: 'translateY(-50%)',
-                transition: 'top 0s' 
-            }}
-          >
-             <button
-                 onClick={(e) => { e.stopPropagation(); onEmptyClick(); }}
-                 className="absolute -top-2 -right-2 bg-white text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-full p-1 shadow-md border border-gray-200 z-50 transition-colors"
-             >
-                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                 </svg>
-             </button>
-
-             <div className="absolute left-0 top-1/2 -translate-x-1/2 -translate-y-1/2 w-2 h-2 bg-blue-500 rounded-full ring-4 ring-blue-100"></div>
-
-             <div className="flex-1 min-w-0">
-                 <h3 className="font-bold text-gray-900 text-xl leading-tight truncate">{relationshipState.sourceFigure.name}</h3>
-                 <div className="text-sm text-gray-500 font-mono font-semibold">
-                     {formatYear(relationshipState.sourceFigure.birthYear)} — {formatYear(relationshipState.sourceFigure.deathYear)}
-                 </div>
-                 <p className="text-xs text-emerald-800 font-bold uppercase tracking-wide mt-1 truncate">
-                     {relationshipState.sourceFigure.occupation}
-                 </p>
-             </div>
-             
-             {relationshipState.sourceImageUrl && (
-                 <div className="w-16 h-16 bg-gray-200 rounded-[10px] flex-shrink-0 overflow-hidden shadow-sm border border-gray-100">
-                    <img src={relationshipState.sourceImageUrl} alt={relationshipState.sourceFigure.name} className="w-full h-full object-cover object-top" />
-                 </div>
-             )}
-          </div>
-      )}
-
       {/* LAYER 5: Figure Actions */}
-      {actionLayoutItem && actionBarCoords && onDiscover && onTrace && onInspect && !isDiscovering && !relationshipState && !isBusy && (
+      {actionLayoutItem && actionBarCoords && onDiscover && onTrace && onInspect && !isDiscovering && !isBusy && (
           <ActionBar 
               figure={actionLayoutItem.figure}
               onDiscover={onDiscover}

@@ -153,4 +153,4 @@ This ensures that even in crowded areas of the timeline, short events cleanly po
    - **Layer 1.5:** Selection Rectangles (the white background glow for focused items).
    - **Layer 2:** Main Content (Historical Figure Bars and Floating Gap Labels).
    - **Layer 2.5:** Manhattan Routes (SVG lines drawn *behind* the main content so they don't block text).
-   - **Layers 3-5:** Overlays, Floating Source Cards, and the Discovery Action Bar.
+   - **Layers 3-5:** Timeline axis labels, selection controls, and the figure action bar. Relationship cards appear in a separate modal overlay.

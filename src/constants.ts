@@ -11,14 +11,17 @@ export const HISTORICAL_EVENTS_PER_CENTURY_CHUNK = 5;
 export const TIMELINE_CHUNKING_THRESHOLD_YEARS = 200;
 export const TIMELINE_CHUNK_YEARS = 100;
 export const DISCOVERY_FIGURES_COUNT = 5;
+export const KEEP_DISCOVERY_CLUSTERS = true;
 export const OCCUPATION_MAX_WORDS = 3;
 export const EVENT_TYPE_MAX_WORDS = 3;
 export const SHORT_DESCRIPTION_MAX_WORDS = 40;
 // Shared by event prompts and visibility filtering; measured as endYear - startYear.
 export const MIN_EVENT_DURATION = 3;
 // Shared output constraints for relationship explanations and deep dives.
-export const RELATIONSHIP_SUMMARY_MIN_SENTENCES = 1;
-export const RELATIONSHIP_SUMMARY_MAX_SENTENCES = 2;
+export const RELATIONSHIP_SUMMARY_MIN_SENTENCES = 2;
+export const RELATIONSHIP_SUMMARY_MAX_SENTENCES = 3;
+// Refresh older positive assessments whose prose used the earlier brief style.
+export const RELATIONSHIP_NARRATIVE_VERSION = 1;
 export const DEEP_DIVE_SUMMARY_MAX_WORDS = 60;
 export const DEEP_DIVE_SECTION_TITLES = [
   'Early Life', 'Major Achievements', 'Key Relationships', 'Historical Legacy',

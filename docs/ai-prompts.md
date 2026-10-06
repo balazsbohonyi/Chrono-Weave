@@ -26,6 +26,14 @@ Events must last at least `MIN_EVENT_DURATION` years, measured as end minus star
 
 Deep dives share the configured summary limit and section titles across providers. People use Early Life, Major Achievements, Key Relationships, and Historical Legacy. Events use Background, Main Developments, Key Participants, and Historical Impact. Quotations must be reliably attributable to the person; otherwise `famousQuote` is empty. Event quotations are empty.
 
+## Writing for curious readers
+
+People, events, discovery descriptions, relationship explanations, and deep dives share a warm, clear historical storytelling voice. Prompts favor active verbs and concrete details while forbidding invented dialogue, feelings, motives, scenes, and quotations. Interest should come from supported facts, actions, and consequences, with uncertainty expressed naturally.
+
+Short descriptions remain within `SHORT_DESCRIPTION_MAX_WORDS`. People descriptions introduce a distinctive contribution and why it mattered; event descriptions explain what happened and what changed; discovery descriptions introduce the person through the actual relationship to the target. They avoid lists of credentials, generic praise, and formal declarations that a connection qualifies.
+
+Biographies and event analyses retain their summary limit, fixed section titles, and substantial paragraph per section. Their summaries introduce the person or event's significance, and the sections develop distinct parts of the story through circumstances, actions, turning points, and consequences. Relationship explanations retain their fuller 2–4 section, 250–450 word target where reliable facts support it. Mapping IDs, connection checks, and correction instructions keep their machine-oriented output requirements.
+
 ## JSON and provider handling
 
 Every task prompt describes its fields, types, and JSON response shape. Gemini additionally sends its existing API response schemas. OpenRouter parses model-generated JSON. Ollama requests JSON through instructions, validates the result, and allows one corrective retry; it does not send a `format` option.
@@ -34,9 +42,13 @@ Mapping and discovery propose connections rather than immediately admitting them
 
 Assessment results are cached per pair under `chrono_assessment_*`, scoped to both historical identities. Both positive and negative verdicts are reused. An unassessed candidate adds one explanation request; an accepted verdict is also reused by the explanation dialog, avoiding a second contradictory generation.
 
+Positive assessments also record `RELATIONSHIP_NARRATIVE_VERSION`. Older positive explanations regenerate once when next used after a narrative-version change; cached rejections remain reusable.
+
 [Ollama documents schema support for downloaded local models but currently excludes cloud inference](https://docs.ollama.com/capabilities/structured-outputs). Cloud models accessed through a local Ollama server still perform inference in the cloud. Adding local schema enforcement is deferred; it is not needed to share task prompts.
 
 ## Cached data and verification
+
+The shared voice update for figure, event, and discovery descriptions and deep dives applies to newly generated content. Saved timeline descriptions and cached biographies are retained. New builds, discoveries, and uncached biographies or event analyses use the updated voice within the same limits and section structures.
 
 Existing timelines, biographies, relationship maps, and explanations are not globally cleared. When mapping or expanding, legacy relationship IDs are assessed before display; a stored ID or discovery description alone is not evidence. Unsupported IDs are excluded from the refreshed map, while already-added figures remain on the timeline. Explanation dialogs prefer the assessed explanation over an older unassessed narrative. Biography caches retain their existing behavior.
 
