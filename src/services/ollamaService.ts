@@ -1,16 +1,6 @@
 import { parseRelationshipAssessment, RelationshipAssessmentError } from './relationshipAssessment';
+import { CATEGORY_LIST } from '../constants';
 import {
-  TIMELINE_CHUNKING_THRESHOLD_YEARS,
-  TIMELINE_CHUNK_YEARS,
-  HISTORICAL_EVENTS_COUNT,
-  HISTORICAL_EVENTS_PER_CENTURY_CHUNK,
-  HISTORICAL_FIGURES_COUNT,
-  HISTORICAL_FIGURES_PER_CENTURY_CHUNK,
-  CATEGORY_LIST,
-} from '../constants';
-import {
-  buildPeoplePrompt,
-  buildEventsPrompt,
   buildDiscoveryPrompt,
   buildRelatedFiguresPrompt,
   buildRelationshipExplanationPrompt,
@@ -19,9 +9,12 @@ import {
   CONNECTION_TEST_PROMPT,
   buildCorrectionPrompt,
 } from './prompts';
-import type { DeepDiveData, FigureCategory, HistoricalFigure, IAIService, RelationshipExplanation } from '../types';
+import type { DeepDiveData, FigureCategory, HistoricalFigure, IAIService, RelationshipExplanation, WeaveGenerationContext, WeaveRequest, WeaveValidationResult } from '../types';
 import { validateLocalUrl, type AppConfig } from '../utils/providerConfig';
-import { isTimelineFigureVisible } from '../utils/timelineFigures';
+import { generateWeaveTimeline, getWeaveGenerationRange, parseWeaveFigures, suggestWeaveTopic, validateWeaveQuery } from './weaveService';
+import { parseJsonResponse } from './jsonResponse';
+import { isWeaveCategoryAllowed } from '../utils/weave';
+import { withAbort } from './utils';
 
 const RELAY = '/api/ollama/cloud';
 
@@ -46,11 +39,6 @@ function string(value: unknown, field: string, allowEmpty = false): string {
   return value.trim();
 }
 
-function year(value: unknown): number {
-  if (typeof value !== 'number' || !Number.isSafeInteger(value)) throw new Error('Years must be integers.');
-  return value;
-}
-
 function explanation(value: unknown): RelationshipExplanation {
   const data = object(value);
   if (!Array.isArray(data.sections) || data.sections.length === 0) throw new Error('Expected explanation sections.');
@@ -61,11 +49,6 @@ function explanation(value: unknown): RelationshipExplanation {
       return { title: string(item.title, 'title'), content: string(item.content, 'content') };
     }),
   };
-}
-
-function parseJson(content: string): unknown {
-  const fenced = content.trim().match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
-  return JSON.parse(fenced ? fenced[1] : content.trim());
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -110,13 +93,16 @@ export class OllamaService implements IAIService {
     const combined = signal ? AbortSignal.any([signal, timeout.signal]) : timeout.signal;
     try {
       const baseUrl = this.config.ollamaMode === 'cloud' ? this.baseUrl : `${validateLocalUrl(this.baseUrl)}/api`;
-      const response = await this.fetcher(`${baseUrl}/${endpoint}`, {
+      const response = await withAbort(this.fetcher(`${baseUrl}/${endpoint}`, {
         method: body === undefined ? 'GET' : 'POST', headers: this.headers(),
         ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: combined,
-      });
+      }), combined);
       let data: unknown;
-      try { data = await response.json(); }
-      catch { throw new Error('Ollama returned an unexpected response. Cloud mode requires the ChronoWeave development or preview server.'); }
+      try { data = await withAbort(response.json(), combined); }
+      catch (error) {
+        combined.throwIfAborted();
+        throw new Error('Ollama returned an unexpected response. Cloud mode requires the ChronoWeave development or preview server.');
+      }
       if (!response.ok) {
         const error = object(data).error;
         const detail = typeof error === 'string' ? error : error && typeof error === 'object' && 'message' in error ? String(error.message) : '';
@@ -184,8 +170,10 @@ export class OllamaService implements IAIService {
           const response = object(data);
           previousContent = string(object(response.message).content, 'model response');
           if (response.done === false || response.done_reason === 'length') throw new Error('The model response was incomplete.');
-          return validate(parseJson(previousContent));
+          signal?.throwIfAborted();
+          return validate(parseJsonResponse(previousContent));
         } catch (error) {
+          signal?.throwIfAborted();
           validationError = error instanceof Error ? error.message : 'Invalid JSON response.';
           if (correction === 1) {
             if (error instanceof RelationshipAssessmentError) throw error;
@@ -199,7 +187,7 @@ export class OllamaService implements IAIService {
       throw new Error('Ollama generation failed.');
     });
     this.queue = result.catch(() => undefined);
-    return result;
+    return withAbort(result, signal);
   }
 
   async testConnection(signal?: AbortSignal, timeoutMs = this.config.ollamaMode === 'cloud' ? 60_000 : 180_000): Promise<{ success: boolean; error?: string }> {
@@ -223,47 +211,16 @@ export class OllamaService implements IAIService {
     } finally { clearTimeout(timer); }
   }
 
-  private figures(value: unknown, start: number, end: number, events: boolean, allowEmpty = false): HistoricalFigure[] {
-    if (!Array.isArray(value) || (!allowEmpty && !events && value.length === 0)) throw new Error('Expected a non-empty JSON array.');
-    const results = value.map(item => {
-      const data = object(item);
-      const name = string(data.name, 'name');
-      const birthYear = year(events ? data.startYear : data.birthYear);
-      const deathYear = year(events ? data.endYear : data.deathYear);
-      const category = string(data.category, 'category');
-      if (!CATEGORY_LIST.includes(category as FigureCategory) || (events ? category !== 'EVENTS' : category === 'EVENTS')) throw new Error('Invalid figure category.');
-      if (birthYear > deathYear) throw new Error(`Invalid historical date range for "${name}": ${events ? 'startYear' : 'birthYear'} (${birthYear}) must be less than or equal to ${events ? 'endYear' : 'deathYear'} (${deathYear}). Use negative years for BCE dates.`);
-      return {
-        id: `o-${events ? 'e' : 'p'}-${encodeURIComponent(name.toLowerCase())}-${birthYear}-${deathYear}`,
-        name, birthYear, deathYear, category: category as FigureCategory,
-        occupation: string(events ? data.type : data.occupation, 'occupation'),
-        shortDescription: string(data.description, 'description'),
-      };
-    }).filter(figure => isTimelineFigureVisible(figure) && figure.deathYear >= start && figure.birthYear <= end);
-    if (!allowEmpty && !events && results.length === 0) throw new Error('No returned entries overlap the requested year range.');
-    return results;
+  validateWeaveQuery(request: WeaveRequest, signal?: AbortSignal): Promise<WeaveValidationResult> {
+    return validateWeaveQuery(this.generate.bind(this), request, signal);
   }
 
-  async fetchHistoricalFigures(start: number, end: number, signal?: AbortSignal): Promise<HistoricalFigure[]> {
-    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start >= end) throw new Error('Enter a valid historical year range.');
-    const results: HistoricalFigure[] = [];
-    if (end - start > TIMELINE_CHUNKING_THRESHOLD_YEARS) {
-      for (let year = start; year < end; year += TIMELINE_CHUNK_YEARS) {
-        const chunkEnd = Math.min(year + TIMELINE_CHUNK_YEARS, end);
-        results.push(...await this.generate(buildPeoplePrompt(year, chunkEnd, HISTORICAL_FIGURES_PER_CENTURY_CHUNK), value => this.figures(value, year, chunkEnd, false), signal));
-        results.push(...await this.generate(buildEventsPrompt(year, chunkEnd, HISTORICAL_EVENTS_PER_CENTURY_CHUNK), value => this.figures(value, year, chunkEnd, true), signal));
-      }
-    } else {
-      results.push(...await this.generate(buildPeoplePrompt(start, end, HISTORICAL_FIGURES_COUNT), value => this.figures(value, start, end, false), signal));
-    }
-    results.push(...await this.generate(buildEventsPrompt(start, end, HISTORICAL_EVENTS_COUNT), value => this.figures(value, start, end, true), signal));
-    const seen = new Set<string>();
-    return results.filter(figure => {
-      const key = `${figure.category === 'EVENTS' ? 'event' : 'person'}:${figure.name.toLowerCase().trim()}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
+  suggestWeaveTopic(excludedTopics?: string[], signal?: AbortSignal): Promise<WeaveValidationResult> {
+    return suggestWeaveTopic(this.generate.bind(this), excludedTopics, signal);
+  }
+
+  fetchHistoricalFigures(start: number, end: number, signal?: AbortSignal, context?: WeaveGenerationContext): Promise<HistoricalFigure[]> {
+    return generateWeaveTimeline(this.generate.bind(this), start, end, signal, context);
   }
 
   async fetchRelatedFigures(target: HistoricalFigure, allFigures: HistoricalFigure[], signal?: AbortSignal): Promise<string[]> {
@@ -298,14 +255,15 @@ export class OllamaService implements IAIService {
     }, signal);
   }
 
-  async discoverRelatedFigures(target: HistoricalFigure, existingNames: string[], start: number, end: number, signal?: AbortSignal): Promise<HistoricalFigure[]> {
-    const excluded = new Set(existingNames.map(name => name.trim().toLowerCase()));
-    return this.generate(buildDiscoveryPrompt(target, existingNames, start, end), value => {
-      const seen = new Set(excluded);
-      return this.figures(value, start, end, false, true).filter(figure => {
-        const key = figure.name.toLowerCase().trim();
-        if (seen.has(key)) return false;
-        seen.add(key); return true;
+  async discoverRelatedFigures(target: HistoricalFigure, existingNames: string[], start: number, end: number, signal?: AbortSignal, context?: WeaveGenerationContext): Promise<HistoricalFigure[]> {
+    const range = getWeaveGenerationRange(start, end, context);
+    if (!CATEGORY_LIST.some(category => category !== 'EVENTS' && isWeaveCategoryAllowed(category, range.context))) return [];
+    const excluded = new Set([...existingNames, target.name].map(name => name.trim().toLowerCase()));
+    return this.generate(buildDiscoveryPrompt(target, existingNames, range.start, range.end, range.context), value => {
+      return parseWeaveFigures(value, range.start, range.end, false, range.context, true).filter(figure => {
+        const key = figure.name.toLowerCase();
+        if (excluded.has(key)) return false;
+        excluded.add(key); return true;
       });
     }, signal);
   }

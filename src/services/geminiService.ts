@@ -1,18 +1,8 @@
 import { generateRelationshipAssessment } from './relationshipAssessment';
 
-import { GenerateContentResponse, GoogleGenAI, Type } from "@google/genai";
-import { DeepDiveData, HistoricalFigure, IAIService, RelationshipExplanation } from "../types";
+import { GenerateContentResponse, GoogleGenAI, Type, type Schema } from "@google/genai";
+import { DeepDiveData, HistoricalFigure, IAIService, RelationshipExplanation, WeaveGenerationContext, WeaveRequest, WeaveValidationResult } from "../types";
 import {
-  TIMELINE_CHUNKING_THRESHOLD_YEARS,
-  TIMELINE_CHUNK_YEARS,
-  HISTORICAL_EVENTS_COUNT,
-  HISTORICAL_EVENTS_PER_CENTURY_CHUNK,
-  HISTORICAL_FIGURES_COUNT,
-  HISTORICAL_FIGURES_PER_CENTURY_CHUNK,
-} from '../constants';
-import {
-  buildPeoplePrompt,
-  buildEventsPrompt,
   buildDiscoveryPrompt,
   buildRelatedFiguresPrompt,
   buildRelationshipExplanationPrompt,
@@ -20,7 +10,11 @@ import {
   HISTORIAN_SYSTEM_PROMPT,
   CONNECTION_TEST_PROMPT,
 } from './prompts';
-import { runWithRetry, enqueueTaskWithRetry } from "./utils";
+import { runWithRetry, enqueueTaskWithRetry, withAbort } from "./utils";
+import { generateValidatedJson, parseJsonResponse } from './jsonResponse';
+import { generateWeaveTimeline, getWeaveGenerationRange, parseWeaveFigures, suggestWeaveTopic, validateWeaveQuery, type JsonTask } from './weaveService';
+import { CATEGORY_LIST } from '../constants';
+import { isWeaveCategoryAllowed } from '../utils/weave';
 
 export class GeminiService implements IAIService {
     private ai: GoogleGenAI | null = null;
@@ -79,280 +73,71 @@ export class GeminiService implements IAIService {
         }
     }
 
-    private async fetchFiguresChunk(start: number, end: number): Promise<HistoricalFigure[]> {
-        const prompt = buildPeoplePrompt(start, end, HISTORICAL_FIGURES_PER_CENTURY_CHUNK);
+    private supportsJsonSchema = true;
 
-        try {
-            const ai = this.ensureAI();
-            // Using runWithRetry directly to allow parallelism via Promise.all in the caller
-            const response = await runWithRetry<GenerateContentResponse>(() => ai.models.generateContent({
-                model: this.model,
-                contents: prompt,
-                config: {
-                    systemInstruction: HISTORIAN_SYSTEM_PROMPT,
-                    responseMimeType: "application/json",
-                    responseSchema: {
-                        type: Type.ARRAY,
-                        items: {
-                            type: Type.OBJECT,
-                            properties: {
-                                name: { type: Type.STRING },
-                                birthYear: { type: Type.INTEGER },
-                                deathYear: { type: Type.INTEGER },
-                                occupation: { type: Type.STRING },
-                                description: { type: Type.STRING },
-                                category: { type: Type.STRING },
-                            },
-                            required: ["name", "birthYear", "deathYear", "occupation", "description", "category"],
-                        },
-                    },
-                },
-            }));
-
-            const peopleData = JSON.parse(response.text || "[]");
-
-            return peopleData.map((item: any, index: number) => ({
-                id: `p-${item.name.replace(/\s+/g, '-')}-${start}-${index}`,
-                name: item.name,
-                birthYear: item.birthYear,
-                deathYear: item.deathYear,
-                occupation: item.occupation,
-                category: item.category,
-                shortDescription: item.description
-            }));
-        } catch (error) {
-            console.warn(`Failed to fetch chunk ${start}-${end}`, error);
-            return [];
-        }
-    }
-
-    private async fetchEventsChunk(start: number, end: number): Promise<HistoricalFigure[]> {
-        const prompt = buildEventsPrompt(start, end, HISTORICAL_EVENTS_PER_CENTURY_CHUNK);
-
-        try {
-            const ai = this.ensureAI();
-            const response = await runWithRetry<GenerateContentResponse>(() => ai.models.generateContent({
-                model: this.model,
-                contents: prompt,
-                config: {
-                    systemInstruction: HISTORIAN_SYSTEM_PROMPT,
-                    responseMimeType: "application/json",
-                    responseSchema: {
-                        type: Type.ARRAY,
-                        items: {
-                            type: Type.OBJECT,
-                            properties: {
-                                name: { type: Type.STRING },
-                                startYear: { type: Type.INTEGER },
-                                endYear: { type: Type.INTEGER },
-                                type: { type: Type.STRING },
-                                description: { type: Type.STRING },
-                                category: { type: Type.STRING },
-                            },
-                            required: ["name", "startYear", "endYear", "type", "description", "category"],
-                        },
-                    },
-                },
-            }));
-
-            const eventsData = JSON.parse(response.text || "[]");
-
-            return eventsData.map((item: any, index: number) => ({
-                id: `e-${item.name.replace(/\s+/g, '-')}-${start}-${index}`,
-                name: item.name,
-                birthYear: item.startYear,
-                deathYear: item.endYear,
-                occupation: item.type,
-                category: 'EVENTS',
-                shortDescription: item.description
-            }));
-        } catch (error) {
-            console.warn(`Failed to fetch events chunk ${start}-${end}`, error);
-            return [];
-        }
-    }
-
-    async fetchHistoricalFigures(startYear: number, endYear: number): Promise<HistoricalFigure[]> {
-        const model = this.model;
-
-        // 1. Fetch People (Chunked if > 200 years, else standard)
-        let peoplePromise: Promise<HistoricalFigure[]>;
-
-        if (endYear - startYear > TIMELINE_CHUNKING_THRESHOLD_YEARS) {
-            const chunks = [];
-            for (let y = startYear; y < endYear; y += TIMELINE_CHUNK_YEARS) {
-                chunks.push({ start: y, end: Math.min(y + TIMELINE_CHUNK_YEARS, endYear) });
-            }
-            peoplePromise = Promise.all(chunks.map(chunk => this.fetchFiguresChunk(chunk.start, chunk.end)))
-                .then(results => results.flat());
-        } else {
-            // Standard single prompt
-            const peoplePrompt = buildPeoplePrompt(startYear, endYear, HISTORICAL_FIGURES_COUNT);
-
-            const ai = this.ensureAI();
-            peoplePromise = enqueueTaskWithRetry<GenerateContentResponse>(() => ai.models.generateContent({
-                model,
-                contents: peoplePrompt,
-                config: {
-                    systemInstruction: HISTORIAN_SYSTEM_PROMPT,
-                    responseMimeType: "application/json",
-                    responseSchema: {
-                        type: Type.ARRAY,
-                        items: {
-                            type: Type.OBJECT,
-                            properties: {
-                                name: { type: Type.STRING },
-                                birthYear: { type: Type.INTEGER },
-                                deathYear: { type: Type.INTEGER },
-                                occupation: { type: Type.STRING },
-                                description: { type: Type.STRING },
-                                category: { type: Type.STRING },
-                            },
-                            required: ["name", "birthYear", "deathYear", "occupation", "description", "category"],
-                        },
-                    },
-                },
-            })).then(response => {
-                const peopleData = JSON.parse(response.text || "[]");
-                return peopleData.map((item: any, index: number) => ({
-                    id: `p-${item.name.replace(/\s+/g, '-')}-${index}`,
-                    name: item.name,
-                    birthYear: item.birthYear,
-                    deathYear: item.deathYear,
-                    occupation: item.occupation,
-                    category: item.category,
-                    shortDescription: item.description
-                }));
-            }).catch(() => []);
-        }
-
-        // 2. Fetch Events (Mixed Strategy: Global + Chunked if > TIMELINE_CHUNKING_THRESHOLD_YEARS)
-        let eventsPromise: Promise<HistoricalFigure[]>;
-
-        // Always fetch global events for continuity
-        const globalEventsPrompt = buildEventsPrompt(startYear, endYear, HISTORICAL_EVENTS_COUNT);
-
-        const ai = this.ensureAI();
-        const globalEventsPromise = enqueueTaskWithRetry<GenerateContentResponse>(() => ai.models.generateContent({
-            model,
-            contents: globalEventsPrompt,
-            config: {
-                systemInstruction: HISTORIAN_SYSTEM_PROMPT,
-                responseMimeType: "application/json",
-                responseSchema: {
-                    type: Type.ARRAY,
-                    items: {
-                        type: Type.OBJECT,
-                        properties: {
-                            name: { type: Type.STRING },
-                            startYear: { type: Type.INTEGER },
-                            endYear: { type: Type.INTEGER },
-                            type: { type: Type.STRING },
-                            description: { type: Type.STRING },
-                            category: { type: Type.STRING },
-                        },
-                        required: ["name", "startYear", "endYear", "type", "description", "category"],
-                    },
-                },
+    private schema(task: JsonTask): Schema {
+        if (task === 'preflight') return {
+            type: Type.OBJECT,
+            properties: {
+                isValid: { type: Type.BOOLEAN }, errorMessage: { type: Type.STRING, nullable: true },
+                inferredStartYear: { type: Type.INTEGER }, inferredEndYear: { type: Type.INTEGER },
+                themeDescription: { type: Type.STRING }, activeCategories: { type: Type.ARRAY, items: { type: Type.STRING } },
             },
-        })).then(response => {
-            const eventsData = JSON.parse(response.text || "[]");
-            return eventsData.map((item: any, index: number) => ({
-                id: `e-g-${item.name.replace(/\s+/g, '-')}-${index}`,
-                name: item.name,
-                birthYear: item.startYear,
-                deathYear: item.endYear,
-                occupation: item.type,
-                category: 'EVENTS',
-                shortDescription: item.description
-            }));
-        }).catch(() => []);
+            required: ['isValid', 'errorMessage', 'inferredStartYear', 'inferredEndYear', 'themeDescription', 'activeCategories'],
+        };
+        const events = task === 'events';
+        return { type: Type.ARRAY, items: {
+            type: Type.OBJECT,
+            properties: {
+                name: { type: Type.STRING },
+                [events ? 'startYear' : 'birthYear']: { type: Type.INTEGER },
+                [events ? 'endYear' : 'deathYear']: { type: Type.INTEGER },
+                [events ? 'type' : 'occupation']: { type: Type.STRING },
+                description: { type: Type.STRING }, category: { type: Type.STRING },
+            },
+            required: ['name', events ? 'startYear' : 'birthYear', events ? 'endYear' : 'deathYear', events ? 'type' : 'occupation', 'description', 'category'],
+        } };
+    }
 
-        if (endYear - startYear > TIMELINE_CHUNKING_THRESHOLD_YEARS) {
-            // Also fetch chunks for better density
-            const chunks = [];
-            for (let y = startYear; y < endYear; y += TIMELINE_CHUNK_YEARS) {
-                chunks.push({ start: y, end: Math.min(y + TIMELINE_CHUNK_YEARS, endYear) });
-            }
-
-            const chunkEventsPromise = Promise.all(chunks.map(chunk => this.fetchEventsChunk(chunk.start, chunk.end)))
-                .then(results => results.flat());
-
-            eventsPromise = Promise.all([globalEventsPromise, chunkEventsPromise])
-                .then(([global, chunked]) => [...global, ...chunked]);
-        } else {
-            eventsPromise = globalEventsPromise;
-        }
-
-        try {
-            // Run People and Events in parallel
-            const [people, rawEvents] = await Promise.all([peoplePromise, eventsPromise]);
-
-            // Deduplicate people (names might overlap in adjacent century chunks)
-            const seenNames = new Set<string>();
-            const uniquePeople: HistoricalFigure[] = [];
-            for (const p of people) {
-                const key = p.name.trim().toLowerCase();
-                if (!seenNames.has(key)) {
-                    seenNames.add(key);
-                    uniquePeople.push(p);
+    private generate<T>(prompt: string, validate: (value: unknown) => T, signal?: AbortSignal, task: JsonTask = 'people'): Promise<T> {
+        const ai = this.ensureAI();
+        return generateValidatedJson(prompt, requestPrompt => {
+            const request = async () => {
+                signal?.throwIfAborted();
+                const combined = signal ? AbortSignal.any([signal, AbortSignal.timeout(180_000)]) : AbortSignal.timeout(180_000);
+                const config = { systemInstruction: HISTORIAN_SYSTEM_PROMPT, abortSignal: combined,
+                    ...(this.supportsJsonSchema ? { responseMimeType: 'application/json', responseSchema: this.schema(task) } : {}) };
+                let response: GenerateContentResponse;
+                try { response = await withAbort(ai.models.generateContent({ model: this.model, contents: requestPrompt, config }), combined); }
+                catch (error) {
+                    signal?.throwIfAborted();
+                    // Some compatible models reject structured output. Retry with the
+                    // full JSON instructions already present in the shared task prompt.
+                    const message = error instanceof Error ? error.message : String(error);
+                    if (!this.supportsJsonSchema || !/schema|response.?mime|structured|json.?mode/i.test(message) ||
+                        !/unsupported|not supported|invalid|not allowed|400/i.test(message)) throw error;
+                    this.supportsJsonSchema = false;
+                    combined.throwIfAborted();
+                    response = await withAbort(ai.models.generateContent({ model: this.model, contents: requestPrompt,
+                        config: { systemInstruction: HISTORIAN_SYSTEM_PROMPT, abortSignal: combined } }), combined);
                 }
-            }
+                signal?.throwIfAborted();
+                return response.text || '';
+            };
+            return task === 'preflight' ? runWithRetry(request, 2, 1000, signal) : enqueueTaskWithRetry(request, signal);
+        }, validate, signal);
+    }
 
-            // Deduplicate Events (by Name OR by exact Start/End year match)
-            const uniqueEvents: HistoricalFigure[] = [];
-            for (const ev of rawEvents) {
-                const isDuplicate = uniqueEvents.some(existing => {
-                    const existingName = existing.name.toLowerCase().trim();
-                    const newName = ev.name.toLowerCase().trim();
-                    const existingTime = `${existing.birthYear}-${existing.deathYear}`;
-                    const newTime = `${ev.birthYear}-${ev.deathYear}`;
+    validateWeaveQuery(request: WeaveRequest, signal?: AbortSignal): Promise<WeaveValidationResult> {
+        return validateWeaveQuery(this.generate.bind(this), request, signal);
+    }
 
-                    return existingName === newName || existingTime === newTime;
-                });
+    suggestWeaveTopic(excludedTopics?: string[], signal?: AbortSignal): Promise<WeaveValidationResult> {
+        return suggestWeaveTopic(this.generate.bind(this), excludedTopics, signal);
+    }
 
-                if (!isDuplicate) {
-                    uniqueEvents.push(ev);
-                }
-            }
-
-            const allFigures = [...uniquePeople, ...uniqueEvents].filter((f: HistoricalFigure) => {
-                // Validate that deathYear is a valid number (not null, undefined, or NaN)
-                const hasValidDeathYear = f.deathYear != null && typeof f.deathYear === 'number' && !isNaN(f.deathYear);
-                const hasValidBirthYear = f.birthYear != null && typeof f.birthYear === 'number' && !isNaN(f.birthYear);
-
-                if (!hasValidBirthYear || !hasValidDeathYear) {
-                    return false;
-                }
-
-                // For events, ensure both birthYear (startYear) and deathYear (endYear) are valid
-                if (f.category === 'EVENTS') {
-                    const currentYear = new Date().getFullYear();
-
-                    // Filter out events that have deathYear = current year when timeline endYear < current year
-                    // This indicates the AI incorrectly set an ongoing event marker for a historical timeline
-                    if (endYear < currentYear && f.deathYear === currentYear) {
-                        console.warn(`[Gemini] Filtering out event "${f.name}" with invalid current year end date`);
-                        return false;
-                    }
-
-                    // Event must span at least 1 year and overlap with timeline range
-                    return f.birthYear < f.deathYear &&
-                        f.deathYear >= startYear &&
-                        f.birthYear <= endYear;
-                }
-                // For figures, allow deathYear >= birthYear and must overlap with timeline range
-                return f.birthYear <= f.deathYear &&
-                    f.deathYear >= startYear &&
-                    f.birthYear <= endYear;
-            });
-
-            return allFigures;
-
-        } catch (error) {
-            console.error("Error fetching figures/events:", error);
-            return [];
-        }
+    fetchHistoricalFigures(start: number, end: number, signal?: AbortSignal, context?: WeaveGenerationContext): Promise<HistoricalFigure[]> {
+        return generateWeaveTimeline(this.generate.bind(this), start, end, signal, context);
     }
 
     async fetchRelatedFigures(target: HistoricalFigure, allFigures: HistoricalFigure[]): Promise<string[]> {
@@ -383,7 +168,7 @@ export class GeminiService implements IAIService {
                 }
             }));
 
-            const result = JSON.parse(response.text || "{}");
+            const result = parseJsonResponse(response.text || "{}") as { relatedIds?: string[] };
             if (!Array.isArray(result.relatedIds) || !result.relatedIds.every((id: unknown) => typeof id === 'string')) {
                 throw new Error('The model returned an invalid relationship map.');
             }
@@ -395,61 +180,18 @@ export class GeminiService implements IAIService {
         }
     }
 
-    async discoverRelatedFigures(
-        target: HistoricalFigure,
-        existingNames: string[],
-        startYear: number,
-        endYear: number
-    ): Promise<HistoricalFigure[]> {
-        try {
-            const prompt = buildDiscoveryPrompt(target, existingNames, startYear, endYear);
-
-            const ai = this.ensureAI();
-            const response = await enqueueTaskWithRetry<GenerateContentResponse>(() => ai.models.generateContent({
-                model: this.model,
-                contents: prompt,
-                config: {
-                    systemInstruction: HISTORIAN_SYSTEM_PROMPT,
-                    responseMimeType: "application/json",
-                    responseSchema: {
-                        type: Type.ARRAY,
-                        items: {
-                            type: Type.OBJECT,
-                            properties: {
-                                name: { type: Type.STRING },
-                                birthYear: { type: Type.INTEGER },
-                                deathYear: { type: Type.INTEGER },
-                                occupation: { type: Type.STRING },
-                                description: { type: Type.STRING },
-                                category: { type: Type.STRING },
-                            },
-                            required: ["name", "birthYear", "deathYear", "occupation", "description", "category"],
-                        },
-                    },
-                },
-            }));
-
-            const rawData = JSON.parse(response.text || "null");
-            if (!Array.isArray(rawData)) throw new Error('The model returned invalid discovery data.');
-
-            return rawData.map((item: any, index: number) => ({
-                id: `${item.name.replace(/\s+/g, '-')}-${Date.now()}-${index}`, // Ensure unique ID
-                name: item.name,
-                birthYear: item.birthYear,
-                deathYear: item.deathYear,
-                occupation: item.occupation,
-                category: item.category,
-                shortDescription: item.description
-            })).filter((f: HistoricalFigure) => {
-                const hasValidDeathYear = f.deathYear != null && typeof f.deathYear === 'number' && !isNaN(f.deathYear);
-                const hasValidBirthYear = f.birthYear != null && typeof f.birthYear === 'number' && !isNaN(f.birthYear);
-                return hasValidBirthYear && hasValidDeathYear && f.birthYear < f.deathYear;
+    async discoverRelatedFigures(target: HistoricalFigure, existingNames: string[], start: number, end: number, signal?: AbortSignal, context?: WeaveGenerationContext): Promise<HistoricalFigure[]> {
+        const range = getWeaveGenerationRange(start, end, context);
+        if (!CATEGORY_LIST.some(category => category !== 'EVENTS' && isWeaveCategoryAllowed(category, range.context))) return [];
+        const excluded = new Set([...existingNames, target.name].map(name => name.trim().toLowerCase()));
+        return this.generate(buildDiscoveryPrompt(target, existingNames, range.start, range.end, range.context), value => {
+            if (!Array.isArray(value)) throw new Error('The model returned invalid discovery data.');
+            return parseWeaveFigures(value, range.start, range.end, false, range.context, true).filter(figure => {
+                const key = figure.name.toLowerCase();
+                if (excluded.has(key)) return false;
+                excluded.add(key); return true;
             });
-
-        } catch (error) {
-            console.error("Error discovering new figures:", error);
-            throw error;
-        }
+        }, signal);
     }
 
     async fetchRelationshipExplanation(source: HistoricalFigure, target: HistoricalFigure): Promise<RelationshipExplanation | null> {
@@ -487,7 +229,7 @@ export class GeminiService implements IAIService {
                     }
                 }));
 
-                return JSON.parse(response.text || "null");
+                return parseJsonResponse(response.text || "null");
             });
         } catch (error) {
             console.error("Error fetching relationship explanation:", error);
@@ -528,7 +270,7 @@ export class GeminiService implements IAIService {
                 }
             }));
 
-            return JSON.parse(response.text || "null");
+            return parseJsonResponse(response.text || "null") as DeepDiveData | null;
         } catch (error) {
             console.error("Error fetching figure deep dive:", error);
             return null;

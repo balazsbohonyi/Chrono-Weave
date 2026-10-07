@@ -10,6 +10,33 @@ export type FigureCategory =
   | 'WRITERS'
   | 'EVENTS';
 
+export type WeaveMode = 'time-span' | 'era' | 'figure' | 'region' | 'theme' | 'freeform';
+
+export interface WeaveRequest {
+  mode: WeaveMode;
+  query: string;
+  startYear?: number;
+  endYear?: number;
+}
+
+export interface WeaveValidationResult {
+  isValid: boolean;
+  errorMessage: string | null;
+  inferredStartYear: number;
+  inferredEndYear: number;
+  themeDescription: string;
+  activeCategories: Array<FigureCategory | 'ALL'>;
+}
+
+export interface WeaveGenerationContext {
+  mode: WeaveMode;
+  query: string;
+  inferredStartYear: number;
+  inferredEndYear: number;
+  themeDescription: string;
+  activeCategories: Array<FigureCategory | 'ALL'>;
+}
+
 export interface HistoricalFigure {
   id: string;
   name: string;
@@ -26,6 +53,7 @@ export interface HistoricalFigure {
 export interface TimelineConfig {
   startYear: number;
   endYear: number;
+  weaveContext?: WeaveGenerationContext;
 }
 
 export interface ViewState {
@@ -78,9 +106,11 @@ export interface RelationshipExplanation {
 export type InteractionMode = 'select' | 'pan' | 'zoom';
 
 export interface IAIService {
-  fetchHistoricalFigures(start: number, end: number, signal?: AbortSignal): Promise<HistoricalFigure[]>;
+  validateWeaveQuery(request: WeaveRequest, signal?: AbortSignal): Promise<WeaveValidationResult>;
+  suggestWeaveTopic(excludedTopics?: string[], signal?: AbortSignal): Promise<WeaveValidationResult>;
+  fetchHistoricalFigures(start: number, end: number, signal?: AbortSignal, context?: WeaveGenerationContext): Promise<HistoricalFigure[]>;
   fetchRelatedFigures(target: HistoricalFigure, allFigures: HistoricalFigure[], signal?: AbortSignal): Promise<string[]>;
-  discoverRelatedFigures(target: HistoricalFigure, existingNames: string[], start: number, end: number, signal?: AbortSignal): Promise<HistoricalFigure[]>;
+  discoverRelatedFigures(target: HistoricalFigure, existingNames: string[], start: number, end: number, signal?: AbortSignal, context?: WeaveGenerationContext): Promise<HistoricalFigure[]>;
   fetchRelationshipExplanation(source: HistoricalFigure, target: HistoricalFigure, signal?: AbortSignal): Promise<RelationshipExplanation | null>;
   fetchFigureDeepDive(figure: HistoricalFigure, signal?: AbortSignal): Promise<DeepDiveData | null>;
   testConnection(signal?: AbortSignal): Promise<{ success: boolean; error?: string }>;

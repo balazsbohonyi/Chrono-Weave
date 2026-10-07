@@ -1,17 +1,7 @@
 import { generateRelationshipAssessment } from './relationshipAssessment';
 
-import { DeepDiveData, FigureCategory, HistoricalFigure, IAIService, RelationshipExplanation } from "../types";
+import { DeepDiveData, FigureCategory, HistoricalFigure, IAIService, RelationshipExplanation, WeaveGenerationContext, WeaveRequest, WeaveValidationResult } from "../types";
 import {
-  TIMELINE_CHUNKING_THRESHOLD_YEARS,
-  TIMELINE_CHUNK_YEARS,
-  HISTORICAL_EVENTS_COUNT,
-  HISTORICAL_EVENTS_PER_CENTURY_CHUNK,
-  HISTORICAL_FIGURES_COUNT,
-  HISTORICAL_FIGURES_PER_CENTURY_CHUNK,
-} from '../constants';
-import {
-  buildPeoplePrompt,
-  buildEventsPrompt,
   buildDiscoveryPrompt,
   buildRelatedFiguresPrompt,
   buildRelationshipExplanationPrompt,
@@ -19,7 +9,11 @@ import {
   HISTORIAN_SYSTEM_PROMPT,
   CONNECTION_TEST_PROMPT,
 } from './prompts';
-import { runWithRetry, enqueueTaskWithRetry } from "./utils";
+import { runWithRetry, enqueueTaskWithRetry, withAbort } from "./utils";
+import { generateValidatedJson, parseJsonResponse } from './jsonResponse';
+import { generateWeaveTimeline, getWeaveGenerationRange, parseWeaveFigures, suggestWeaveTopic, validateWeaveQuery, type JsonTask } from './weaveService';
+import { CATEGORY_LIST } from '../constants';
+import { isWeaveCategoryAllowed } from '../utils/weave';
 
 export class OpenRouterService implements IAIService {
     private apiKey: string;
@@ -31,14 +25,14 @@ export class OpenRouterService implements IAIService {
         this.model = model || "openai/gpt-oss-120b";
     }
 
-    async testConnection(): Promise<{ success: boolean; error?: string }> {
+    async testConnection(signal?: AbortSignal): Promise<{ success: boolean; error?: string }> {
         try {
             const response = await fetch(this.baseUrl, {
                 method: "POST",
                 headers: {
                     "Authorization": `Bearer ${this.apiKey}`,
                     "Content-Type": "application/json",
-                    "HTTP-Referer": window.location.origin,
+                    "HTTP-Referer": typeof window === 'undefined' ? 'http://localhost:3000' : window.location.origin,
                     "X-Title": "ChronoWeave"
                 },
                 body: JSON.stringify({
@@ -83,238 +77,57 @@ export class OpenRouterService implements IAIService {
         }
     }
 
-    private parseJson(text: string): any {
-        // Trim the text to remove any leading/trailing whitespace
-        const trimmedText = text.trim();
-
-        // First, try parsing the text directly
-        try {
-            return JSON.parse(trimmedText);
-        } catch (e) {
-            console.warn("[OpenRouter] Direct JSON parse failed:", (e as Error).message);
-            // If direct parse fails, try cleaning and extracting
-        }
-
-        // Try to extract JSON from markdown code blocks (```json ... ``` or ``` ... ```)
-        const markdownMatch = trimmedText.match(/```(?:json)?[\s\n]*([\s\S]*?)```/);
-        if (markdownMatch && markdownMatch[1] && markdownMatch[1].trim().length > 0) {
-            try {
-                const extracted = markdownMatch[1].trim();
-                console.log("[OpenRouter] Markdown extraction found, attempting parse.");
-                return JSON.parse(extracted);
-            } catch (e2) {
-                console.warn("[OpenRouter] Markdown extraction found but parse failed:", (e2 as Error).message);
-            }
-        }
-
-
-
-        // If we get here, parsing failed
-        console.error("[OpenRouter] Failed to parse JSON. First 500 chars:", trimmedText.substring(0, 500));
-        console.error("[OpenRouter] Last 500 chars:", trimmedText.substring(Math.max(0, trimmedText.length - 500)));
-        throw new Error("Failed to parse JSON from OpenRouter response");
-    }
-
-    private async callOpenRouter(prompt: string): Promise<any> {
+    private async callOpenRouter(prompt: string, signal?: AbortSignal, raw = false): Promise<any> {
+        signal?.throwIfAborted();
         const messages = [];
         messages.push({ role: "system", content: HISTORIAN_SYSTEM_PROMPT });
         messages.push({ role: "user", content: prompt });
 
-        const response = await fetch(this.baseUrl, {
+        const combined = signal ? AbortSignal.any([signal, AbortSignal.timeout(180_000)]) : AbortSignal.timeout(180_000);
+        const response = await withAbort(fetch(this.baseUrl, {
             method: "POST",
+            signal: combined,
             headers: {
                 "Authorization": `Bearer ${this.apiKey}`,
                 "Content-Type": "application/json",
-                "HTTP-Referer": window.location.origin,
+                "HTTP-Referer": typeof window === 'undefined' ? 'http://localhost:3000' : window.location.origin,
                 "X-Title": "ChronoWeave"
             },
             body: JSON.stringify({
                 model: this.model,
                 messages: messages,
             })
-        });
+        }), combined);
 
         if (!response.ok) {
             const errBody = await response.text();
-            throw new Error(`OpenRouter API Error: ${response.status} - ${errBody}`);
+            throw Object.assign(new Error(`OpenRouter API Error: ${response.status} - ${errBody}`), { status: response.status });
         }
 
-        const data = await response.json();
+        const data = await withAbort(response.json(), combined);
         const content = data.choices?.[0]?.message?.content || "";
-        return this.parseJson(content);
+        signal?.throwIfAborted();
+        return raw ? content : parseJsonResponse(content);
     }
 
-    private async fetchFiguresChunk(start: number, end: number): Promise<HistoricalFigure[]> {
-        const prompt = buildPeoplePrompt(start, end, HISTORICAL_FIGURES_PER_CENTURY_CHUNK);
-
-        try {
-            const peopleData = await runWithRetry(() => this.callOpenRouter(prompt));
-
-            if (!Array.isArray(peopleData)) return [];
-
-            return peopleData.map((item: any, index: number) => ({
-                id: `p-${item.name.replace(/\s+/g, '-')}-${start}-${index}`,
-                name: item.name,
-                birthYear: item.birthYear,
-                deathYear: item.deathYear,
-                occupation: item.occupation,
-                category: item.category as FigureCategory,
-                shortDescription: item.description
-            }));
-        } catch (error) {
-            console.warn(`[OpenRouter] Failed to fetch figures chunk ${start}-${end}:`, (error as Error).message);
-            return [];
-        }
+    private generate<T>(prompt: string, validate: (value: unknown) => T, signal?: AbortSignal, task: JsonTask = 'people'): Promise<T> {
+        // Plain task JSON keeps this compatible with models that do not support
+        // OpenAI-style response_format/json_schema parameters.
+        return generateValidatedJson(prompt, requestPrompt => task === 'preflight'
+            ? runWithRetry(() => this.callOpenRouter(requestPrompt, signal, true), 2, 1000, signal)
+            : enqueueTaskWithRetry(() => this.callOpenRouter(requestPrompt, signal, true), signal), validate, signal);
     }
 
-    private async fetchEventsChunk(start: number, end: number): Promise<HistoricalFigure[]> {
-        const prompt = buildEventsPrompt(start, end, HISTORICAL_EVENTS_PER_CENTURY_CHUNK);
-        try {
-            const eventsData = await runWithRetry(() => this.callOpenRouter(prompt));
-            if (Array.isArray(eventsData)) {
-                return eventsData.map((item: any, index: number) => ({
-                    id: `e-${item.name.replace(/\s+/g, '-')}-${start}-${index}`,
-                    name: item.name,
-                    birthYear: item.startYear,
-                    deathYear: item.endYear,
-                    occupation: item.type,
-                    category: 'EVENTS' as FigureCategory,
-                    shortDescription: item.description
-                }));
-            }
-            return [];
-        } catch (e) {
-            console.warn(`Failed to fetch events chunk ${start}-${end}`, e);
-            return [];
-        }
+    validateWeaveQuery(request: WeaveRequest, signal?: AbortSignal): Promise<WeaveValidationResult> {
+        return validateWeaveQuery(this.generate.bind(this), request, signal);
     }
 
-    async fetchHistoricalFigures(startYear: number, endYear: number): Promise<HistoricalFigure[]> {
-        let figures: HistoricalFigure[] = [];
+    suggestWeaveTopic(excludedTopics?: string[], signal?: AbortSignal): Promise<WeaveValidationResult> {
+        return suggestWeaveTopic(this.generate.bind(this), excludedTopics, signal);
+    }
 
-        // 1. Fetch People (Chunked if > TIMELINE_CHUNKING_THRESHOLD_YEARS)
-        if (endYear - startYear > TIMELINE_CHUNKING_THRESHOLD_YEARS) {
-            const chunks = [];
-            for (let y = startYear; y < endYear; y += TIMELINE_CHUNK_YEARS) {
-                chunks.push({ start: y, end: Math.min(y + TIMELINE_CHUNK_YEARS, endYear) });
-            }
-            try {
-                const chunkResults = await Promise.all(chunks.map(chunk => this.fetchFiguresChunk(chunk.start, chunk.end)));
-                figures = chunkResults.flat();
-            } catch (e) {
-                console.error("Chunk fetch failed", e);
-            }
-        } else {
-            const peoplePrompt = buildPeoplePrompt(startYear, endYear, HISTORICAL_FIGURES_COUNT);
-            try {
-                const peopleData = await enqueueTaskWithRetry(() => this.callOpenRouter(peoplePrompt));
-                if (Array.isArray(peopleData)) {
-                    figures = figures.concat(peopleData.map((item: any, index: number) => ({
-                        id: `p-${item.name.replace(/\s+/g, '-')}-${index}`,
-                        name: item.name,
-                        birthYear: item.birthYear,
-                        deathYear: item.deathYear,
-                        occupation: item.occupation,
-                        category: item.category as FigureCategory,
-                        shortDescription: item.description
-                    })));
-                }
-            } catch (e) { console.error(e); }
-        }
-
-        // 2. Fetch Events
-        const globalEventsPrompt = buildEventsPrompt(startYear, endYear, HISTORICAL_EVENTS_COUNT);
-
-        let rawEvents: HistoricalFigure[] = [];
-        const globalEventsPromise = enqueueTaskWithRetry(() => this.callOpenRouter(globalEventsPrompt))
-            .then((eventsData: any) => {
-                if (Array.isArray(eventsData)) {
-                    return eventsData.map((item: any, index: number) => ({
-                        id: `e-g-${item.name.replace(/\s+/g, '-')}-${index}`,
-                        name: item.name,
-                        birthYear: item.startYear,
-                        deathYear: item.endYear,
-                        occupation: item.type,
-                        category: 'EVENTS' as FigureCategory,
-                        shortDescription: item.description
-                    }));
-                }
-                return [];
-            })
-            .catch(() => []);
-
-        if (endYear - startYear > TIMELINE_CHUNKING_THRESHOLD_YEARS) {
-            const chunks = [];
-            for (let y = startYear; y < endYear; y += TIMELINE_CHUNK_YEARS) {
-                chunks.push({ start: y, end: Math.min(y + TIMELINE_CHUNK_YEARS, endYear) });
-            }
-            const chunkEventsPromise = Promise.all(chunks.map(chunk => this.fetchEventsChunk(chunk.start, chunk.end)))
-                .then(results => results.flat());
-
-            rawEvents = await Promise.all([globalEventsPromise, chunkEventsPromise])
-                .then(([global, chunked]) => [...global, ...chunked]);
-        } else {
-            rawEvents = await globalEventsPromise;
-        }
-
-        // Deduplicate Logic
-        const seenNames = new Set<string>();
-        const uniqueFigures: HistoricalFigure[] = [];
-        for (const f of figures) {
-            const key = f.name.trim().toLowerCase();
-            if (!seenNames.has(key)) {
-                seenNames.add(key);
-                uniqueFigures.push(f);
-            }
-        }
-
-        // Deduplicate Events (by Name OR by exact Start/End year match)
-        const uniqueEvents: HistoricalFigure[] = [];
-        for (const ev of rawEvents) {
-            const isDuplicate = uniqueEvents.some(existing => {
-                const existingName = existing.name.toLowerCase().trim();
-                const newName = ev.name.toLowerCase().trim();
-                const existingTime = `${existing.birthYear}-${existing.deathYear}`;
-                const newTime = `${ev.birthYear}-${ev.deathYear}`;
-
-                return existingName === newName || existingTime === newTime;
-            });
-
-            if (!isDuplicate) {
-                uniqueEvents.push(ev);
-            }
-        }
-
-        return [...uniqueFigures, ...uniqueEvents].filter((f: HistoricalFigure) => {
-            // Validate that both birthYear and deathYear are valid numbers (not null, undefined, or NaN)
-            const hasValidDeathYear = f.deathYear != null && typeof f.deathYear === 'number' && !isNaN(f.deathYear);
-            const hasValidBirthYear = f.birthYear != null && typeof f.birthYear === 'number' && !isNaN(f.birthYear);
-
-            if (!hasValidBirthYear || !hasValidDeathYear) {
-                return false;
-            }
-
-            // For events, ensure both birthYear (startYear) and deathYear (endYear) are valid
-            if (f.category === 'EVENTS') {
-                const currentYear = new Date().getFullYear();
-
-                // Filter out events that have deathYear = current year when timeline endYear < current year
-                // This indicates the AI incorrectly set an ongoing event marker for a historical timeline
-                if (endYear < currentYear && f.deathYear === currentYear) {
-                    console.warn(`[OpenRouter] Filtering out event "${f.name}" with invalid current year end date`);
-                    return false;
-                }
-
-                // Event must span at least 1 year and overlap with timeline range
-                return f.birthYear < f.deathYear &&
-                    f.deathYear >= startYear &&
-                    f.birthYear <= endYear;
-            }
-            // For figures, allow deathYear >= birthYear and must overlap with timeline range
-            return f.birthYear <= f.deathYear &&
-                f.deathYear >= startYear &&
-                f.birthYear <= endYear;
-        });
+    fetchHistoricalFigures(start: number, end: number, signal?: AbortSignal, context?: WeaveGenerationContext): Promise<HistoricalFigure[]> {
+        return generateWeaveTimeline(this.generate.bind(this), start, end, signal, context);
     }
 
     async fetchRelatedFigures(target: HistoricalFigure, allFigures: HistoricalFigure[]): Promise<string[]> {
@@ -335,30 +148,18 @@ export class OpenRouterService implements IAIService {
         }
     }
 
-    async discoverRelatedFigures(target: HistoricalFigure, existingNames: string[], startYear: number, endYear: number): Promise<HistoricalFigure[]> {
-        const prompt = buildDiscoveryPrompt(target, existingNames, startYear, endYear);
-
-        try {
-            const rawData = await enqueueTaskWithRetry(() => this.callOpenRouter(prompt));
-            if (!Array.isArray(rawData)) throw new Error('The model returned invalid discovery data.');
-
-            return rawData.map((item: any, index: number) => ({
-                id: `${item.name.replace(/\s+/g, '-')}-${Date.now()}-${index}`,
-                name: item.name,
-                birthYear: item.birthYear,
-                deathYear: item.deathYear,
-                occupation: item.occupation,
-                category: item.category as FigureCategory,
-                shortDescription: item.description
-            })).filter((f: HistoricalFigure) => {
-                const hasValidDeathYear = f.deathYear != null && typeof f.deathYear === 'number' && !isNaN(f.deathYear);
-                const hasValidBirthYear = f.birthYear != null && typeof f.birthYear === 'number' && !isNaN(f.birthYear);
-                return hasValidBirthYear && hasValidDeathYear && f.birthYear < f.deathYear;
+    async discoverRelatedFigures(target: HistoricalFigure, existingNames: string[], start: number, end: number, signal?: AbortSignal, context?: WeaveGenerationContext): Promise<HistoricalFigure[]> {
+        const range = getWeaveGenerationRange(start, end, context);
+        if (!CATEGORY_LIST.some(category => category !== 'EVENTS' && isWeaveCategoryAllowed(category, range.context))) return [];
+        const excluded = new Set([...existingNames, target.name].map(name => name.trim().toLowerCase()));
+        return this.generate(buildDiscoveryPrompt(target, existingNames, range.start, range.end, range.context), value => {
+            if (!Array.isArray(value)) throw new Error('The model returned invalid discovery data.');
+            return parseWeaveFigures(value, range.start, range.end, false, range.context, true).filter(figure => {
+                const key = figure.name.toLowerCase();
+                if (excluded.has(key)) return false;
+                excluded.add(key); return true;
             });
-        } catch (error) {
-            console.error("OpenRouter discoverRelatedFigures error:", error);
-            throw error;
-        }
+        }, signal);
     }
 
     async fetchRelationshipExplanation(source: HistoricalFigure, target: HistoricalFigure): Promise<RelationshipExplanation | null> {

@@ -5,12 +5,13 @@ import { CATEGORY_COLORS, CATEGORY_LIST } from '../constants';
 
 interface LegendProps {
   selectedCategories: Set<FigureCategory>;
+  availableCategories?: FigureCategory[];
   onToggleCategory: (category: FigureCategory) => void;
   isOpen: boolean;
   onToggleOpen?: () => void;
 }
 
-const Legend: React.FC<LegendProps> = ({ selectedCategories, onToggleCategory, isOpen, onToggleOpen }) => {
+const Legend: React.FC<LegendProps> = ({ selectedCategories, availableCategories = CATEGORY_LIST, onToggleCategory, isOpen, onToggleOpen }) => {
   return (
     <div className="fixed top-[52px] left-0 w-full z-[55] flex flex-col items-center pointer-events-none">
       
@@ -24,7 +25,7 @@ const Legend: React.FC<LegendProps> = ({ selectedCategories, onToggleCategory, i
       >
         <div className="w-full px-6 py-4 overflow-x-auto no-scrollbar">
             <div className="flex items-center justify-start gap-4 min-w-max">
-                {CATEGORY_LIST.map((category) => {
+                {availableCategories.map((category) => {
                     const isSelected = selectedCategories.has(category);
                     const isDimmed = selectedCategories.size > 0 && !isSelected;
                     const color = CATEGORY_COLORS[category];

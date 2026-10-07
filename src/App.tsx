@@ -2,16 +2,18 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import TimelineCanvas from './components/TimelineCanvas';
 import ControlPanel from './components/ControlPanel';
+import WeaveLauncherOverlay from './components/WeaveLauncherOverlay';
 import Sidebar from './components/Sidebar';
 import RelationshipPopover from './components/RelationshipPopover';
 import RelationshipOverlay, { RelationshipOverlayState } from './components/RelationshipOverlay';
-import { KEEP_DISCOVERY_CLUSTERS } from './constants';
+import { CATEGORY_LIST, KEEP_DISCOVERY_CLUSTERS } from './constants';
 import { addDiscoveryCluster, CLUSTER_STORAGE_KEY, emptyClusters, restoreClusters, serializeClusters } from './utils/discoveryClusters';
 import Toast from './components/Toast';
 import ProgressOverlay from './components/ProgressOverlay';
 import SettingsDialog from './components/SettingsDialog';
 import Legend from './components/Legend';
-import { HistoricalFigure, DeepDiveData, IAIService, RelationshipExplanation, FigureCategory, DiscoveryClusterState, ClusterPlacement, LayoutData } from './types';
+import { HistoricalFigure, DeepDiveData, IAIService, RelationshipExplanation, FigureCategory, DiscoveryClusterState, ClusterPlacement, LayoutData, WeaveRequest, WeaveGenerationContext } from './types';
+import { calculateWeaveBounds, normalizeWeaveCategories, normalizeWeaveContext } from './utils/weave';
 import { createAIService } from './services/aiService';
 import { assessRelationships, readRelationshipAssessment } from './services/relationshipAssessment';
 import { isConfigValid, providerNames } from './utils/providerConfig';
@@ -28,10 +30,15 @@ export interface RelationshipData {
     targetDetail: { description: string; imageUrl: string | null } | undefined;
 }
 
+type CanvasConfig = { start: number; end: number; weaveContext?: WeaveGenerationContext };
+
 const App: React.FC = () => {
-    const [config, setConfig] = useState({ start: 600, end: 1600 });
+    const [config, setConfig] = useState<CanvasConfig>({ start: 600, end: 1600 });
     const [figures, setFigures] = useState<HistoricalFigure[]>([]);
     const [loading, setLoading] = useState(false);
+    const [isLauncherOpen, setIsLauncherOpen] = useState(false);
+    const [launcherPhase, setLauncherPhase] = useState<'idle' | 'validating' | 'building'>('idle');
+    const launcherInvoker = useRef<HTMLElement | null>(null);
     const [hoverYear, setHoverYear] = useState<number | null>(null);
 
     const [selectedYear, setSelectedYear] = useState<number | null>(null);
@@ -173,12 +180,17 @@ const App: React.FC = () => {
 
             if (cachedData && cachedConfig) {
                 const parsedData: HistoricalFigure[] = JSON.parse(cachedData);
-                const parsedConfig: { start: number; end: number } = JSON.parse(cachedConfig);
+                const parsedConfig: CanvasConfig = JSON.parse(cachedConfig);
 
-                if (Array.isArray(parsedData) && parsedData.length > 0) {
-                    const visibleFigures = filterTimelineFigures(parsedData);
+                if (Array.isArray(parsedData) && parsedData.length > 0 &&
+                    Number.isSafeInteger(parsedConfig?.start) && Number.isSafeInteger(parsedConfig?.end) && parsedConfig.start < parsedConfig.end) {
+                    // Old caches remain broad canvases; new caches retain their category limits.
+                    const context = parsedConfig.weaveContext ? normalizeWeaveContext(parsedConfig.weaveContext) : undefined;
+                    const categories = context?.activeCategories ?? ['ALL'];
+                    const visibleFigures = filterTimelineFigures(parsedData).filter(figure => categories.includes('ALL') || categories.includes(figure.category));
+                    if (!visibleFigures.length) return false;
                     setFigures(visibleFigures);
-                    setConfig(parsedConfig);
+                    setConfig({ start: parsedConfig.start, end: parsedConfig.end, ...(context ? { weaveContext: context } : {}) });
                     setClusterState(restoreClusters(localStorage.getItem(CLUSTER_STORAGE_KEY), visibleFigures, KEEP_DISCOVERY_CLUSTERS));
                     if (visibleFigures.length !== parsedData.length) {
                         localStorage.setItem(TIMELINE_DATA_KEY, JSON.stringify(visibleFigures));
@@ -204,30 +216,65 @@ const App: React.FC = () => {
         }
     }, [cacheLoaded, config, figures, clusterState]);
 
-    const buildTimeline = useCallback(async (start: number, end: number) => {
-        if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start >= end) {
-            setToast({ message: 'Enter a valid year range.', type: 'error' });
-            return;
-        }
+    const closeLauncher = useCallback(() => {
+        buildController.current?.abort();
+        buildVersion.current++;
+        setLoading(false);
+        setLauncherPhase('idle');
+        setIsLauncherOpen(false);
+    }, []);
+
+    useEffect(() => {
+        if (isLauncherOpen || isSettingsOpen || !launcherInvoker.current) return;
+        const invoker = launcherInvoker.current;
+        launcherInvoker.current = null;
+        if (invoker.isConnected && !invoker.closest('[inert]')) invoker.focus({ preventScroll: true });
+    }, [isLauncherOpen, isSettingsOpen]);
+
+    const openLauncher = useCallback(() => {
+        launcherInvoker.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        dismissRelationships();
+        setPopoverState(previous => ({ ...previous, isOpen: false, loading: false }));
+        setToast(null);
+        setIsLauncherOpen(true);
+    }, [dismissRelationships]);
+
+    const ensureWeaveProvider = useCallback(() => {
         const selectedConfig = getEffectiveConfig();
         if (selectedConfig.provider !== 'ollama' && !isConfigValid(selectedConfig)) {
-            setToast({ message: 'Configure your AI provider in Settings first.', type: 'error' });
-            return;
+            throw new Error('Configure your AI provider in Settings first.');
         }
+    }, [getEffectiveConfig]);
+
+    const buildTimeline = useCallback(async (request: WeaveRequest) => {
+        ensureWeaveProvider();
         invalidateOperations();
         const version = buildVersion.current;
         const controller = new AbortController();
         buildController.current = controller;
         const service = serviceRef.current;
-        setLoading(true);
-        dismissRelationships();
-        setPopoverState(previous => ({ ...previous, isOpen: false, loading: false }));
+        setLauncherPhase('validating');
         try {
-            const data = filterTimelineFigures(await service.fetchHistoricalFigures(start, end, controller.signal));
-            if (controller.signal.aborted || buildVersion.current !== version) return;
-            if (!data.length) throw new Error('The model returned no timeline data. Try another model or year range.');
+            const validation = await service.validateWeaveQuery(request, controller.signal);
+            controller.signal.throwIfAborted();
+            if (buildVersion.current !== version) throw new DOMException('Request cancelled.', 'AbortError');
+            if (!validation.isValid) throw new Error(validation.errorMessage || 'Try a more specific historical subject.');
+            const { start, end } = calculateWeaveBounds(validation.inferredStartYear, validation.inferredEndYear);
+            const weaveContext: WeaveGenerationContext = {
+                mode: request.mode, query: request.query,
+                inferredStartYear: validation.inferredStartYear, inferredEndYear: validation.inferredEndYear,
+                themeDescription: validation.themeDescription,
+                activeCategories: normalizeWeaveCategories(validation.activeCategories),
+            };
+            setLauncherPhase('building');
+            setLoading(true);
+            const data = filterTimelineFigures(await service.fetchHistoricalFigures(start, end, controller.signal, weaveContext))
+                .filter(figure => weaveContext.activeCategories.includes('ALL') || weaveContext.activeCategories.includes(figure.category));
+            controller.signal.throwIfAborted();
+            if (buildVersion.current !== version) throw new DOMException('Request cancelled.', 'AbortError');
+            if (!data.length) throw new Error('No timeline entries were found for this subject. Try another topic or model.');
             invalidateFigureOperations();
-            const nextConfig = { start, end };
+            const nextConfig = { start, end, weaveContext };
             setFigures(data);
             setConfig(nextConfig);
             setSelectedYear(null);
@@ -242,17 +289,29 @@ const App: React.FC = () => {
             setSelectedCategories(new Set());
             setIsLegendOpen(false);
             setClusterState(emptyClusters());
-        } catch (error) {
-            if (!controller.signal.aborted && buildVersion.current === version) {
-                setToast({ message: error instanceof Error ? error.message : 'Failed to load timeline data.', type: 'error' });
-            }
+            setIsLauncherOpen(false);
         } finally {
-            if (!controller.signal.aborted && buildVersion.current === version) setLoading(false);
+            if (buildVersion.current === version) {
+                setLoading(false);
+                setLauncherPhase('idle');
+            }
         }
-    }, [getEffectiveConfig]);
+    }, [ensureWeaveProvider]);
+
+    const suggestWeaveTopic = useCallback(async (excludedTopics: string[]) => {
+        ensureWeaveProvider();
+        buildController.current?.abort();
+        const controller = new AbortController();
+        const version = ++buildVersion.current;
+        buildController.current = controller;
+        const suggestion = await serviceRef.current.suggestWeaveTopic(excludedTopics, controller.signal);
+        controller.signal.throwIfAborted();
+        if (version !== buildVersion.current) throw new DOMException('Request cancelled.', 'AbortError');
+        return suggestion;
+    }, [ensureWeaveProvider]);
 
     useEffect(() => {
-        loadTimelineFromCache();
+        setIsLauncherOpen(!loadTimelineFromCache());
         setCacheLoaded(true);
         return () => invalidateOperations();
     }, [loadTimelineFromCache]);
@@ -268,7 +327,8 @@ const App: React.FC = () => {
         setIsDiscovering(false);
         setIsTracing(false);
         setPopoverState(previous => ({ ...previous, isOpen: false, loading: false }));
-        setToast({ message: 'Settings saved. New requests use ' + providerNames[selectedConfig.provider] + '. Click Build to regenerate the timeline.', type: 'success' });
+        setLauncherPhase('idle');
+        setToast({ message: 'Settings saved. New requests use ' + providerNames[selectedConfig.provider] + '. Choose Weave New Canvas to start a timeline.', type: 'success' });
     };
 
 
@@ -541,7 +601,13 @@ const App: React.FC = () => {
         }
     };
 
+    const availableCategories = useMemo(() => config.weaveContext && !config.weaveContext.activeCategories.includes('ALL')
+        ? CATEGORY_LIST.filter(category => config.weaveContext!.activeCategories.includes(category))
+        : CATEGORY_LIST, [config]);
+    const hasCategoryFilters = availableCategories.length > 1;
+
     const toggleCategory = useCallback((category: FigureCategory) => {
+        if (!availableCategories.includes(category)) return;
         setSelectedCategories(prev => {
             const next = new Set(prev);
             if (next.has(category)) {
@@ -551,7 +617,7 @@ const App: React.FC = () => {
             }
             return next;
         });
-    }, []);
+    }, [availableCategories]);
 
     const closePopover = useCallback(() => {
         popoverVersion.current++;
@@ -577,15 +643,13 @@ const App: React.FC = () => {
         ? highlightedFigureIds[currentSearchIndex]
         : null;
 
-    const isBusy = loading || isDiscovering || isTracing;
+    const isBusy = loading || launcherPhase !== 'idle' || isDiscovering || isTracing;
 
     return (
         <div className="relative w-screen h-screen overflow-hidden font-sans text-content-primary bg-canvas">
-            <div className="absolute inset-0" inert={!!relationshipState || popoverState.isOpen}>
+            <div className="absolute inset-0" inert={isLauncherOpen || !!relationshipState || popoverState.isOpen || isSettingsOpen}>
             <ControlPanel
-                startYear={config.start}
-                endYear={config.end}
-                onBuild={buildTimeline}
+                onOpenLauncher={openLauncher}
                 isBuilding={loading}
                 hasFigures={figures.length > 0}
                 onSearch={handleSearch}
@@ -598,12 +662,13 @@ const App: React.FC = () => {
                 isLegendOpen={isLegendOpen}
             />
 
-            <Legend
+            {hasCategoryFilters && <Legend
                 selectedCategories={selectedCategories}
+                availableCategories={availableCategories}
                 onToggleCategory={toggleCategory}
                 isOpen={isLegendOpen}
                 onToggleOpen={() => setIsLegendOpen(prev => !prev)}
-            />
+            />}
 
             <div className="absolute inset-0 z-0">
                 <TimelineCanvas
@@ -617,7 +682,7 @@ const App: React.FC = () => {
                     clusters={clusterState.clusters}
                     clusterPlacements={clusterState.placements}
                     onPlacementsResolved={handlePlacementsResolved}
-                    modalActive={!!relationshipState || popoverState.isOpen}
+                    modalActive={isLauncherOpen || !!relationshipState || popoverState.isOpen || isSettingsOpen}
                     relationshipSourceId={relationshipState?.sourceFigure.id}
                     highlightedFigureIds={highlightedFigureIds}
                     focusedFigureId={focusedFigureId}
@@ -630,11 +695,11 @@ const App: React.FC = () => {
                     onCanvasInteraction={handleCanvasInteraction}
                     isBusy={isBusy}
                     selectedCategories={selectedCategories}
-                    isLegendCollapsed={!isLegendOpen}
+                    isLegendCollapsed={!hasCategoryFilters || !isLegendOpen}
                 />
             </div>
 
-            {loading && (
+            {loading && !isLauncherOpen && (
                 <ProgressOverlay title="CONSULTING THE ARCHIVES" />
             )}
 
@@ -648,11 +713,21 @@ const App: React.FC = () => {
                 isCollapsed={isSidebarCollapsed}
                 onToggleCollapse={() => setIsSidebarCollapsed(prev => !prev)}
                 selectedCategories={selectedCategories}
-                isLegendOpen={isLegendOpen}
+                isLegendOpen={hasCategoryFilters && isLegendOpen}
                 isGlobalView={selectedYear === null}
             />
 
             </div>
+
+            {isLauncherOpen && <WeaveLauncherOverlay
+                initialStartYear={config.start}
+                initialEndYear={config.end}
+                phase={launcherPhase}
+                onClose={closeLauncher}
+                onSubmit={buildTimeline}
+                onSurprise={suggestWeaveTopic}
+                onOpenSettings={() => { closeLauncher(); setIsSettingsOpen(true); }}
+            />}
 
             {relationshipState && <RelationshipOverlay
                 key={relationshipState.requestId}
