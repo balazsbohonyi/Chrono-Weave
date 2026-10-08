@@ -13,7 +13,7 @@ interface WeaveLauncherOverlayProps {
   onSurprise: (excludedTopics: string[]) => Promise<WeaveValidationResult>;
   initialStartYear: number;
   initialEndYear: number;
-  phase?: 'idle' | 'validating' | 'building';
+  phase?: 'idle' | 'validating' | 'building' | 'verifying';
   onOpenSettings: () => void;
 }
 
@@ -167,7 +167,7 @@ const WeaveLauncherOverlay: React.FC<WeaveLauncherOverlayProps> = ({
     setEndYearStr(initialEndYear.toString());
   }, [initialStartYear, initialEndYear]);
 
-  const isBusy = isSubmitting || phase === 'building' || phase === 'validating' || surpriseState === 'consulting';
+  const isBusy = isSubmitting || phase !== 'idle' || surpriseState === 'consulting';
   const isBuildInProgress = isSubmitting || phase !== 'idle';
   const isBusyRef = useRef(isBusy);
   isBusyRef.current = isBusy;
@@ -184,7 +184,7 @@ const WeaveLauncherOverlay: React.FC<WeaveLauncherOverlayProps> = ({
   focusedModeRef.current = focusedMode;
 
   const handleBackToGrid = useCallback(() => {
-    if (isSubmitting || phase === 'building' || phase === 'validating') return;
+    if (isSubmitting || phase !== 'idle') return;
     const currentMode = focusedModeRef.current;
     if (!currentMode) return;
 
@@ -410,11 +410,13 @@ const WeaveLauncherOverlay: React.FC<WeaveLauncherOverlayProps> = ({
         <p className="launcher-build-progress-title">
           {phase === 'validating' ? 'Checking your historical query...'
             : phase === 'building' ? 'Building your timeline...'
+            : phase === 'verifying' ? 'Checking historical connections...'
             : 'Preparing your timeline...'}
         </p>
         <p className="launcher-build-progress-description">
           {phase === 'validating' ? 'Confirming the subject, dates, and categories for your timeline.'
             : phase === 'building' ? 'Finding historical figures and events. Your timeline will open when it is ready.'
+            : phase === 'verifying' ? 'Keeping figures with established connections to your focus figure.'
             : 'Getting your request ready.'}
         </p>
       </div>

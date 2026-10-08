@@ -8,6 +8,9 @@ interface ActionBarProps {
     onTrace: (figure: HistoricalFigure) => void;
     onInspect: (figure: HistoricalFigure) => void;
     isDiscovering: boolean;
+    isFollowingFigure?: boolean;
+    focusFigureId?: string;
+    onRelationship?: (figure: HistoricalFigure) => void;
     style: React.CSSProperties;
 }
 
@@ -17,6 +20,9 @@ const ActionBar: React.FC<ActionBarProps> = ({
     onTrace,
     onInspect,
     isDiscovering,
+    isFollowingFigure = false,
+    focusFigureId,
+    onRelationship,
     style
 }) => {
 
@@ -30,7 +36,10 @@ const ActionBar: React.FC<ActionBarProps> = ({
         onDiscover,
         onTrace,
         onInspect,
-        isDiscovering
+        isDiscovering,
+        isFollowingFigure,
+        focusFigureId,
+        onRelationship
     });
 
     return (

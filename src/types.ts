@@ -11,6 +11,8 @@ export type FigureCategory =
   | 'EVENTS';
 
 export type WeaveMode = 'time-span' | 'era' | 'figure' | 'region' | 'theme' | 'freeform';
+export type CanvasLayoutMode = 'timeline' | 'gallery';
+export type CanvasLayoutSelection = 'automatic' | 'manual';
 
 export interface WeaveRequest {
   mode: WeaveMode;

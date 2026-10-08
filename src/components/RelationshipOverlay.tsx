@@ -2,8 +2,8 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 're
 import { HistoricalFigure } from '../types';
 import { relationshipRows } from '../utils/relationshipRows';
 import ProgressOverlay from './ProgressOverlay';
-import { fetchBatchFigureDetails } from '../services/wikiService';
-import { formatYear } from '../utils/formatters';
+import FigureCard from './FigureCard';
+import { useFigurePortraits } from '../hooks/useFigurePortraits';
 import { useModalFocus } from '../hooks/useModalFocus';
 
 export interface RelationshipOverlayState {
@@ -29,7 +29,6 @@ const RelationshipOverlay: React.FC<Props> = ({ state, figures, detailOpen, onCl
   const dialogRef = useRef<HTMLDivElement>(null);
   const diagramRef = useRef<HTMLDivElement>(null);
   const lastCard = useRef<HTMLButtonElement | null>(null);
-  const [portraits, setPortraits] = useState(new Map<string, string>());
   const [columns, setColumns] = useState(3);
   const [animation, setAnimation] = useState<'pending' | 'running' | 'done'>('pending');
   const related = useMemo(() => {
@@ -38,6 +37,7 @@ const RelationshipOverlay: React.FC<Props> = ({ state, figures, detailOpen, onCl
   }, [figures, state.relatedIds, state.sourceFigure.id]);
   const source = figures.find(figure => figure.id === state.sourceFigure.id) ?? state.sourceFigure;
   const allCards = useMemo(() => [source, ...related], [source, related]);
+  const portraits = useFigurePortraits(allCards);
   useModalFocus(dialogRef, !detailOpen, onClose);
 
   useEffect(() => {
@@ -46,15 +46,6 @@ const RelationshipOverlay: React.FC<Props> = ({ state, figures, detailOpen, onCl
     queueMicrotask(() => { if (current) lastCard.current?.focus({ preventScroll: true }); });
     return () => { current = false; };
   }, [detailOpen]);
-
-  useEffect(() => {
-    let current = true;
-    fetchBatchFigureDetails(allCards).then(details => {
-      if (!current) return;
-      setPortraits(new Map([...details].flatMap(([id, detail]) => detail.imageUrl ? [[id, detail.imageUrl] as const] : [])));
-    }).catch(error => console.warn('Could not load relationship portraits', error));
-    return () => { current = false; };
-  }, [allCards]);
 
   useLayoutEffect(() => {
     const diagram = diagramRef.current;
@@ -92,9 +83,11 @@ const RelationshipOverlay: React.FC<Props> = ({ state, figures, detailOpen, onCl
   const renderCard = (figure: HistoricalFigure, isSource: boolean, index = 0) => {
     const imageUrl = figure.imageUrl || portraits.get(figure.id);
     return (
-      <button
+      <FigureCard
         key={figure.id}
-        className={`relationship-card ${isSource ? 'relationship-source' : ''}`}
+        figure={figure}
+        imageUrl={imageUrl}
+        isSource={isSource}
         aria-label={isSource ? `Read biography of ${figure.name}` : `Relationship between ${source.name} and ${figure.name}`}
         style={isSource ? undefined : appearance(index)}
         onClick={event => {
@@ -102,14 +95,7 @@ const RelationshipOverlay: React.FC<Props> = ({ state, figures, detailOpen, onCl
           const withPortrait = imageUrl ? { ...figure, imageUrl } : figure;
           if (isSource) onInspect(withPortrait); else onRelationship(withPortrait);
         }}
-      >
-        <div className="relationship-card-text">
-          <h2>{figure.name}</h2>
-          <p className="relationship-dates">{formatYear(figure.birthYear)} — {formatYear(figure.deathYear)}</p>
-          <p className="relationship-occupation">{figure.occupation}</p>
-        </div>
-        {imageUrl && <img src={imageUrl} alt="" onError={event => { event.currentTarget.style.display = 'none'; }} />}
-      </button>
+      />
     );
   };
 

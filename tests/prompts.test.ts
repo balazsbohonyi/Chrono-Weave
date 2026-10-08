@@ -11,9 +11,21 @@ import {
   SHORT_DESCRIPTION_MAX_WORDS,
   DEEP_DIVE_SUMMARY_MAX_WORDS,
 } from '../src/constants';
-import type { IAIService } from '../src/types';
+import type { IAIService, WeaveGenerationContext } from '../src/types';
 import { chatResponse, event, figure, localConfig, person, sections, relationship } from './helpers';
 import { buildPeoplePrompt, buildEventsPrompt, buildDiscoveryPrompt, buildDeepDivePrompt, buildRelatedFiguresPrompt, buildRelationshipExplanationPrompt } from '../src/services/prompts';
+
+test('Follow a Figure generation uses the mapping evidence standard for people and events', () => {
+  const context: WeaveGenerationContext = { mode: 'figure', query: figure.name, inferredStartYear: 1800,
+    inferredEndYear: 1900, themeDescription: 'Ada Lovelace and her connections', activeCategories: ['ALL'] };
+  for (const prompt of [buildPeoplePrompt(1800, 1900, 10, context), buildEventsPrompt(1800, 1900, 10, context)]) {
+    assert.match(prompt, /Every other person or event must have an established relationship to that exact seed identity/);
+    assert.match(prompt, /Shared eras, places, professions, similar ideas, or multi-step chains through unrelated intermediaries do not qualify/);
+    assert.match(prompt, /Do not include someone merely as a contemporary/);
+    assert.match(prompt, /concrete interaction, role, work, or historical episode linking it to the seed in its description/);
+  }
+  assert.doesNotMatch(buildPeoplePrompt(1800, 1900, 10, { ...context, mode: 'era' }), /canvas of connections to the named seed/);
+});
 
 test('reader-facing tasks share the historical storytelling voice without changing their output structures', () => {
   const eventFigure = { ...figure, name: event.name, category: 'EVENTS' as const };

@@ -13,6 +13,9 @@ interface SidebarProps {
     onDiscover: (figure: HistoricalFigure) => void;
     onInspect: (figure: HistoricalFigure) => void;
     activeTracingFigureId?: string;
+    focusFigureId?: string;
+    isFollowingFigure?: boolean;
+    onRelationship?: (figure: HistoricalFigure) => void;
     isCollapsed: boolean;
     onToggleCollapse: () => void;
     selectedCategories: Set<FigureCategory>;
@@ -31,6 +34,9 @@ const Sidebar: React.FC<SidebarProps> = ({
     onDiscover,
     onInspect,
     activeTracingFigureId,
+    focusFigureId,
+    isFollowingFigure = false,
+    onRelationship,
     isCollapsed,
     onToggleCollapse,
     selectedCategories,
@@ -250,6 +256,9 @@ const Sidebar: React.FC<SidebarProps> = ({
                                 onInspect={onInspect}
                                 onTrace={handleTrace}
                                 isTracing={isTracing}
+                                isFollowingFigure={isFollowingFigure}
+                                focusFigureId={focusFigureId}
+                                onRelationship={onRelationship}
                             />
                         </div>
                     );
