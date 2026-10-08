@@ -3,6 +3,9 @@ import { WeaveMode, WeaveRequest, WeaveValidationResult } from '../types';
 import { useTheme } from '../contexts/ThemeContext';
 import { useModalFocus } from '../hooks/useModalFocus';
 import { formatYear } from '../utils/formatters';
+import { validateWeaveRequestLocally } from '../utils/weave';
+import LauncherExampleScroller from './LauncherExampleScroller';
+import LauncherAnimatedIllustration from './LauncherAnimatedIllustration';
 
 interface WeaveLauncherOverlayProps {
   onClose: () => void;
@@ -18,6 +21,8 @@ interface StrategyConfig {
   mode: WeaveMode;
   title: string;
   badge: string;
+  illustration: string;
+  illustrationHeight?: number;
   description: string;
   placeholder: string;
   inputLabel: string;
@@ -29,51 +34,70 @@ const STRATEGIES: StrategyConfig[] = [
     mode: 'time-span',
     title: 'Strict Time Span',
     badge: 'Chronological Window',
+    illustration: '1-chronological-window.jpg',
     description: 'Explore a specific century or span of years.',
     placeholder: 'e.g. 1400 to 1500',
     inputLabel: 'Specify Start and End Years',
-    examples: ['1400 to 1500', '1880 to 1914', '1945 to 1991', '-500 to -300']
+    examples: []
   },
   {
     mode: 'era',
     title: 'Historical Era',
     badge: 'Epoch & Civilization',
+    illustration: '2-epoch-civilization.jpg',
     description: 'Dive into a historical period, civilization, or dynasty.',
     placeholder: 'e.g. Golden Age of Piracy, Meiji Restoration, Weimar Republic',
     inputLabel: 'Era or Period Name',
-    examples: ['Golden Age of Piracy', 'Meiji Restoration', 'Weimar Republic', 'Hellenistic Period']
+    examples: [
+      'Golden Age of Piracy', 'Meiji Restoration', 'Weimar Republic', 'Hellenistic Period',
+      'Italian Renaissance', 'Islamic Golden Age', 'Tokugawa Period', 'Byzantine Empire'
+    ]
   },
   {
     mode: 'figure',
     title: 'Follow a Figure',
     badge: 'Biography & World',
+    illustration: '3-biography-history.jpg',
     description: 'Explore a person’s life and the people around them.',
     placeholder: 'e.g. Leonardo da Vinci, Cleopatra VII, Ada Lovelace',
     inputLabel: 'Historical Figure Name',
-    examples: ['Leonardo da Vinci', 'Cleopatra VII', 'Ada Lovelace', 'Ibn Battuta']
+    examples: [
+      'Leonardo da Vinci', 'Cleopatra VII', 'Ada Lovelace', 'Ibn Battuta',
+      'Marie Curie', 'Mansa Musa', 'Zheng He', 'Hypatia'
+    ]
   },
   {
     mode: 'region',
     title: 'Region & Culture',
     badge: 'Geographic History',
+    illustration: '4-geographic-history.jpg',
     description: 'Focus on a region, civilization, or culture.',
     placeholder: 'e.g. Song Dynasty China, Mughal Empire, Viking Age Scandinavia',
     inputLabel: 'Region, Empire, or Culture',
-    examples: ['Song Dynasty China', 'Mesoamerica before Spanish conquest', 'Mughal Empire', 'Viking Age Scandinavia']
+    examples: [
+      'Song Dynasty China', 'Mesoamerica before Spanish conquest', 'Mughal Empire', 'Viking Age Scandinavia',
+      'Ancient Egypt', 'Kingdom of Kush', 'Inca Empire', 'Safavid Persia'
+    ]
   },
   {
     mode: 'theme',
     title: 'Theme or Discipline',
     badge: 'Ideas & Disciplines',
+    illustration: '5-ideas-discipline.jpg',
     description: 'Trace the history of a field, discipline, or idea.',
     placeholder: 'e.g. Early History of Computing, Astronomy in the Islamic Golden Age',
     inputLabel: 'Theme, Movement, or Idea',
-    examples: ['Early History of Computing', 'Astronomy in the Islamic Golden Age', 'Impressionism & Post-Impressionism', 'Development of Modern Surgery']
+    examples: [
+      'Early History of Computing', 'Astronomy in the Islamic Golden Age', 'Impressionism & Post-Impressionism', 'Development of Modern Surgery',
+      'History of Aviation', 'Silk Road Trade', 'History of Printing', 'Origins of Democracy'
+    ]
   },
   {
     mode: 'freeform',
     title: 'Freeform / Custom',
     badge: 'Custom Synthesis',
+    illustration: '6-custom-synthesis.jpg',
+    illustrationHeight: 1024,
     description: 'Combine periods, places, people, and ideas in your own prompt.',
     placeholder: 'e.g. Women pioneers in medicine before 1900, Space Race architects',
     inputLabel: 'Describe your historical canvas query',
@@ -81,18 +105,14 @@ const STRATEGIES: StrategyConfig[] = [
       'Women pioneers in medicine before 1900',
       'Philosophers in Athens during the Peloponnesian War',
       'Key inventors of the Industrial Revolution',
-      'Navigators of the Age of Exploration'
+      'Navigators of the Age of Exploration',
+      'Women mathematicians in the 19th century',
+      'Architects and patrons of Renaissance Florence',
+      'Scholars and translators in medieval Baghdad',
+      'Artists and writers of the Harlem Renaissance'
     ]
   }
 ];
-
-function parseTimeSpanExample(example: string): { start: string; end: string } | null {
-  const match = example.match(/^(-?\d+)\s+to\s+(-?\d+)$/);
-  if (match) {
-    return { start: match[1], end: match[2] };
-  }
-  return null;
-}
 
 const WeaveLauncherOverlay: React.FC<WeaveLauncherOverlayProps> = ({
   onClose,
@@ -119,18 +139,17 @@ const WeaveLauncherOverlay: React.FC<WeaveLauncherOverlayProps> = ({
   const [surpriseResult, setSurpriseResult] = useState<WeaveValidationResult | null>(null);
   const [surpriseError, setSurpriseError] = useState<string | null>(null);
   const [excludedTopics, setExcludedTopics] = useState<string[]>([]);
+  const surpriseRequestRef = useRef(0);
+  const surpriseTriggerRef = useRef<HTMLButtonElement>(null);
+  const restoreSurpriseFocusRef = useRef(false);
 
-  // Refs for FLIP animations & focus restoration
+  // Refs for form focus and restoring the selected card.
   const dialogRef = useRef<HTMLDivElement>(null);
   const isMountedRef = useRef<boolean>(true);
-  const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const cardTriggerRefs = useRef<Record<string, HTMLButtonElement | null>>({});
-  const focusedCardRef = useRef<HTMLDivElement>(null);
   const startInputRef = useRef<HTMLInputElement>(null);
-  const queryInputRef = useRef<HTMLInputElement>(null);
+  const queryInputRef = useRef<HTMLTextAreaElement>(null);
 
-  const initialRectRef = useRef<DOMRect | null>(null);
-  const exitRectRef = useRef<DOMRect | null>(null);
   const lastFocusedModeRef = useRef<WeaveMode | null>(null);
   const operationRef = useRef(false);
 
@@ -148,16 +167,14 @@ const WeaveLauncherOverlay: React.FC<WeaveLauncherOverlayProps> = ({
     setEndYearStr(initialEndYear.toString());
   }, [initialStartYear, initialEndYear]);
 
-  // Track focused mode changes for return FLIP
-  useEffect(() => {
-    if (focusedMode) {
-      lastFocusedModeRef.current = focusedMode;
-    }
-  }, [focusedMode]);
-
   const isBusy = isSubmitting || phase === 'building' || phase === 'validating' || surpriseState === 'consulting';
+  const isBuildInProgress = isSubmitting || phase !== 'idle';
   const isBusyRef = useRef(isBusy);
   isBusyRef.current = isBusy;
+  const isBuildInProgressRef = useRef(isBuildInProgress);
+  isBuildInProgressRef.current = isBuildInProgress;
+  const surpriseStateRef = useRef(surpriseState);
+  surpriseStateRef.current = surpriseState;
 
   // Stable callbacks for focus trap
   const onCloseRef = useRef(onClose);
@@ -171,10 +188,6 @@ const WeaveLauncherOverlay: React.FC<WeaveLauncherOverlayProps> = ({
     const currentMode = focusedModeRef.current;
     if (!currentMode) return;
 
-    if (focusedCardRef.current) {
-      exitRectRef.current = focusedCardRef.current.getBoundingClientRect();
-    }
-
     setFocusedMode(null);
     setInputError(null);
   }, [isSubmitting, phase]);
@@ -182,11 +195,32 @@ const WeaveLauncherOverlay: React.FC<WeaveLauncherOverlayProps> = ({
   const handleBackRef = useRef<() => void>(handleBackToGrid);
   handleBackRef.current = handleBackToGrid;
 
+  const handleCollapseSurprise = useCallback(() => {
+    if (isSubmitting || phase !== 'idle') return;
+    ++surpriseRequestRef.current;
+    operationRef.current = false;
+    restoreSurpriseFocusRef.current = true;
+    setSurpriseState('idle');
+    setSurpriseResult(null);
+    setSurpriseError(null);
+  }, [isSubmitting, phase]);
+  const collapseSurpriseRef = useRef(handleCollapseSurprise);
+  collapseSurpriseRef.current = handleCollapseSurprise;
+
+  useLayoutEffect(() => {
+    if (surpriseState === 'idle' && restoreSurpriseFocusRef.current) {
+      restoreSurpriseFocusRef.current = false;
+      surpriseTriggerRef.current?.focus({ preventScroll: true });
+    }
+  }, [surpriseState]);
+
   // Stable escape callback passed to useModalFocus:
   // When inside a focused card, Escape returns to the grid.
-  // When already at grid level, Escape closes the overlay.
+  // At grid level, Escape collapses an open suggestion before closing the overlay.
   const handleModalClose = useCallback(() => {
-    if (isBusyRef.current) {
+    if (!isBuildInProgressRef.current && focusedModeRef.current === null && surpriseStateRef.current !== 'idle') {
+      collapseSurpriseRef.current();
+    } else if (isBusyRef.current) {
       onCloseRef.current();
     } else if (focusedModeRef.current !== null) {
       handleBackRef.current();
@@ -197,139 +231,28 @@ const WeaveLauncherOverlay: React.FC<WeaveLauncherOverlayProps> = ({
 
   useModalFocus(dialogRef, true, handleModalClose);
 
-  // FLIP animation: Grid -> Focused Card
   useLayoutEffect(() => {
-    if (focusedMode && initialRectRef.current && focusedCardRef.current) {
-      const isReducedMotion = typeof window !== 'undefined' &&
-        window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-      if (!isReducedMotion) {
-        const first = initialRectRef.current;
-        const last = focusedCardRef.current.getBoundingClientRect();
-        const deltaX = first.left - last.left;
-        const deltaY = first.top - last.top;
-        const deltaW = first.width / Math.max(last.width, 1);
-        const deltaH = first.height / Math.max(last.height, 1);
-
-        const anim = focusedCardRef.current.animate(
-          [
-            {
-              transformOrigin: 'top left',
-              transform: `translate(${deltaX}px, ${deltaY}px) scale(${deltaW}, ${deltaH})`,
-              opacity: 0.95
-            },
-            {
-              transformOrigin: 'top left',
-              transform: 'none',
-              opacity: 1
-            }
-          ],
-          {
-            duration: 320,
-            easing: 'cubic-bezier(0.16, 1, 0.3, 1)',
-            fill: 'both'
-          }
-        );
-
-        anim.onfinish = () => {
-          if (focusedMode === 'time-span') {
-            startInputRef.current?.focus();
-          } else {
-            queryInputRef.current?.focus();
-          }
-        };
-        initialRectRef.current = null;
-        return () => anim.cancel();
-      } else {
-        if (focusedMode === 'time-span') {
-          startInputRef.current?.focus();
-        } else {
-          queryInputRef.current?.focus();
-        }
-      }
-      initialRectRef.current = null;
-    }
-  }, [focusedMode]);
-
-  // FLIP animation: Focused Card -> Grid
-  useLayoutEffect(() => {
-    if (focusedMode === null && exitRectRef.current && lastFocusedModeRef.current) {
-      const returningMode = lastFocusedModeRef.current;
-      const cardEl = cardRefs.current[returningMode];
-      const isReducedMotion = typeof window !== 'undefined' &&
-        window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-      if (!isReducedMotion && cardEl) {
-        const first = exitRectRef.current;
-        const last = cardEl.getBoundingClientRect();
-        const deltaX = first.left - last.left;
-        const deltaY = first.top - last.top;
-        const deltaW = first.width / Math.max(last.width, 1);
-        const deltaH = first.height / Math.max(last.height, 1);
-
-        const anim = cardEl.animate(
-          [
-            {
-              transformOrigin: 'top left',
-              transform: `translate(${deltaX}px, ${deltaY}px) scale(${deltaW}, ${deltaH})`
-            },
-            {
-              transformOrigin: 'top left',
-              transform: 'none'
-            }
-          ],
-          {
-            duration: 280,
-            easing: 'cubic-bezier(0.16, 1, 0.3, 1)'
-          }
-        );
-
-        anim.onfinish = () => {
-          cardTriggerRefs.current[returningMode]?.focus();
-        };
-        exitRectRef.current = null;
-        return () => anim.cancel();
-      } else {
-        cardTriggerRefs.current[returningMode]?.focus();
-      }
-      exitRectRef.current = null;
+    if (focusedMode === 'time-span') {
+      startInputRef.current?.focus({ preventScroll: true });
+    } else if (focusedMode) {
+      queryInputRef.current?.focus({ preventScroll: true });
+    } else if (lastFocusedModeRef.current) {
+      cardTriggerRefs.current[lastFocusedModeRef.current]?.focus({ preventScroll: true });
     }
   }, [focusedMode]);
 
   const handleSelectStrategy = (mode: WeaveMode) => {
     if (isBusy) return;
-    const cardEl = cardRefs.current[mode];
-    if (cardEl) {
-      initialRectRef.current = cardEl.getBoundingClientRect();
-    }
     setInputError(null);
     lastFocusedModeRef.current = mode;
     setFocusedMode(mode);
   };
 
-  const handleSelectExample = (mode: WeaveMode, example: string, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleSelectExample = (example: string) => {
     if (isBusy) return;
-
-    if (mode === 'time-span') {
-      const parsed = parseTimeSpanExample(example);
-      if (parsed) {
-        setStartYearStr(parsed.start);
-        setEndYearStr(parsed.end);
-      }
-    } else {
-      setQueryInput(example);
-    }
-
-    if (focusedMode !== mode) {
-      const cardEl = cardRefs.current[mode];
-      if (cardEl) {
-        initialRectRef.current = cardEl.getBoundingClientRect();
-      }
-      setInputError(null);
-      lastFocusedModeRef.current = mode;
-      setFocusedMode(mode);
-    }
+    setQueryInput(example);
+    setInputError(null);
+    queryInputRef.current?.focus({ preventScroll: true });
   };
 
   const handleSubmitForm = async (e: React.FormEvent) => {
@@ -373,6 +296,12 @@ const WeaveLauncherOverlay: React.FC<WeaveLauncherOverlayProps> = ({
         endYear: e
       };
 
+      const rejection = validateWeaveRequestLocally(request);
+      if (rejection) {
+        setInputError(rejection.errorMessage);
+        return;
+      }
+
       try {
         operationRef.current = true;
         setIsSubmitting(true);
@@ -415,12 +344,13 @@ const WeaveLauncherOverlay: React.FC<WeaveLauncherOverlayProps> = ({
   // Surprise roll handler
   const handleSurpriseRoll = async () => {
     if (isBusy || operationRef.current) return;
+    const request = ++surpriseRequestRef.current;
     try {
       operationRef.current = true;
       setSurpriseState('consulting');
       setSurpriseError(null);
       const result = await onSurprise(excludedTopics);
-      if (!isMountedRef.current) return;
+      if (!isMountedRef.current || request !== surpriseRequestRef.current) return;
 
       if (result.isValid && result.themeDescription) {
         setSurpriseResult(result);
@@ -431,11 +361,11 @@ const WeaveLauncherOverlay: React.FC<WeaveLauncherOverlayProps> = ({
         setSurpriseState('error');
       }
     } catch (err: unknown) {
-      if (!isMountedRef.current) return;
+      if (!isMountedRef.current || request !== surpriseRequestRef.current) return;
       setSurpriseError(err instanceof Error ? err.message : 'Error consulting the archives. Please try again.');
       setSurpriseState('error');
     } finally {
-      operationRef.current = false;
+      if (request === surpriseRequestRef.current) operationRef.current = false;
     }
   };
 
@@ -456,6 +386,41 @@ const WeaveLauncherOverlay: React.FC<WeaveLauncherOverlayProps> = ({
   };
 
   const focusedStrategy = STRATEGIES.find(s => s.mode === focusedMode);
+  const weaveButtonContent = (
+    <>
+      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+        <path strokeLinecap="round" d="M4 7c4-4 12 4 16 0M4 12c4-4 12 4 16 0M4 17c4-4 12 4 16 0M7 4c-4 4 4 12 0 16M12 4c-4 4 4 12 0 16M17 4c-4 4 4 12 0 16" />
+      </svg>
+      <span>{isBuildInProgress ? 'Weaving...' : 'Weave'}</span>
+    </>
+  );
+  const weaveButton = (
+    <button
+      type="submit"
+      disabled={isBusy}
+      aria-busy={isBuildInProgress}
+      className="launcher-btn-primary launcher-weave-button"
+    >
+      {weaveButtonContent}
+    </button>
+  );
+  const buildProgress = isBuildInProgress && (
+    <div className="launcher-build-progress" role="status" aria-live="polite" aria-atomic="true" data-phase={phase}>
+      <div className="launcher-build-progress-copy">
+        <p className="launcher-build-progress-title">
+          {phase === 'validating' ? 'Checking your historical query...'
+            : phase === 'building' ? 'Building your timeline...'
+            : 'Preparing your timeline...'}
+        </p>
+        <p className="launcher-build-progress-description">
+          {phase === 'validating' ? 'Confirming the subject, dates, and categories for your timeline.'
+            : phase === 'building' ? 'Finding historical figures and events. Your timeline will open when it is ready.'
+            : 'Getting your request ready.'}
+        </p>
+      </div>
+      <span className="launcher-build-spinner" aria-hidden="true" />
+    </div>
+  );
 
   return (
     <div
@@ -467,19 +432,12 @@ const WeaveLauncherOverlay: React.FC<WeaveLauncherOverlayProps> = ({
       tabIndex={-1}
     >
       <div className="sr-only" role="status" aria-live="polite">
-        {surpriseState === 'consulting' ? 'Consulting the archives...' : phase === 'validating' ? 'Checking your historical query...' : phase === 'building' ? 'Building your timeline...' : ''}
+        {surpriseState === 'consulting' ? 'Consulting the archives...' : ''}
       </div>
       <div className="launcher-dialog">
         {/* Header with Theme, Settings, Close */}
         <header className="launcher-header">
           <div className="flex items-center gap-3">
-            <div className="launcher-brand-icon" aria-hidden="true">
-              <svg className="w-5 h-5 text-on-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c-.75-.75-1.5-1.5-3-1.5s-2.25.75-3 1.5l-9 9a2.121 2.121 0 003 3l9-9c.75-.75 1.5-1.5 1.5-3s-.75-2.25-1.5-3z" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M18 4l.5 1.5L20 6l-1.5.5L18 8l-.5-1.5L16 6l1.5-.5L18 4z" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 3l.3 1L7.5 4.3 6.3 4.7 6 6l-.3-1.3L4.5 4.3l1.2-.3L6 3z" />
-              </svg>
-            </div>
             <div>
               <h2 id="launcher-heading" className="text-base font-bold text-content-primary leading-tight">
                 Weave New Canvas
@@ -511,7 +469,8 @@ const WeaveLauncherOverlay: React.FC<WeaveLauncherOverlayProps> = ({
             <button
               type="button"
               onClick={onOpenSettings}
-              className="p-2 text-content-muted hover:text-content-heading hover:bg-interaction/5 rounded-lg transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-marker focus-visible:outline-offset-2"
+              disabled={isBuildInProgress}
+              className="p-2 text-content-muted enabled:hover:text-content-heading enabled:hover:bg-interaction/5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-marker focus-visible:outline-offset-2"
               title="Settings"
               aria-label="Settings"
             >
@@ -539,7 +498,7 @@ const WeaveLauncherOverlay: React.FC<WeaveLauncherOverlayProps> = ({
         <div className={`launcher-scroll ${focusedMode ? 'launcher-scroll--focused' : ''}`}>
           {/* Hero Section */}
           <div className="launcher-hero">
-            <span className="launcher-pill-tag">Explore history</span>
+            <span className="launcher-eyebrow">Explore history</span>
             <h1 className="text-3xl font-extrabold text-content-primary mt-2">
               How would you like to explore history?
             </h1>
@@ -557,7 +516,6 @@ const WeaveLauncherOverlay: React.FC<WeaveLauncherOverlayProps> = ({
             {STRATEGIES.map(strat => (
               <div
                 key={strat.mode}
-                ref={el => { cardRefs.current[strat.mode] = el; }}
                 className="launcher-card group"
               >
                 <button
@@ -565,150 +523,76 @@ const WeaveLauncherOverlay: React.FC<WeaveLauncherOverlayProps> = ({
                   ref={el => { cardTriggerRefs.current[strat.mode] = el; }}
                   onClick={() => handleSelectStrategy(strat.mode)}
                   disabled={isBusy || focusedMode !== null}
-                  className="w-full text-left p-0 bg-transparent border-0 cursor-pointer focus:outline-none"
+                  className="launcher-card-trigger w-full text-left bg-transparent border-0 cursor-pointer focus:outline-none"
                   aria-label={`${strat.title}: ${strat.description}`}
                 >
-                  <div className="flex items-center justify-between">
-                    <div className="launcher-card-icon">
-                      {strat.mode === 'time-span' && (
-                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                        </svg>
-                      )}
-                      {strat.mode === 'era' && (
-                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                        </svg>
-                      )}
-                      {strat.mode === 'figure' && (
-                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                        </svg>
-                      )}
-                      {strat.mode === 'region' && (
-                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                      )}
-                      {strat.mode === 'theme' && (
-                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                        </svg>
-                      )}
-                      {strat.mode === 'freeform' && (
-                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                        </svg>
-                      )}
-                    </div>
-                    <span className="text-[11px] font-semibold text-accent-marker uppercase tracking-wider">
+                  <LauncherAnimatedIllustration
+                    variant="card"
+                    src={`/illustrations/${strat.illustration}`}
+                    height={strat.illustrationHeight ?? 986}
+                  />
+                  <div className="launcher-card-overlay launcher-card-badges">
+                    <span className="launcher-card-kicker">
                       {strat.badge}
                     </span>
                   </div>
-
-                  <h3 className="launcher-card-title mt-3">
-                    {strat.title}
-                  </h3>
-                  <p className="launcher-card-desc">
-                    {strat.description}
-                  </p>
+                  <div className="launcher-card-overlay launcher-card-caption">
+                    <h3 className="launcher-card-title">{strat.title}</h3>
+                    <div className="launcher-card-description-reveal">
+                      <div className="launcher-card-description-clip">
+                        <p className="launcher-card-desc">{strat.description}</p>
+                      </div>
+                    </div>
+                  </div>
                 </button>
 
-                <div className="launcher-example-chips" aria-label="Example queries">
-                  {strat.examples.map(ex => (
-                    <button
-                      key={ex}
-                      type="button"
-                      onClick={(e) => handleSelectExample(strat.mode, ex, e)}
-                      disabled={isBusy || focusedMode !== null}
-                      className="launcher-example-chip"
-                      title={`Use example: ${ex}`}
-                    >
-                      {ex}
-                    </button>
-                  ))}
-                </div>
               </div>
             ))}
           </div>
 
-          {/* Focused Stage (Option A: Real FLIP / Geometry Transition) */}
+          {/* Strategy details */}
           {focusedMode && focusedStrategy && (
             <div className="launcher-focused-stage">
-              <div
-                ref={focusedCardRef}
-                className="launcher-focused-card"
-                role="region"
-                aria-labelledby="focused-card-title"
-              >
-                <div className="flex items-center justify-between pb-4 border-b border-border/40">
-                  <div className="flex items-center gap-3">
-                    <div className="launcher-card-icon">
-                      {focusedMode === 'time-span' && (
-                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                        </svg>
-                      )}
-                      {focusedMode === 'era' && (
-                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                        </svg>
-                      )}
-                      {focusedMode === 'figure' && (
-                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                        </svg>
-                      )}
-                      {focusedMode === 'region' && (
-                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                      )}
-                      {focusedMode === 'theme' && (
-                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                        </svg>
-                      )}
-                      {focusedMode === 'freeform' && (
-                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                        </svg>
-                      )}
-                    </div>
-                    <div>
-                      <h2 id="focused-card-title" className="text-xl font-bold text-content-primary">
-                        {focusedStrategy.title}
-                      </h2>
-                      <p className="text-xs text-content-muted">{focusedStrategy.description}</p>
-                    </div>
+              <LauncherAnimatedIllustration
+                key={focusedMode}
+                src={`/illustrations/${focusedStrategy.illustration}`}
+                height={focusedStrategy.illustrationHeight ?? 986}
+              />
+              <div className="launcher-focused-panel">
+                <div className={`launcher-focused-card${focusedMode === 'time-span' ? ' launcher-focused-card--time-span' : ''}`} role="region" aria-labelledby="focused-card-title">
+                  <div className="launcher-focused-heading">
+                    <h2 id="focused-card-title" className="text-2xl font-bold text-content-primary">
+                      {focusedStrategy.title}
+                    </h2>
+                    <button
+                      type="button"
+                      onClick={handleBackToGrid}
+                      disabled={isBusy}
+                      className="launcher-back"
+                      title="Return to strategy grid (Esc)"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 12H5m0 0 6 6m-6-6 6-6" />
+                      </svg>
+                      <span>Back</span>
+                    </button>
                   </div>
+                  <p className="text-sm text-content-muted mt-1">{focusedStrategy.description}</p>
 
-                  <button
-                    type="button"
-                    onClick={handleBackToGrid}
-                    disabled={isBusy}
-                    className="launcher-btn-secondary text-xs py-1.5 px-3"
-                    title="Return to strategy grid (Esc)"
-                  >
-                    Back to Grid
-                  </button>
-                </div>
-
-                <form onSubmit={handleSubmitForm} className="mt-6">
-                  {focusedMode === 'time-span' ? (
-                    <div>
-                      <label className="block text-xs font-semibold text-content-secondary uppercase tracking-wider mb-2">
-                        {focusedStrategy.inputLabel}
-                      </label>
-                      <div className="flex items-center gap-3">
-                        <div className="flex-1">
+                  <form onSubmit={handleSubmitForm} className="launcher-focused-form">
+                    {focusedMode === 'time-span' ? (
+                      <div>
+                        <p className="block text-xs font-semibold text-content-secondary uppercase tracking-wider mb-3">
+                          {focusedStrategy.inputLabel}
+                        </p>
+                        <div className="launcher-years">
                           <label htmlFor="launcher-start-year" className="sr-only">Start Year</label>
                           <input
                             id="launcher-start-year"
                             ref={startInputRef}
                             type="text"
                             inputMode="numeric"
-                            placeholder="Start year (e.g. 1400)"
+                            placeholder="1400"
                             value={startYearStr}
                             onChange={(e) => {
                               setStartYearStr(e.target.value);
@@ -716,18 +600,17 @@ const WeaveLauncherOverlay: React.FC<WeaveLauncherOverlayProps> = ({
                             }}
                             disabled={isBusy}
                             aria-invalid={inputError !== null}
-                            aria-describedby={inputError ? 'launcher-input-error' : undefined}
-                            className="launcher-input text-center font-mono"
+                            aria-describedby={inputError ? 'launcher-year-help launcher-input-error' : 'launcher-year-help'}
+                            className="launcher-input launcher-year-input"
+                            style={{ width: `${Math.max(8, startYearStr.length + 4) * 2}ch` }}
                           />
-                        </div>
-                        <span className="text-content-muted font-bold">to</span>
-                        <div className="flex-1">
+                          <span className="text-content-muted font-bold">to</span>
                           <label htmlFor="launcher-end-year" className="sr-only">End Year</label>
                           <input
                             id="launcher-end-year"
                             type="text"
                             inputMode="numeric"
-                            placeholder="End year (e.g. 1500)"
+                            placeholder="1500"
                             value={endYearStr}
                             onChange={(e) => {
                               setEndYearStr(e.target.value);
@@ -735,111 +618,62 @@ const WeaveLauncherOverlay: React.FC<WeaveLauncherOverlayProps> = ({
                             }}
                             disabled={isBusy}
                             aria-invalid={inputError !== null}
-                            aria-describedby={inputError ? 'launcher-input-error' : undefined}
-                            className="launcher-input text-center font-mono"
+                            aria-describedby={inputError ? 'launcher-year-help launcher-input-error' : 'launcher-year-help'}
+                            className="launcher-input launcher-year-input"
+                            style={{ width: `${Math.max(8, endYearStr.length + 4) * 2}ch` }}
                           />
+                          {weaveButton}
+                        </div>
+                        <p id="launcher-year-help" className="text-xs text-content-faint mt-2">
+                          Negative numbers represent BCE (e.g. -500 for 500 BCE).
+                        </p>
+                      </div>
+                    ) : (
+                      <div>
+                        <label htmlFor="launcher-query-input" className="block text-xs font-semibold text-content-secondary uppercase tracking-wider mb-3">
+                          {focusedStrategy.inputLabel}
+                        </label>
+                        <div className="launcher-prompt">
+                          <textarea
+                            id="launcher-query-input"
+                            ref={queryInputRef}
+                            rows={3}
+                            placeholder={focusedStrategy.placeholder}
+                            value={queryInput}
+                            onChange={(e) => {
+                              setQueryInput(e.target.value);
+                              setInputError(null);
+                            }}
+                            disabled={isBusy}
+                            aria-invalid={inputError !== null}
+                            aria-describedby={inputError ? 'launcher-input-error' : undefined}
+                            className="launcher-textarea launcher-prompt-text"
+                          />
+                          <div className="launcher-prompt-footer">
+                            <LauncherExampleScroller
+                              key={focusedMode}
+                              examples={focusedStrategy.examples}
+                              disabled={isBusy}
+                              onSelect={handleSelectExample}
+                            />
+                            {weaveButton}
+                          </div>
                         </div>
                       </div>
-                      <p className="text-xs text-content-faint mt-1.5">
-                        Negative numbers represent BCE (e.g. -500 for 500 BCE).
-                      </p>
-                    </div>
-                  ) : (
-                    <div>
-                      <label htmlFor="launcher-query-input" className="block text-xs font-semibold text-content-secondary uppercase tracking-wider mb-2">
-                        {focusedStrategy.inputLabel}
-                      </label>
-                      <input
-                        id="launcher-query-input"
-                        ref={queryInputRef}
-                        type="text"
-                        placeholder={focusedStrategy.placeholder}
-                        value={queryInput}
-                        onChange={(e) => {
-                          setQueryInput(e.target.value);
-                          setInputError(null);
-                        }}
-                        disabled={isBusy}
-                        aria-invalid={inputError !== null}
-                        aria-describedby={inputError ? 'launcher-input-error' : undefined}
-                        className="launcher-input"
-                      />
-                    </div>
-                  )}
+                    )}
 
-                  {/* Inline Error Message */}
-                  {inputError && (
-                    <div
-                      id="launcher-input-error"
-                      role="alert"
-                      aria-live="assertive"
-                      className="launcher-error-banner mt-4"
-                    >
-                      <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                      <span>{inputError}</span>
-                    </div>
-                  )}
+                    {inputError && (
+                      <div id="launcher-input-error" role="alert" aria-live="assertive" className="launcher-input-error mt-4">
+                        <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <span>{inputError}</span>
+                      </div>
+                    )}
 
-                  {/* Accessible Example Chips for Fast Filling */}
-                  <div className="mt-4">
-                    <span className="text-xs text-content-muted font-medium mr-2">Quick examples:</span>
-                    <div className="inline-flex flex-wrap gap-1.5 mt-1 align-middle">
-                      {focusedStrategy.examples.map(ex => (
-                        <button
-                          key={ex}
-                          type="button"
-                          onClick={(e) => handleSelectExample(focusedStrategy.mode, ex, e)}
-                          disabled={isBusy}
-                          className="launcher-example-chip"
-                        >
-                          {ex}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Action Buttons */}
-                  <div className="flex items-center justify-end gap-3 mt-6 pt-4 border-t border-border/40">
-                    <button
-                      type="button"
-                      onClick={handleBackToGrid}
-                      disabled={isBusy}
-                      className="launcher-btn-secondary"
-                    >
-                      Back
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={isBusy}
-                      className="launcher-btn-primary"
-                    >
-                      {isSubmitting || phase === 'building' || phase === 'validating' ? (
-                        <>
-                          <svg className="animate-spin h-4 w-4 text-on-accent" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                          </svg>
-                          <span>
-                            {phase === 'validating'
-                              ? 'Checking your historical query...'
-                              : phase === 'building'
-                              ? 'Building your timeline...'
-                              : 'Submitting request...'}
-                          </span>
-                        </>
-                      ) : (
-                        <>
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" />
-                          </svg>
-                          <span>Begin Weaving</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </form>
+                    {buildProgress}
+                  </form>
+                </div>
               </div>
             </div>
           )}
@@ -851,6 +685,20 @@ const WeaveLauncherOverlay: React.FC<WeaveLauncherOverlayProps> = ({
             inert={focusedMode !== null ? true : undefined}
           >
             <div className="launcher-surprise-box">
+              {surpriseState !== 'idle' && (
+                <button
+                  type="button"
+                  onClick={handleCollapseSurprise}
+                  disabled={isBuildInProgress}
+                  className="close-button launcher-surprise-close"
+                  aria-label="Close Surprise Me"
+                  title="Close Surprise Me (Esc)"
+                >
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
               {surpriseState === 'idle' && (
                 <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
                   <div className="flex items-center gap-3 text-left">
@@ -877,6 +725,7 @@ const WeaveLauncherOverlay: React.FC<WeaveLauncherOverlayProps> = ({
                   <button
                     type="button"
                     onClick={handleSurpriseRoll}
+                    ref={surpriseTriggerRef}
                     disabled={isBusy || focusedMode !== null}
                     className="launcher-btn-primary whitespace-nowrap"
                   >
@@ -908,26 +757,21 @@ const WeaveLauncherOverlay: React.FC<WeaveLauncherOverlayProps> = ({
 
               {(surpriseState === 'suggested' || surpriseState === 'error') && surpriseResult && (
                 <div className="text-left">
-                  <div className="flex items-center justify-between gap-2 mb-2">
+                  <div className="launcher-suggestion-header">
                     <span className="launcher-pill-tag">Historical Suggestion</span>
-                    <span className="text-xs font-mono font-bold text-accent-marker">
-                      {formatYear(surpriseResult.inferredStartYear)} – {formatYear(surpriseResult.inferredEndYear)}
-                    </span>
+                    <div className="launcher-suggestion-meta">
+                      {surpriseResult.activeCategories?.map(cat => (
+                        <span key={cat} className="launcher-category-tag">{cat}</span>
+                      ))}
+                      <span className="text-xs font-mono font-bold text-accent-marker whitespace-nowrap">
+                        {formatYear(surpriseResult.inferredStartYear)} – {formatYear(surpriseResult.inferredEndYear)}
+                      </span>
+                    </div>
                   </div>
 
-                  <h3 className="text-lg font-bold text-content-primary">
+                  <h3 className="launcher-prompt-text text-content-primary">
                     {surpriseResult.themeDescription}
                   </h3>
-
-                  {surpriseResult.activeCategories && surpriseResult.activeCategories.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 mt-2">
-                      {surpriseResult.activeCategories.map(cat => (
-                        <span key={cat} className="launcher-category-tag">
-                          {cat}
-                        </span>
-                      ))}
-                    </div>
-                  )}
 
                   {surpriseError && (
                     <div className="launcher-error-banner mt-3" role="alert">
@@ -935,7 +779,7 @@ const WeaveLauncherOverlay: React.FC<WeaveLauncherOverlayProps> = ({
                     </div>
                   )}
 
-                  <div className="flex items-center justify-end gap-3 mt-5 pt-3 border-t border-border/40">
+                  <div className="flex flex-wrap items-center justify-end gap-3 mt-5 pt-3 border-t border-border/40">
                     <button
                       type="button"
                       onClick={handleSurpriseRoll}
@@ -952,37 +796,18 @@ const WeaveLauncherOverlay: React.FC<WeaveLauncherOverlayProps> = ({
                       type="button"
                       onClick={handleBuildSurprise}
                       disabled={isBusy || focusedMode !== null}
-                      className="launcher-btn-primary"
+                      aria-busy={isBuildInProgress}
+                      className="launcher-btn-primary launcher-weave-button"
                     >
-                      {isSubmitting || phase === 'building' || phase === 'validating' ? (
-                        <>
-                          <svg className="animate-spin h-4 w-4 text-on-accent" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                          </svg>
-                          <span>
-                            {phase === 'validating'
-                              ? 'Checking your historical query...'
-                              : phase === 'building'
-                              ? 'Building your timeline...'
-                              : 'Submitting request...'}
-                          </span>
-                        </>
-                      ) : (
-                        <>
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                          </svg>
-                          <span>Build Timeline</span>
-                        </>
-                      )}
+                      {weaveButtonContent}
                     </button>
                   </div>
+                  {buildProgress}
                 </div>
               )}
 
               {surpriseState === 'error' && !surpriseResult && (
-                <div className="py-2 text-left">
+                <div className="py-2 pr-7 text-left">
                   <div className="launcher-error-banner" role="alert">
                     <span>{surpriseError || 'Unable to uncover a topic. Please roll again.'}</span>
                   </div>

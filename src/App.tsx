@@ -650,7 +650,7 @@ const App: React.FC = () => {
             <div className="absolute inset-0" inert={isLauncherOpen || !!relationshipState || popoverState.isOpen || isSettingsOpen}>
             <ControlPanel
                 onOpenLauncher={openLauncher}
-                isBuilding={loading}
+                isBuilding={loading || launcherPhase !== 'idle'}
                 hasFigures={figures.length > 0}
                 onSearch={handleSearch}
                 searchResultCount={highlightedFigureIds.length}

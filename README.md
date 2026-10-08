@@ -23,6 +23,14 @@ The app uses Google Gemini, OpenRouter, or Ollama to generate historical data an
 
 ## Key Features
 
+### Canvas Launcher
+
+- **Weave New Canvas**: Choose from six illustrated cards to build a timeline by year range, era, person, region, theme, or a custom prompt
+- **Guided Prompts**: Open a card for its input form and clickable examples, where available
+- **Surprise Me**: Get an AI-suggested historical topic, review its years and categories, then weave it or spin again
+- **Topic-aware Timelines**: AI interprets your prompt to determine the historical period and relevant categories
+- **Preserved Canvas**: Your existing timeline stays in place until a new build succeeds
+
 ### 🎨 Interactive Timeline Canvas
 - Visualize historical figures and events as bars on a horizontal timeline
 - Zoom and pan the canvas for detailed exploration
@@ -81,6 +89,33 @@ The app uses Google Gemini, OpenRouter, or Ollama to generate historical data an
 - **Preserved Scroll Position**: Separate scroll tracking for figures and events—switch between tabs and your scroll position is remembered
 - **Dual View Mode**: Toggle between figures and events in the sidebar
 - **Category-aware Filtering**: Sidebar respects active category filters
+
+## Creating a Timeline
+
+Configure an AI provider in **Settings**, then click **Weave New Canvas** in the top control panel. The launcher opens automatically when no usable cached timeline is available; otherwise, the app restores your previous timeline.
+
+Choose a card based on how you want to explore history:
+
+| Card | What to enter | Example |
+| --- | --- | --- |
+| **Strict Time Span** | Start and end years | `1400` to `1500` |
+| **Historical Era** | A period, civilization, or dynasty | `Meiji Restoration` |
+| **Follow a Figure** | A historical person's name | `Ada Lovelace` |
+| **Region & Culture** | A region, empire, or culture | `Viking Age Scandinavia` |
+| **Theme or Discipline** | A field, movement, or idea | `Early History of Computing` |
+| **Freeform / Custom** | A prompt combining places, periods, people, or ideas | `Women pioneers in medicine before 1900` |
+
+1. Open a card and enter your years or prompt. For topic cards, you can click an example to fill the input and edit it.
+2. Click **Weave**. The app validates the request before generating the timeline. For topic prompts, AI infers the year range and relevant categories; **Strict Time Span** keeps your entered years and permits all categories. Use whole-number years, with negative numbers for BCE dates (for example, `-500` for 500 BCE), and an end year later than the start year. Future years are not accepted.
+3. If validation or generation fails, the form shows an error so you can revise the request and try again. A successful build replaces the previous timeline and is saved locally, including its topic and category scope.
+
+The canvas adds space around the requested period for readability; this padding does not broaden the historical subject. Topic timelines offer only the relevant category filters, and **Expand Timeline** continues to respect the original topic.
+
+Use **Back** or **Escape** to return from a card's form to the card grid before submitting. Closing the launcher during validation or generation cancels the build and preserves your existing timeline. Settings is disabled while validation or generation is in progress.
+
+### Surprise Me
+
+Click **Surprise Me** below the cards to request a historical suggestion. Review its topic, year range, and categories, then click **Weave** to build it or **Spin Again** for another suggestion. Requesting a suggestion does not start a timeline build. Use the suggestion panel's close button or **Escape** to collapse it before weaving.
 
 ## Installation & Setup
 
@@ -157,7 +192,7 @@ Both development and production modes work identically:
      - Gemini default: `gemini-2.5-flash`
      - OpenRouter default: `openai/gpt-oss-120b`
 3. **Test** your connection before saving (validates API key and model)
-4. Click **Save** to apply changes. The displayed timeline stays in place; new AI requests use the selected provider/model. Click **Build** to regenerate it, including the same year range.
+4. Click **Save** to apply changes. The displayed timeline stays in place; new AI requests use the selected provider/model. Click **Weave New Canvas** to create another timeline. For a specific year range, choose **Strict Time Span**, enter the desired years, and click **Weave**.
 
 **Validation**: Gemini and OpenRouter require an API key and model. Local Ollama requires a valid server URL and model. Ollama Cloud requires a model and either a saved dialog key or a server-side environment key.
 
@@ -199,7 +234,7 @@ Create an [Ollama API key](https://ollama.com/settings/keys), or enter it in Set
 
 Run `npm run dev`, or `npm run build` followed by `npm run preview` for a locally served production build. The cloud relay is available in both Vite servers. A deployment containing only the static `dist` files has no cloud relay; direct cloud access requires a server. Restart the server after changing environment values; rebuild production assets after changing provider/model defaults. Keep environment files out of source control.
 
-Page load restores a cached timeline, or leaves an empty timeline for you to build explicitly with **Weave History**. A 600–1600 build uses 21 generation requests before retries: 10 century batches of people, 10 century batches of events, and one batch of major events across the entire range. Ollama requests run sequentially to avoid bursts. GPT-OSS requests use `think: "low"` to reduce reasoning overhead; other models retain their defaults. Each request has a three-minute timeout; a complete timeline may take longer. Invalid output receives one corrective retry; transient rate-limit/busy errors receive at most two retries. A failed build preserves the displayed timeline and its cache. [Ollama Cloud currently lacks enforced structured outputs](https://docs.ollama.com/capabilities/structured-outputs), so responses are requested as JSON and validated in the app.
+Page load restores a cached timeline, or opens the launcher so you can choose how to build one. Clicking **Weave** first sends a validation request, followed by generation requests for the permitted people and event categories. Longer periods are split into batches; request counts depend on the range and category scope. Ollama requests run sequentially to avoid bursts. GPT-OSS requests use `think: "low"` to reduce reasoning overhead; other models retain their defaults. Each request has a three-minute timeout; a complete timeline may take longer. Invalid output receives one corrective retry; transient rate-limit/busy errors receive at most two retries. A failed build preserves the displayed timeline and its cache. [Ollama Cloud currently lacks enforced structured outputs](https://docs.ollama.com/capabilities/structured-outputs), so responses are requested as JSON and validated in the app.
 
 For Linux/WSL server commands, downloading and switching models, and cloud examples, follow the [Ollama setup guide](docs/ollama.md).
 

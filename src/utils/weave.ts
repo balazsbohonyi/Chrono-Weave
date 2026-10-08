@@ -53,7 +53,10 @@ export function validateWeaveRequestLocally(request: WeaveRequest): WeaveValidat
     try {
       assertWeaveYearRange(request.startYear, request.endYear);
       calculateWeaveBounds(request.startYear, request.endYear);
-      if (request.endYear > new Date().getFullYear()) return rejectWeaveRequest('Choose a historical range ending in the current year or earlier.');
+      const currentYear = new Date().getFullYear();
+      if (request.startYear > currentYear || request.endYear > currentYear) {
+        return rejectWeaveRequest(`Years cannot be later than ${currentYear} (the current year).`);
+      }
     } catch (error) { return rejectWeaveRequest((error as Error).message); }
   } else if (!request.query.trim()) return rejectWeaveRequest('Enter a historical topic to explore.');
   return null;

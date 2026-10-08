@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { calculateWeaveBounds, normalizeWeaveCategories, normalizeWeaveContext, parseWeaveValidationResult } from '../src/utils/weave';
+import { calculateWeaveBounds, normalizeWeaveCategories, normalizeWeaveContext, parseWeaveValidationResult, validateWeaveRequestLocally } from '../src/utils/weave';
 import { parseJsonResponse } from '../src/services/jsonResponse';
 import { planWeaveChunks } from '../src/services/weaveService';
 
@@ -17,6 +17,27 @@ test('weave bounds add ten percent padding and round outward across BCE and CE',
 test('weave bounds reject reversed, fractional, nonfinite, and unsafe dates', () => {
   for (const [start, end] of [[1, 1], [2, 1], [1.5, 2], [NaN, 2], [0, Infinity], [0, Number.MAX_SAFE_INTEGER], [-Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER]]) {
     assert.throws(() => calculateWeaveBounds(start, end));
+  }
+});
+
+test('strict year validation rejects future dates with a current-year hint', () => {
+  const currentYear = new Date().getFullYear();
+  for (const [startYear, endYear] of [[1770, currentYear + 1], [currentYear + 1, currentYear + 2]]) {
+    const result = validateWeaveRequestLocally({ mode: 'time-span', query: '', startYear, endYear });
+    assert.equal(result?.isValid, false);
+    assert.equal(result?.errorMessage, `Years cannot be later than ${currentYear} (the current year).`);
+  }
+});
+
+test('strict year validation accepts ordered BCE dates and the current year, and rejects equal or reversed dates', () => {
+  const currentYear = new Date().getFullYear();
+  for (const [startYear, endYear] of [[-500, -100], [-500, 100], [1770, currentYear], [currentYear - 1, currentYear]]) {
+    assert.equal(validateWeaveRequestLocally({ mode: 'time-span', query: '', startYear, endYear }), null);
+  }
+  for (const [startYear, endYear] of [[-100, -500], [-500, -500], [1900, 1770], [currentYear, currentYear]]) {
+    const result = validateWeaveRequestLocally({ mode: 'time-span', query: '', startYear, endYear });
+    assert.equal(result?.isValid, false);
+    assert.match(result?.errorMessage ?? '', /start year earlier than the end year/);
   }
 });
 

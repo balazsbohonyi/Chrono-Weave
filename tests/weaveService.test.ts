@@ -54,7 +54,8 @@ test('all launcher modes reach AI validation, while invalid strict bounds never 
       const service = serviceFor(provider);
       for (const request of requests) assert.equal((await service.validateWeaveQuery(request)).isValid, true);
       assert.equal(calls, 6);
-      for (const [startYear, endYear] of [[1900, 1800], [1800, 1800], [1800.5, 1900], [NaN, 1900], [0, Infinity]]) {
+      for (const [startYear, endYear] of [[1900, 1800], [1800, 1800], [-100, -500], [-500, -500],
+        [1770, new Date().getFullYear() + 1], [1800.5, 1900], [NaN, 1900], [0, Infinity]]) {
         assert.equal((await service.validateWeaveQuery({ mode: 'time-span', query: '', startYear, endYear })).isValid, false);
       }
       assert.equal(calls, 6);

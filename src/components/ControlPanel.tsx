@@ -180,7 +180,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
 
         <button
           onClick={onOpenSettings}
-          className="p-2 text-content-muted hover:text-content-heading hover:bg-interaction/5 rounded-lg transition-colors"
+          disabled={isBuilding}
+          className="p-2 text-content-muted enabled:hover:text-content-heading enabled:hover:bg-interaction/5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           title="Settings"
           aria-label="Settings"
         >

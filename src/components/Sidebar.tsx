@@ -212,7 +212,6 @@ const Sidebar: React.FC<SidebarProps> = ({
                     const detail = detailsMap.get(fig.id);
                     const isTracing = tracingId === fig.id;
                     const isActiveSource = activeTracingFigureId === fig.id;
-                    const isEvent = fig.category === 'EVENTS';
 
                     return (
                         <div
@@ -245,15 +244,13 @@ const Sidebar: React.FC<SidebarProps> = ({
                                 </div>
                             </div>
 
-                            {!isEvent && (
-                                <SidebarCardActions
-                                    figure={fig}
-                                    onDiscover={onDiscover}
-                                    onInspect={onInspect}
-                                    onTrace={handleTrace}
-                                    isTracing={isTracing}
-                                />
-                            )}
+                            <SidebarCardActions
+                                figure={fig}
+                                onDiscover={onDiscover}
+                                onInspect={onInspect}
+                                onTrace={handleTrace}
+                                isTracing={isTracing}
+                            />
                         </div>
                     );
                 })}

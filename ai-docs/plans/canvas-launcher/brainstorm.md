@@ -1,8 +1,5 @@
 # Brainstorming Session Transcript: ChronoWeave Timeline Generation Modes
 
-**Location:** `d:\develop\projects\ChronoWeave\ai-docs\brainstorm.md`
-**Date:** 2026-10-07
-
 ---
 
 **USER:**
