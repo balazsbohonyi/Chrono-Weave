@@ -10,6 +10,14 @@ const accepted = { isValid: true, errorMessage: null, inferredStartYear: 1800, i
   themeDescription: 'Women in Science during the nineteenth century', activeCategories: ['SCIENTISTS'] };
 const context: WeaveGenerationContext = { mode: 'theme', query: 'Women in Science during the nineteenth century',
   inferredStartYear: 1800, inferredEndYear: 1900, themeDescription: accepted.themeDescription, activeCategories: ['SCIENTISTS'] };
+const suggestion = { isValid: true, errorMessage: null, inferredStartYear: 1543, inferredEndYear: 1687,
+  themeDescription: 'The Scientific Revolution', activeCategories: ['SCIENTISTS'], representativeEntries: [
+    { name: 'Nicolaus Copernicus', category: 'SCIENTISTS', startYear: 1473, endYear: 1543 },
+    { name: 'Galileo Galilei', category: 'SCIENTISTS', startYear: 1564, endYear: 1642 },
+    { name: 'Johannes Kepler', category: 'SCIENTISTS', startYear: 1571, endYear: 1630 },
+    { name: 'Isaac Newton', category: 'SCIENTISTS', startYear: 1643, endYear: 1727 },
+    { name: 'Christiaan Huygens', category: 'SCIENTISTS', startYear: 1629, endYear: 1695 },
+  ] };
 type Provider = 'gemini' | 'openrouter' | 'ollama';
 const providers: Provider[] = ['gemini', 'openrouter', 'ollama'];
 const serviceFor = (provider: Provider): IAIService => provider === 'gemini' ? new GeminiService('test-key', 'gemini-model')
@@ -120,11 +128,85 @@ test('suggestions stay separate from timeline generation and avoid already displ
       globalThis.fetch = async (_url, init) => {
         calls++;
         assert.match(promptFor(provider, JSON.parse(String(init?.body))), /previously suggested topics/);
-        return responseFor(provider, JSON.stringify(calls === 1 ? accepted : { ...accepted, themeDescription: 'Women astronomers in nineteenth-century America' }));
+        return responseFor(provider, JSON.stringify(calls === 1 ? accepted : suggestion));
       };
       const result = await serviceFor(provider).suggestWeaveTopic([accepted.themeDescription]);
-      assert.match(result.themeDescription, /astronomers/);
+      assert.equal(result.themeDescription, suggestion.themeDescription);
+      assert.equal('representativeEntries' in result, false);
       assert.equal(calls, 2);
+    }
+  } finally { globalThis.fetch = previous; }
+});
+
+test('all providers screen coverage in the suggestion call and correct sparse, duplicate, or incompatible examples', async () => {
+  const previous = globalThis.fetch;
+  const changeFirst = (patch: object) => ({ ...suggestion,
+    representativeEntries: [{ ...suggestion.representativeEntries[0], ...patch }, ...suggestion.representativeEntries.slice(1)] });
+  const invalid = [
+    accepted,
+    { ...suggestion, representativeEntries: suggestion.representativeEntries.slice(0, 4) },
+    changeFirst({ name: '  GALILEO GALILEI  ' }),
+    changeFirst({ category: 'ARTISTS' }),
+    changeFirst({ category: 'UNKNOWN' }),
+    changeFirst({ startYear: 1900, endYear: 1950 }),
+    changeFirst({ startYear: 1643, endYear: 1600 }),
+    changeFirst({ startYear: 0 }),
+    { ...changeFirst({ category: 'EVENTS', startYear: 1600, endYear: 1601 }), activeCategories: ['ALL'] },
+  ];
+  try {
+    for (const provider of providers) {
+      for (const bad of invalid) {
+        let calls = 0;
+        globalThis.fetch = async (_url, init) => {
+          const body = JSON.parse(String(init?.body));
+          const prompt = promptFor(provider, body);
+          assert.match(prompt, /broad, recognizable/);
+          assert.match(prompt, /full natural historical span/);
+          assert.match(prompt, /representativeEntries/);
+          const system = provider === 'gemini' ? body.systemInstruction.parts[0].text : body.messages[0].content;
+          assert.match(system, /ChronoWeave, an interactive historical timeline app/);
+          if (provider === 'gemini') {
+            assert.ok(body.generationConfig.responseSchema.properties.representativeEntries);
+            assert.ok(body.generationConfig.responseSchema.required.includes('representativeEntries'));
+          }
+          if (++calls === 2) assert.match(JSON.stringify(body), /previous response was invalid/);
+          return responseFor(provider, JSON.stringify(calls === 1 ? bad : suggestion));
+        };
+        const result = await serviceFor(provider).suggestWeaveTopic();
+        assert.equal(result.themeDescription, suggestion.themeDescription);
+        assert.equal(calls, 2);
+      }
+      let calls = 0;
+      globalThis.fetch = async () => { calls++; return responseFor(provider, JSON.stringify(invalid[1])); };
+      await assert.rejects(serviceFor(provider).suggestWeaveTopic(), /unusable data after a retry/);
+      assert.equal(calls, 2);
+    }
+  } finally { globalThis.fetch = previous; }
+});
+
+test('rich short periods are accepted and broader recovery stays a suggestion rather than a build', async () => {
+  const previous = globalThis.fetch;
+  const war = { ...suggestion, themeDescription: 'World War II', inferredStartYear: 1939, inferredEndYear: 1945,
+    activeCategories: ['ALL'], representativeEntries: [
+      ['Winston Churchill', 1874, 1965], ['Franklin D. Roosevelt', 1882, 1945], ['Adolf Hitler', 1889, 1945],
+      ['Joseph Stalin', 1878, 1953], ['Charles de Gaulle', 1890, 1970],
+    ].map(([name, startYear, endYear]) => ({ name, startYear, endYear, category: 'LEADERS & BADDIES' })) };
+  try {
+    for (const provider of providers) {
+      let calls = 0;
+      globalThis.fetch = async (_url, init) => {
+        calls++;
+        const prompt = promptFor(provider, JSON.parse(String(init?.body)));
+        assert.match(prompt, /meaningfully broader related subject/);
+        assert.match(prompt, /"The Normandy campaign \(1944\)"/);
+        assert.match(prompt, /no fixed minimum number of years/);
+        assert.doesNotMatch(prompt, /Select historically significant people\./);
+        return responseFor(provider, JSON.stringify(war));
+      };
+      const result = await serviceFor(provider).suggestWeaveTopic([], undefined, 'The Normandy campaign (1944)');
+      assert.equal(result.inferredStartYear, 1939);
+      assert.equal(result.inferredEndYear, 1945);
+      assert.equal(calls, 1);
     }
   } finally { globalThis.fetch = previous; }
 });

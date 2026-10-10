@@ -27,7 +27,7 @@ The app uses Google Gemini, OpenRouter, or Ollama to generate historical data an
 
 - **Weave New Canvas**: Choose from six illustrated cards to build a timeline by year range, era, person, region, theme, or a custom prompt
 - **Guided Prompts**: Open a card for its input form and clickable examples, where available
-- **Surprise Me**: Get an AI-suggested historical topic, review its years and categories, then weave it or spin again
+- **Surprise Me**: Get a screened AI suggestion about a recognizable historical subject, review its years and categories, then weave it or spin again
 - **Topic-aware Timelines**: AI interprets your prompt to determine the historical period and relevant categories
 - **Preserved Canvas**: Your existing timeline stays in place until a new build succeeds
 
@@ -127,6 +127,10 @@ Use **Back** or **Escape** to return from a card's form to the card grid before 
 ### Surprise Me
 
 Click **Surprise Me** below the cards to request a historical suggestion. Review its topic, year range, and categories, then click **Weave** to build it or **Spin Again** for another suggestion. Requesting a suggestion does not start a timeline build. Use the suggestion panel's close button or **Escape** to collapse it before weaving.
+
+Suggestions favor familiar eras, major developments, established disciplines, and famous people with known connections across world regions. They use the subject's natural historical span, including short periods with rich coverage, rather than arbitrary narrow date slices. The AI must supply five to eight named examples fitting the suggested years and categories before the topic is shown. This lightweight coverage check happens in the suggestion request; it does not generate or verify a full canvas.
+
+If weaving a suggestion returns no people or events, the app offers a broader related topic for you to review and weave. It preserves the current canvas and does not automatically build the replacement. Other failures, such as connection or access problems, keep their normal error messages.
 
 ## Installation & Setup
 
