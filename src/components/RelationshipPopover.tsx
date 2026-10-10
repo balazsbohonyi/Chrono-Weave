@@ -31,7 +31,7 @@ const RelationshipPopover: React.FC<RelationshipPopoverProps> = ({
   const dialogRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const biographyReturn = useRef<{ figureId: string; scrollTop: number } | null>(null);
-  useModalFocus(dialogRef, isOpen, onClose);
+  useModalFocus(dialogRef, isOpen, onClose, '[data-canvas-history]');
 
   useLayoutEffect(() => {
     if (!isOpen) {

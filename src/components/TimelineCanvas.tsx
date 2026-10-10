@@ -1,11 +1,12 @@
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ViewState } from '../types';
 import { CATEGORY_COLORS, CATEGORY_BAR_TEXT_COLORS } from '../constants';
 import { formatYear } from '../utils/formatters';
 import ActionBar from './ActionBar';
 import CanvasZoomReset from './CanvasZoomReset';
 import { centerCameraOnBounds } from '../utils/canvasCamera';
+import { listenForCanvasWheel } from '../utils/canvasWheel';
 import { BASE_PIXELS_PER_YEAR, ROW_HEIGHT, calculateTextWidth, calculateTimelineLayout } from '../utils/timelineLayout';
 import type { CanvasProps } from './CanvasProps';
 
@@ -29,6 +30,8 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
   clusterPlacements,
   onPlacementsResolved,
   initialLayout,
+  initialCamera,
+  onCameraChange,
   modalActive,
   relationshipSourceId,
   highlightedFigureIds,
@@ -52,10 +55,13 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
   const warnedCategoriesRef = useRef<Set<string>>(new Set());
 
   const [viewState, setViewState] = useState<ViewState>({
-    scale: 1,
-    translateX: 0,
-    translateY: 0,
+    scale: initialCamera?.scale ?? 1,
+    translateX: initialCamera?.x ?? 0,
+    translateY: initialCamera?.y ?? 0,
   });
+  useLayoutEffect(() => {
+    onCameraChange?.({ x: viewState.translateX, y: viewState.translateY, scale: viewState.scale });
+  }, [viewState, onCameraChange]);
   const [isDragging, setIsDragging] = useState(false);
   const [lastMousePos, setLastMousePos] = useState({ x: 0, y: 0 });
   const dragStartPos = useRef({ x: 0, y: 0 });
@@ -242,8 +248,7 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
       }
     };
 
-    el.addEventListener('wheel', handleWheel, { passive: false });
-    return () => el.removeEventListener('wheel', handleWheel);
+    return listenForCanvasWheel(el, handleWheel, modalActive);
   }, [highlightedFigureIds, onCanvasInteraction, contentWidth, modalActive]);
 
   // Cleanup trackpad detection timer

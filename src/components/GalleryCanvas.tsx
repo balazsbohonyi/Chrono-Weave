@@ -7,6 +7,7 @@ import FigureCard from './FigureCard';
 import ActionBar from './ActionBar';
 import CanvasZoomReset from './CanvasZoomReset';
 import { centerCameraOnBounds, pinchCamera, zoomCameraAt, type CanvasCamera, type Point } from '../utils/canvasCamera';
+import { listenForCanvasWheel } from '../utils/canvasWheel';
 
 type Drag = { pointerId: number; start: Point; moved: boolean };
 const SIDEBAR_WIDTH = 544; // Sidebar's w-[34rem] at the application's 16px base size.
@@ -15,9 +16,10 @@ const GalleryCanvas: React.FC<CanvasProps> = ({ figures, modalActive, highlighte
   isSearchFocusActive = false, newlyDiscoveredIds, onDiscover, onTrace, onInspect, onRelationship,
   isFollowingFigure = false,
   isDiscovering = false, onCanvasInteraction, isBusy = false, selectedCategories,
-  isLegendCollapsed, seedFigureId, isSidebarOpen = false, relationshipSourceId }) => {
+  isLegendCollapsed, seedFigureId, isSidebarOpen = false, relationshipSourceId, initialCamera, onCameraChange }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [camera, setCamera] = useState<CanvasCamera>({ x: 0, y: 0, scale: 1 });
+  const [camera, setCamera] = useState<CanvasCamera>(initialCamera ?? { x: 0, y: 0, scale: 1 });
+  useLayoutEffect(() => { onCameraChange?.(camera); }, [camera, onCameraChange]);
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [actions, setActions] = useState<{ id: string; top: number; left: number } | null>(null);
@@ -49,6 +51,7 @@ const GalleryCanvas: React.FC<CanvasProps> = ({ figures, modalActive, highlighte
     const previous = previousLayout.current;
     previousLayout.current = layout;
     if (!previous) {
+      if (initialCamera) return;
       setCamera(previous => ({ ...previous,
         x: layout.bounds.width * previous.scale <= usableWidth ? (usableWidth - layout.bounds.width * previous.scale) / 2 : 40,
         y: headerHeight + Math.max(32, (viewport.height - headerHeight - layout.bounds.height * previous.scale) / 2),
@@ -130,11 +133,11 @@ const GalleryCanvas: React.FC<CanvasProps> = ({ figures, modalActive, highlighte
       setCamera(previous => ({ ...previous, x: previous.x - dx * unit, y: previous.y - dy * unit }));
     };
     const suppressMiddleClick = (event: MouseEvent) => { if (event.button === 1) event.preventDefault(); };
-    container.addEventListener('wheel', wheel, { passive: false });
+    const stopWheel = listenForCanvasWheel(container, wheel, modalActive);
     container.addEventListener('mousedown', suppressMiddleClick);
     container.addEventListener('auxclick', suppressMiddleClick);
     return () => {
-      container.removeEventListener('wheel', wheel);
+      stopWheel();
       container.removeEventListener('mousedown', suppressMiddleClick);
       container.removeEventListener('auxclick', suppressMiddleClick);
     };

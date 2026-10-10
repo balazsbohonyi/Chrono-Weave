@@ -38,7 +38,7 @@ const RelationshipOverlay: React.FC<Props> = ({ state, figures, detailOpen, onCl
   const source = figures.find(figure => figure.id === state.sourceFigure.id) ?? state.sourceFigure;
   const allCards = useMemo(() => [source, ...related], [source, related]);
   const portraits = useFigurePortraits(allCards);
-  useModalFocus(dialogRef, !detailOpen, onClose);
+  useModalFocus(dialogRef, !detailOpen, onClose, '[data-canvas-history]');
 
   useEffect(() => {
     if (detailOpen || !lastCard.current) return;

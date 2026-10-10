@@ -1,4 +1,5 @@
 import { CATEGORY_LIST } from '../constants';
+import { getWeaveValidationMessage } from './userErrors';
 import type { FigureCategory, WeaveGenerationContext, WeaveRequest, WeaveValidationResult } from '../types';
 
 export const WEAVE_MODES = ['time-span', 'era', 'figure', 'region', 'theme', 'freeform'] as const;
@@ -68,7 +69,7 @@ export function parseWeaveValidationResult(value: unknown, request?: WeaveReques
   const verdict = typeof data.isValid === 'string' ? data.isValid.trim().toLowerCase() : data.isValid;
   if (verdict === false || verdict === 'false') {
     if (typeof data.errorMessage !== 'string' || !data.errorMessage.trim()) throw new Error('A rejected query needs a friendly errorMessage.');
-    return rejectWeaveRequest(data.errorMessage.trim());
+    return rejectWeaveRequest(getWeaveValidationMessage(data.errorMessage, request?.mode));
   }
   if (verdict !== true && verdict !== 'true') throw new Error('Return isValid as true or false.');
   const start = request?.mode === 'time-span' ? request.startYear : data.inferredStartYear;

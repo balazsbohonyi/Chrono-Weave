@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useTheme } from '../contexts/ThemeContext';
 
 interface ControlPanelProps {
+  searchQuery: string;
   onOpenLauncher: () => void;
   isBuilding: boolean;
   hasFigures: boolean;
@@ -16,6 +17,7 @@ interface ControlPanelProps {
 }
 
 const ControlPanel: React.FC<ControlPanelProps> = ({
+  searchQuery,
   onOpenLauncher,
   isBuilding,
   hasFigures,
@@ -26,7 +28,6 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   onPrevResult,
   onOpenSettings
 }) => {
-  const [searchQuery, setSearchQuery] = useState("");
   const { theme, toggleTheme } = useTheme();
   const themeLabel = theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme';
 
@@ -42,17 +43,15 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
-    setSearchQuery(val);
     onSearch(val);
   };
 
   const handleClearSearch = () => {
-    setSearchQuery("");
     onSearch("");
   };
 
   return (
-    <div className="fixed top-0 left-0 w-full z-50 flex items-center gap-2 sm:gap-4 bg-surface/60 backdrop-blur-xl px-3 sm:px-6 py-2 border-b border-border/50 shadow-sm transition-all h-[52px]">
+    <div data-canvas-controls className="fixed top-0 left-0 w-full z-50 flex items-center gap-2 sm:gap-4 bg-surface/60 backdrop-blur-xl px-3 sm:px-6 py-2 border-b border-border/50 shadow-sm transition-all h-[52px]">
       {/* Prominent Magic Wand Button: Weave New Canvas */}
       <div className="flex items-center flex-shrink-0">
         <button

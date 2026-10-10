@@ -14,6 +14,50 @@ export type WeaveMode = 'time-span' | 'era' | 'figure' | 'region' | 'theme' | 'f
 export type CanvasLayoutMode = 'timeline' | 'gallery';
 export type CanvasLayoutSelection = 'automatic' | 'manual';
 
+export interface CanvasConfig {
+  start: number;
+  end: number;
+  weaveContext?: WeaveGenerationContext;
+  layoutMode: CanvasLayoutMode;
+  layoutVersion: number;
+  layoutSelection: CanvasLayoutSelection;
+  seedFigureId?: string;
+}
+
+export interface SidebarViewState {
+  mode: 'FIGURES' | 'EVENTS';
+  scrollPositions: { FIGURES: number; EVENTS: number };
+}
+
+export interface CanvasViewSnapshot {
+  cameras: Partial<Record<CanvasLayoutMode, { x: number; y: number; scale: number }>>;
+  selectedYear: number | null;
+  selectedFigureIds: string[];
+  selectedCategories: FigureCategory[];
+  isSidebarCollapsed: boolean;
+  isLegendOpen: boolean;
+  sidebar: SidebarViewState;
+  searchQuery: string;
+  highlightedFigureIds: string[];
+  currentSearchIndex: number;
+}
+
+export interface CanvasSnapshot {
+  id: string;
+  createdAt: number;
+  config: CanvasConfig;
+  figures: HistoricalFigure[];
+  clusters: DiscoveryClusterState;
+  view: CanvasViewSnapshot;
+  cache: Record<string, string>;
+}
+
+export interface CanvasHistoryRecord {
+  version: 1;
+  current: CanvasSnapshot | null;
+  history: CanvasSnapshot[];
+}
+
 export interface WeaveRequest {
   mode: WeaveMode;
   query: string;

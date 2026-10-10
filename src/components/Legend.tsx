@@ -13,7 +13,7 @@ interface LegendProps {
 
 const Legend: React.FC<LegendProps> = ({ selectedCategories, availableCategories = CATEGORY_LIST, onToggleCategory, isOpen, onToggleOpen }) => {
   return (
-    <div className="fixed top-[52px] left-0 w-full z-[55] flex flex-col items-center pointer-events-none">
+    <div data-canvas-controls className="fixed top-[52px] left-0 w-full z-[55] flex flex-col items-center pointer-events-none">
       
       {/* Collapsible Content Area */}
       <div
@@ -23,7 +23,7 @@ const Legend: React.FC<LegendProps> = ({ selectedCategories, availableCategories
           ${isOpen ? 'max-h-40 opacity-100 border-b' : 'max-h-0 opacity-0 border-none'}
         `}
       >
-        <div className="w-full px-6 py-4 overflow-x-auto no-scrollbar">
+        <div data-canvas-scroll className="w-full px-6 py-4 overflow-x-auto no-scrollbar">
             <div className="flex items-center justify-start gap-4 min-w-max">
                 {availableCategories.map((category) => {
                     const isSelected = selectedCategories.has(category);

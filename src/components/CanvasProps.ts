@@ -1,5 +1,6 @@
 import type { FigureCategory, HistoricalFigure, LayoutData, DiscoveryCluster, ClusterPlacement } from '../types';
 import type { TimelineLayoutResult } from '../utils/timelineLayout';
+import type { CanvasCamera } from '../utils/canvasCamera';
 
 export interface CanvasProps {
   figures: HistoricalFigure[];
@@ -13,6 +14,8 @@ export interface CanvasProps {
   clusterPlacements: Record<string, ClusterPlacement>;
   onPlacementsResolved: (layout: LayoutData[]) => void;
   initialLayout?: { figures: HistoricalFigure[]; result: TimelineLayoutResult } | null;
+  initialCamera?: CanvasCamera;
+  onCameraChange?: (camera: CanvasCamera) => void;
   modalActive: boolean;
   relationshipSourceId?: string;
   highlightedFigureIds: string[];

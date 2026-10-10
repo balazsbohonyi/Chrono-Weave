@@ -1,8 +1,42 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { assessRelationships, generateRelationshipAssessment, parseRelationshipAssessment, readRelationshipAssessment, RelationshipAssessmentError } from '../src/services/relationshipAssessment';
+import { assessRelationships, countVerifiedConnections, generateRelationshipAssessment, parseRelationshipAssessment, readRelationshipAssessment, RelationshipAssessmentError } from '../src/services/relationshipAssessment';
 import { figure, MemoryStorage, relationship, sections } from './helpers';
 import { RELATIONSHIP_NARRATIVE_VERSION } from '../src/constants';
+
+test('verified connection counts deduplicate directions and exclude rejected, changed, removed, or unverified pairs', async () => {
+  const target = { ...figure, id: 'babbage', name: 'Charles Babbage' };
+  const other = { ...figure, id: 'byron', name: 'Lord Byron' };
+  const unrelated = { ...figure, id: 'unrelated', name: 'Unrelated figure' };
+  const figures = [figure, target, other, unrelated];
+  const storage = new MemoryStorage();
+  const service = { fetchRelationshipExplanation: async (_source: typeof figure, candidate: typeof figure) =>
+    candidate.id === unrelated.id ? { ...relationship, isRelevant: false, evidence: '' } : relationship };
+  await assessRelationships(service, figure, figures, storage);
+  await assessRelationships(service, target, [figure], storage);
+  storage.setItem('chrono_map_unrelated', JSON.stringify({ relatedIds: [target.id] }));
+  storage.setItem('chrono_rel_unrelated_babbage', JSON.stringify({ explanation: relationship }));
+  storage.setItem('chrono_assessment_bad', '{not JSON');
+  assert.equal(countVerifiedConnections(figures, storage), 2);
+  assert.equal(countVerifiedConnections([figure, other], storage), 1);
+  assert.equal(countVerifiedConnections(figures.map(item => item.id === target.id ? { ...item, birthYear: 1791 } : item), storage), 1);
+  const reversedKey = 'chrono_assessment_babbage_ada';
+  const reversed = JSON.parse(storage.getItem(reversedKey)!);
+  storage.setItem(reversedKey, JSON.stringify({ ...reversed, explanation: { ...relationship, isRelevant: false, evidence: '' } }));
+  assert.equal(countVerifiedConnections(figures, storage), 1);
+});
+
+test('obsolete positive assessments and claims without evidence do not increase verified counts', async () => {
+  const target = { ...figure, id: 'babbage', name: 'Charles Babbage' };
+  const storage = new MemoryStorage();
+  await assessRelationships({ fetchRelationshipExplanation: async () => relationship }, figure, [target], storage);
+  const cacheKey = 'chrono_assessment_ada_babbage';
+  const saved = JSON.parse(storage.getItem(cacheKey)!);
+  storage.setItem(cacheKey, JSON.stringify({ ...saved, narrativeVersion: RELATIONSHIP_NARRATIVE_VERSION - 1 }));
+  assert.equal(countVerifiedConnections([figure, target], storage), 0);
+  storage.setItem(cacheKey, JSON.stringify({ ...saved, explanation: { ...relationship, evidence: '' } }));
+  assert.equal(countVerifiedConnections([figure, target], storage), 0);
+});
 
 test('a discovery claim does not admit Bunyan–Watts when the assessment finds only shared tradition', async () => {
   const source = { ...figure, id: 'bunyan', name: 'John Bunyan', birthYear: 1628, deathYear: 1688 };

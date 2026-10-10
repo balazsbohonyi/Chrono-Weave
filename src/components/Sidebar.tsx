@@ -1,12 +1,14 @@
 
 import React, { useEffect, useState, useRef, useMemo } from 'react';
-import { HistoricalFigure, FigureCategory } from '../types';
+import { HistoricalFigure, FigureCategory, SidebarViewState } from '../types';
 import { fetchBatchFigureDetails } from '../services/wikiService';
 import { formatYear } from '../utils/formatters';
 
 import SidebarCardActions from './SidebarCardActions';
 
 interface SidebarProps {
+    initialView?: SidebarViewState;
+    onViewChange?: (view: SidebarViewState) => void;
     selectedFigures: HistoricalFigure[];
     currentYear: number | null;
     onTraceRelationships: (figure: HistoricalFigure) => Promise<void>;
@@ -28,6 +30,8 @@ interface SidebarProps {
 type ViewMode = 'FIGURES' | 'EVENTS';
 
 const Sidebar: React.FC<SidebarProps> = ({
+    initialView,
+    onViewChange,
     selectedFigures,
     currentYear,
     onTraceRelationships,
@@ -46,8 +50,10 @@ const Sidebar: React.FC<SidebarProps> = ({
     const [detailsMap, setDetailsMap] = useState<Map<string, { description: string; imageUrl: string | null }>>(new Map());
     const [isLoading, setIsLoading] = useState(false);
     const [tracingId, setTracingId] = useState<string | null>(null);
-    const [viewMode, setViewMode] = useState<ViewMode>('FIGURES');
-    const [scrollPositions, setScrollPositions] = useState<{ FIGURES: number; EVENTS: number }>({ FIGURES: 0, EVENTS: 0 });
+    const [viewMode, setViewMode] = useState<ViewMode>(initialView?.mode ?? 'FIGURES');
+    const [scrollPositions, setScrollPositions] = useState<{ FIGURES: number; EVENTS: number }>(initialView?.scrollPositions ?? { FIGURES: 0, EVENTS: 0 });
+    const firstDisplay = useRef(true);
+    useEffect(() => { onViewChange?.({ mode: viewMode, scrollPositions }); }, [viewMode, scrollPositions, onViewChange]);
 
     // Refs for tracking positions
     const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -95,6 +101,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 
     // Reset scroll position when content changes
     useEffect(() => {
+        if (firstDisplay.current) { firstDisplay.current = false; return; }
         if (scrollContainerRef.current) {
             scrollContainerRef.current.scrollTop = 0;
         }

@@ -4,10 +4,12 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useModalFocus } from '../hooks/useModalFocus';
 import { formatYear } from '../utils/formatters';
 import { validateWeaveRequestLocally } from '../utils/weave';
+import { getUserErrorMessage } from '../utils/userErrors';
 import LauncherExampleScroller from './LauncherExampleScroller';
 import LauncherAnimatedIllustration from './LauncherAnimatedIllustration';
 
 interface WeaveLauncherOverlayProps {
+  historyControl?: React.ReactNode;
   onClose: () => void;
   onSubmit: (request: WeaveRequest) => Promise<void>;
   onSurprise: (excludedTopics: string[]) => Promise<WeaveValidationResult>;
@@ -115,6 +117,7 @@ const STRATEGIES: StrategyConfig[] = [
 ];
 
 const WeaveLauncherOverlay: React.FC<WeaveLauncherOverlayProps> = ({
+  historyControl,
   onClose,
   onSubmit,
   onSurprise,
@@ -280,12 +283,12 @@ const WeaveLauncherOverlay: React.FC<WeaveLauncherOverlayProps> = ({
       const e = Number(trimmedEnd);
 
       if (!Number.isSafeInteger(s) || !Number.isSafeInteger(e)) {
-        setInputError('Years must be safe integer numbers.');
+        setInputError('These years are too large. Please enter a smaller historical year range.');
         return;
       }
 
       if (s >= e) {
-        setInputError('Start year must be strictly earlier than end year.');
+        setInputError('The start year must come before the end year.');
         return;
       }
 
@@ -308,7 +311,7 @@ const WeaveLauncherOverlay: React.FC<WeaveLauncherOverlayProps> = ({
         await onSubmit(request);
       } catch (err: unknown) {
         if (isMountedRef.current) {
-          setInputError(err instanceof Error ? err.message : 'Failed to weave timeline. Please try again.');
+          setInputError(getUserErrorMessage(err, 'We could not create your canvas. Please try again.'));
         }
       } finally {
         operationRef.current = false;
@@ -332,7 +335,7 @@ const WeaveLauncherOverlay: React.FC<WeaveLauncherOverlayProps> = ({
         await onSubmit(request);
       } catch (err: unknown) {
         if (isMountedRef.current) {
-          setInputError(err instanceof Error ? err.message : 'Failed to weave timeline. Please try again.');
+          setInputError(getUserErrorMessage(err, 'We could not create your canvas. Please try again.'));
         }
       } finally {
         operationRef.current = false;
@@ -357,12 +360,12 @@ const WeaveLauncherOverlay: React.FC<WeaveLauncherOverlayProps> = ({
         setExcludedTopics(prev => [...prev, result.themeDescription]);
         setSurpriseState('suggested');
       } else {
-        setSurpriseError(result.errorMessage || 'Unable to uncover an unexpected era. Please roll again.');
+        setSurpriseError('We could not find a historical topic this time. Please roll again.');
         setSurpriseState('error');
       }
     } catch (err: unknown) {
       if (!isMountedRef.current || request !== surpriseRequestRef.current) return;
-      setSurpriseError(err instanceof Error ? err.message : 'Error consulting the archives. Please try again.');
+      setSurpriseError(getUserErrorMessage(err, 'We could not find a historical topic this time. Please roll again.'));
       setSurpriseState('error');
     } finally {
       if (request === surpriseRequestRef.current) operationRef.current = false;
@@ -378,7 +381,7 @@ const WeaveLauncherOverlay: React.FC<WeaveLauncherOverlayProps> = ({
       await onSubmit({ mode: 'freeform', query: surpriseResult.themeDescription });
     } catch (err: unknown) {
       if (!isMountedRef.current) return;
-      setSurpriseError(err instanceof Error ? err.message : 'Failed to build timeline from suggestion.');
+      setSurpriseError(getUserErrorMessage(err, 'We could not create a canvas for this topic. Please try again.'));
     } finally {
       operationRef.current = false;
       if (isMountedRef.current) setIsSubmitting(false);
@@ -438,7 +441,7 @@ const WeaveLauncherOverlay: React.FC<WeaveLauncherOverlayProps> = ({
       </div>
       <div className="launcher-dialog">
         {/* Header with Theme, Settings, Close */}
-        <header className="launcher-header">
+        <header className="launcher-header" data-canvas-controls>
           <div className="flex items-center gap-3">
             <div>
               <h2 id="launcher-heading" className="text-base font-bold text-content-primary leading-tight">
@@ -494,6 +497,7 @@ const WeaveLauncherOverlay: React.FC<WeaveLauncherOverlayProps> = ({
               </svg>
             </button>
           </div>
+          {historyControl}
         </header>
 
         {/* Scrollable Main Area */}
