@@ -4,7 +4,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useModalFocus } from '../hooks/useModalFocus';
 import { formatYear } from '../utils/formatters';
 import { validateWeaveRequestLocally } from '../utils/weave';
-import { getUserErrorMessage } from '../utils/userErrors';
+import { EmptyCanvasError, getUserErrorMessage } from '../utils/userErrors';
 import LauncherExampleScroller from './LauncherExampleScroller';
 import LauncherAnimatedIllustration from './LauncherAnimatedIllustration';
 
@@ -12,7 +12,7 @@ interface WeaveLauncherOverlayProps {
   historyControl?: React.ReactNode;
   onClose: () => void;
   onSubmit: (request: WeaveRequest) => Promise<void>;
-  onSurprise: (excludedTopics: string[]) => Promise<WeaveValidationResult>;
+  onSurprise: (excludedTopics: string[], broadenTopic?: string) => Promise<WeaveValidationResult>;
   initialStartYear: number;
   initialEndYear: number;
   phase?: 'idle' | 'validating' | 'building' | 'verifying';
@@ -141,6 +141,7 @@ const WeaveLauncherOverlay: React.FC<WeaveLauncherOverlayProps> = ({
   const [surpriseState, setSurpriseState] = useState<'idle' | 'consulting' | 'suggested' | 'error'>('idle');
   const [surpriseResult, setSurpriseResult] = useState<WeaveValidationResult | null>(null);
   const [surpriseError, setSurpriseError] = useState<string | null>(null);
+  const [surpriseNotice, setSurpriseNotice] = useState<string | null>(null);
   const [excludedTopics, setExcludedTopics] = useState<string[]>([]);
   const surpriseRequestRef = useRef(0);
   const surpriseTriggerRef = useRef<HTMLButtonElement>(null);
@@ -206,6 +207,7 @@ const WeaveLauncherOverlay: React.FC<WeaveLauncherOverlayProps> = ({
     setSurpriseState('idle');
     setSurpriseResult(null);
     setSurpriseError(null);
+    setSurpriseNotice(null);
   }, [isSubmitting, phase]);
   const collapseSurpriseRef = useRef(handleCollapseSurprise);
   collapseSurpriseRef.current = handleCollapseSurprise;
@@ -352,6 +354,7 @@ const WeaveLauncherOverlay: React.FC<WeaveLauncherOverlayProps> = ({
       operationRef.current = true;
       setSurpriseState('consulting');
       setSurpriseError(null);
+      setSurpriseNotice(null);
       const result = await onSurprise(excludedTopics);
       if (!isMountedRef.current || request !== surpriseRequestRef.current) return;
 
@@ -374,17 +377,39 @@ const WeaveLauncherOverlay: React.FC<WeaveLauncherOverlayProps> = ({
 
   const handleBuildSurprise = async () => {
     if (!surpriseResult || !surpriseResult.isValid || isBusy || operationRef.current) return;
+    const request = ++surpriseRequestRef.current;
     try {
       operationRef.current = true;
       setIsSubmitting(true);
       setSurpriseError(null);
+      setSurpriseNotice(null);
       await onSubmit({ mode: 'freeform', query: surpriseResult.themeDescription });
     } catch (err: unknown) {
-      if (!isMountedRef.current) return;
-      setSurpriseError(getUserErrorMessage(err, 'We could not create a canvas for this topic. Please try again.'));
+      if (!isMountedRef.current || request !== surpriseRequestRef.current) return;
+      if (err instanceof EmptyCanvasError) {
+        setIsSubmitting(false);
+        setSurpriseState('consulting');
+        try {
+          const result = await onSurprise(excludedTopics, surpriseResult.themeDescription);
+          if (!isMountedRef.current || request !== surpriseRequestRef.current) return;
+          if (!result.isValid || !result.themeDescription) throw new Error('No broader topic was suggested.');
+          setSurpriseResult(result);
+          setExcludedTopics(prev => [...prev, result.themeDescription]);
+          setSurpriseState('suggested');
+          setSurpriseNotice('The previous topic returned no people or events. Here is a broader related suggestion. Review it before weaving again.');
+        } catch (recoveryError: unknown) {
+          if (!isMountedRef.current || request !== surpriseRequestRef.current) return;
+          setSurpriseState('error');
+          setSurpriseError(getUserErrorMessage(recoveryError, 'That topic returned no people or events, and we could not find a broader suggestion. Try Spin Again.'));
+        }
+      } else {
+        setSurpriseError(getUserErrorMessage(err, 'We could not create a canvas for this topic. Please try again.'));
+      }
     } finally {
-      operationRef.current = false;
-      if (isMountedRef.current) setIsSubmitting(false);
+      if (isMountedRef.current && request === surpriseRequestRef.current) {
+        operationRef.current = false;
+        setIsSubmitting(false);
+      }
     }
   };
 
@@ -785,29 +810,35 @@ const WeaveLauncherOverlay: React.FC<WeaveLauncherOverlayProps> = ({
                     </div>
                   )}
 
-                  <div className="flex flex-wrap items-center justify-end gap-3 mt-5 pt-3 border-t border-border/40">
-                    <button
-                      type="button"
-                      onClick={handleSurpriseRoll}
-                      disabled={isBusy || focusedMode !== null}
-                      className="launcher-btn-secondary"
-                    >
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                      </svg>
-                      <span>Spin Again</span>
-                    </button>
+                  {surpriseNotice && (
+                    <p className="mt-3 text-sm text-content-body leading-relaxed" role="status">{surpriseNotice}</p>
+                  )}
 
-                    <button
-                      type="button"
-                      onClick={handleBuildSurprise}
-                      disabled={isBusy || focusedMode !== null}
-                      aria-busy={isBuildInProgress}
-                      className="launcher-btn-primary launcher-weave-button"
-                    >
-                      {weaveButtonContent}
-                    </button>
-                  </div>
+                  {!isBuildInProgress && (
+                    <div className="flex flex-wrap items-center justify-end gap-3 mt-5 pt-3 border-t border-border/40">
+                      <button
+                        type="button"
+                        onClick={handleSurpriseRoll}
+                        disabled={isBusy || focusedMode !== null}
+                        className="launcher-btn-secondary"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                        <span>Spin Again</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleBuildSurprise}
+                        disabled={isBusy || focusedMode !== null}
+                        aria-busy={isBuildInProgress}
+                        className="launcher-btn-primary launcher-weave-button"
+                      >
+                        {weaveButtonContent}
+                      </button>
+                    </div>
+                  )}
                   {buildProgress}
                 </div>
               )}

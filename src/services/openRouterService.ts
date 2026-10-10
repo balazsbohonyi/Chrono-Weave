@@ -113,7 +113,7 @@ export class OpenRouterService implements IAIService {
     private generate<T>(prompt: string, validate: (value: unknown) => T, signal?: AbortSignal, task: JsonTask = 'people'): Promise<T> {
         // Plain task JSON keeps this compatible with models that do not support
         // OpenAI-style response_format/json_schema parameters.
-        return generateValidatedJson(prompt, requestPrompt => task === 'preflight'
+        return generateValidatedJson(prompt, requestPrompt => task === 'preflight' || task === 'suggestion'
             ? runWithRetry(() => this.callOpenRouter(requestPrompt, signal, true), 2, 1000, signal)
             : enqueueTaskWithRetry(() => this.callOpenRouter(requestPrompt, signal, true), signal), validate, signal);
     }
@@ -122,8 +122,8 @@ export class OpenRouterService implements IAIService {
         return validateWeaveQuery(this.generate.bind(this), request, signal);
     }
 
-    suggestWeaveTopic(excludedTopics?: string[], signal?: AbortSignal): Promise<WeaveValidationResult> {
-        return suggestWeaveTopic(this.generate.bind(this), excludedTopics, signal);
+    suggestWeaveTopic(excludedTopics?: string[], signal?: AbortSignal, broadenTopic?: string): Promise<WeaveValidationResult> {
+        return suggestWeaveTopic(this.generate.bind(this), excludedTopics, signal, broadenTopic);
     }
 
     fetchHistoricalFigures(start: number, end: number, signal?: AbortSignal, context?: WeaveGenerationContext): Promise<HistoricalFigure[]> {

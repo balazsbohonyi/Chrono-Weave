@@ -140,6 +140,33 @@ input[type=number] {
 .relationship-overlay, .relationship-detail-backdrop { background: rgb(var(--color-surface) / 60%); backdrop-filter: blur(24px); }
 .relationship-overlay { position: fixed; inset: 0; z-index: 95; }
 .relationship-dialog { height: 100%; outline: none; }
+
+.biography-header-container { container-type: inline-size; }
+.biography-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 7rem;
+    grid-template-areas: "details portrait" "summary summary";
+    align-items: start;
+    gap: 24px;
+}
+.biography-header--no-portrait {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "details" "summary";
+}
+.biography-header-details { grid-area: details; max-width: 18rem; overflow-wrap: anywhere; }
+.biography-header-summary { grid-area: summary; width: 100%; max-width: 32rem; justify-self: center; }
+.biography-header-portrait { grid-area: portrait; }
+@container (min-width: 48rem) {
+    .biography-header {
+        grid-template-columns: fit-content(18rem) minmax(0, 1fr) 7rem;
+        grid-template-areas: "details summary portrait";
+        column-gap: 32px;
+    }
+    .biography-header--no-portrait {
+        grid-template-columns: fit-content(18rem) minmax(0, 1fr);
+        grid-template-areas: "details summary";
+    }
+}
 .close-button {
   display: grid;
   place-items: center;

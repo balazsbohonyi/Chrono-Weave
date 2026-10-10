@@ -13,7 +13,7 @@ import {
 import { runWithRetry, enqueueTaskWithRetry, withAbort } from "./utils";
 import { generateValidatedJson, parseJsonResponse } from './jsonResponse';
 import { generateWeaveTimeline, getWeaveGenerationRange, parseWeaveFigures, suggestWeaveTopic, validateWeaveQuery, type JsonTask } from './weaveService';
-import { CATEGORY_LIST } from '../constants';
+import { CATEGORY_LIST, SURPRISE_MIN_EXAMPLES, SURPRISE_MAX_EXAMPLES } from '../constants';
 import { isWeaveCategoryAllowed } from '../utils/weave';
 
 export class GeminiService implements IAIService {
@@ -76,14 +76,22 @@ export class GeminiService implements IAIService {
     private supportsJsonSchema = true;
 
     private schema(task: JsonTask): Schema {
-        if (task === 'preflight') return {
+        if (task === 'preflight' || task === 'suggestion') return {
             type: Type.OBJECT,
             properties: {
                 isValid: { type: Type.BOOLEAN }, errorMessage: { type: Type.STRING, nullable: true },
                 inferredStartYear: { type: Type.INTEGER }, inferredEndYear: { type: Type.INTEGER },
                 themeDescription: { type: Type.STRING }, activeCategories: { type: Type.ARRAY, items: { type: Type.STRING } },
+                ...(task === 'suggestion' ? { representativeEntries: {
+                    type: Type.ARRAY, minItems: String(SURPRISE_MIN_EXAMPLES), maxItems: String(SURPRISE_MAX_EXAMPLES),
+                    items: { type: Type.OBJECT, properties: {
+                        name: { type: Type.STRING }, category: { type: Type.STRING },
+                        startYear: { type: Type.INTEGER }, endYear: { type: Type.INTEGER },
+                    }, required: ['name', 'category', 'startYear', 'endYear'] },
+                } } : {}),
             },
-            required: ['isValid', 'errorMessage', 'inferredStartYear', 'inferredEndYear', 'themeDescription', 'activeCategories'],
+            required: ['isValid', 'errorMessage', 'inferredStartYear', 'inferredEndYear', 'themeDescription', 'activeCategories',
+                ...(task === 'suggestion' ? ['representativeEntries'] : [])],
         };
         const events = task === 'events';
         return { type: Type.ARRAY, items: {
@@ -124,7 +132,7 @@ export class GeminiService implements IAIService {
                 signal?.throwIfAborted();
                 return response.text || '';
             };
-            return task === 'preflight' ? runWithRetry(request, 2, 1000, signal) : enqueueTaskWithRetry(request, signal);
+            return task === 'preflight' || task === 'suggestion' ? runWithRetry(request, 2, 1000, signal) : enqueueTaskWithRetry(request, signal);
         }, validate, signal);
     }
 
@@ -132,8 +140,8 @@ export class GeminiService implements IAIService {
         return validateWeaveQuery(this.generate.bind(this), request, signal);
     }
 
-    suggestWeaveTopic(excludedTopics?: string[], signal?: AbortSignal): Promise<WeaveValidationResult> {
-        return suggestWeaveTopic(this.generate.bind(this), excludedTopics, signal);
+    suggestWeaveTopic(excludedTopics?: string[], signal?: AbortSignal, broadenTopic?: string): Promise<WeaveValidationResult> {
+        return suggestWeaveTopic(this.generate.bind(this), excludedTopics, signal, broadenTopic);
     }
 
     fetchHistoricalFigures(start: number, end: number, signal?: AbortSignal, context?: WeaveGenerationContext): Promise<HistoricalFigure[]> {

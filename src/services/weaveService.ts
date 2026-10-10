@@ -2,6 +2,7 @@ import {
   CATEGORY_LIST, HISTORICAL_EVENTS_COUNT, HISTORICAL_EVENTS_PER_CENTURY_CHUNK,
   HISTORICAL_FIGURES_COUNT, HISTORICAL_FIGURES_PER_CENTURY_CHUNK,
   TIMELINE_CHUNKING_THRESHOLD_YEARS, TIMELINE_CHUNK_YEARS,
+  MIN_EVENT_DURATION, SURPRISE_MIN_EXAMPLES, SURPRISE_MAX_EXAMPLES,
 } from '../constants';
 import type { FigureCategory, HistoricalFigure, WeaveGenerationContext, WeaveRequest, WeaveValidationResult } from '../types';
 import { isTimelineFigureVisible } from '../utils/timelineFigures';
@@ -11,7 +12,7 @@ import {
 } from '../utils/weave';
 import { buildEventsPrompt, buildPeoplePrompt, buildWeaveSuggestionPrompt, buildWeaveValidationPrompt } from './prompts';
 
-export type JsonTask = 'people' | 'events' | 'preflight';
+export type JsonTask = 'people' | 'events' | 'preflight' | 'suggestion';
 export type JsonGenerator = <T>(prompt: string, validate: (value: unknown) => T, signal?: AbortSignal, task?: JsonTask) => Promise<T>;
 
 export async function validateWeaveQuery(generate: JsonGenerator, request: WeaveRequest, signal?: AbortSignal): Promise<WeaveValidationResult> {
@@ -22,17 +23,40 @@ export async function validateWeaveQuery(generate: JsonGenerator, request: Weave
   return generate(buildWeaveValidationPrompt(normalized), value => parseWeaveValidationResult(value, normalized), signal, 'preflight');
 }
 
-export async function suggestWeaveTopic(generate: JsonGenerator, excludedTopics: string[] = [], signal?: AbortSignal): Promise<WeaveValidationResult> {
+export async function suggestWeaveTopic(generate: JsonGenerator, excludedTopics: string[] = [], signal?: AbortSignal, broadenTopic?: string): Promise<WeaveValidationResult> {
   signal?.throwIfAborted();
   const excluded = excludedTopics.filter(topic => typeof topic === 'string').map(topic => topic.trim()).filter(Boolean).slice(-50);
-  return generate(buildWeaveSuggestionPrompt(excluded), value => {
+  return generate(buildWeaveSuggestionPrompt(excluded, broadenTopic), value => {
     const result = parseWeaveValidationResult(value);
     if (!result.isValid) throw new Error('Suggest a valid historical topic rather than a rejection.');
     if (excluded.some(topic => topic.toLowerCase() === result.themeDescription.toLowerCase())) {
       throw new Error('This topic was already suggested. Choose a different subject, not a rewording.');
     }
+    const examples = (value as Record<string, unknown>).representativeEntries;
+    if (!Array.isArray(examples) || examples.length < SURPRISE_MIN_EXAMPLES || examples.length > SURPRISE_MAX_EXAMPLES) {
+      throw new Error(`Choose a broad, recognizable topic supported by ${SURPRISE_MIN_EXAMPLES}-${SURPRISE_MAX_EXAMPLES} representativeEntries.`);
+    }
+    const names = new Set<string>();
+    for (const raw of examples) {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Each representative entry must describe a named historical person or event.');
+      const example = raw as Record<string, unknown>;
+      const name = requiredString(example.name, 'representative name').toLowerCase();
+      if (names.has(name)) throw new Error('Representative entries must be distinct identities, not repeated names or aliases.');
+      names.add(name);
+      const category = requiredString(example.category, 'representative category').toUpperCase() as FigureCategory;
+      if (!CATEGORY_LIST.includes(category) || (!result.activeCategories.includes('ALL') && !result.activeCategories.includes(category))) {
+        throw new Error('Representative entries must use known categories included in the suggested topic.');
+      }
+      const start = example.startYear as number;
+      const end = example.endYear as number;
+      assertWeaveYearRange(start, end);
+      if (start === 0 || end === 0 || end > new Date().getFullYear() || end < result.inferredStartYear || start > result.inferredEndYear ||
+          (category === 'EVENTS' && end - start < MIN_EVENT_DURATION)) {
+        throw new Error('Representative entries must have defensible historical dates overlapping the topic; events must meet the minimum duration. Choose a broader topic if necessary.');
+      }
+    }
     return result;
-  }, signal, 'preflight');
+  }, signal, 'suggestion');
 }
 
 export function getWeaveGenerationRange(start: number, end: number, context?: WeaveGenerationContext): { start: number; end: number; context?: WeaveGenerationContext } {

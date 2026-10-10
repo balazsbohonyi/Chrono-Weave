@@ -1,7 +1,9 @@
-import { RefObject, useEffect } from 'react';
+import { RefObject, useLayoutEffect } from 'react';
 
 export function useModalFocus(ref: RefObject<HTMLElement | null>, active: boolean, onClose: () => void, externalFocusSelector?: string) {
-  useEffect(() => {
+  // Release the previous dialog's trap before the next dialog's layout effects
+  // focus its controls. Passive cleanup happens too late for this handoff.
+  useLayoutEffect(() => {
     if (!active || !ref.current) return;
     const dialog = ref.current;
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -11,7 +13,8 @@ export function useModalFocus(ref: RefObject<HTMLElement | null>, active: boolea
     const focusable = () => [...dialog.querySelectorAll<HTMLElement>(selector), ...external().flatMap(element => [...element.querySelectorAll<HTMLElement>(selector)])]
       .filter(element => !element.hasAttribute('disabled') && !element.closest('[inert]') && element.tabIndex !== -1 && element.getClientRects().length > 0)
       .sort((first, second) => first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1);
-    if (!contains(document.activeElement)) (focusable().find(element => dialog.contains(element)) ?? dialog).focus({ preventScroll: true });
+    const focusDialog = () => (focusable().find(element => dialog.contains(element)) ?? dialog).focus({ preventScroll: true });
+    if (!contains(document.activeElement)) focusDialog();
     const handleKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
@@ -29,7 +32,7 @@ export function useModalFocus(ref: RefObject<HTMLElement | null>, active: boolea
       }
     };
     const containFocus = (event: FocusEvent) => {
-      if (!contains(event.target as Node)) (focusable()[0] ?? dialog).focus({ preventScroll: true });
+      if (!contains(event.target as Node)) focusDialog();
     };
     document.addEventListener('keydown', handleKey, true);
     document.addEventListener('focusin', containFocus);

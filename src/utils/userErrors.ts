@@ -3,6 +3,12 @@ import type { WeaveMode } from '../types';
 // Only messages written for users may bypass the error formatter.
 export class UserFacingError extends Error {}
 
+export class EmptyCanvasError extends UserFacingError {
+  constructor() {
+    super('No historical figures or events were found for this subject. Try another topic.');
+  }
+}
+
 export function getUserErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof UserFacingError) return error.message;
   const detail = error instanceof Error ? error.message : typeof error === 'string' ? error : '';

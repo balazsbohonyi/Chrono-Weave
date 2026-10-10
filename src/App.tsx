@@ -20,7 +20,7 @@ import SettingsDialog from './components/SettingsDialog';
 import Legend from './components/Legend';
 import { HistoricalFigure, DeepDiveData, IAIService, RelationshipExplanation, FigureCategory, DiscoveryClusterState, ClusterPlacement, LayoutData, WeaveRequest, WeaveGenerationContext, CanvasLayoutMode, CanvasConfig, CanvasSnapshot, CanvasHistoryRecord, CanvasViewSnapshot, SidebarViewState } from './types';
 import { calculateWeaveBounds, normalizeWeaveCategories } from './utils/weave';
-import { getUserErrorMessage, getWeaveValidationMessage, UserFacingError } from './utils/userErrors';
+import { getUserErrorMessage, getWeaveValidationMessage, UserFacingError, EmptyCanvasError } from './utils/userErrors';
 import { createAIService } from './services/aiService';
 import { assessRelationships, readRelationshipAssessment } from './services/relationshipAssessment';
 import { isConfigValid, providerNames } from './utils/providerConfig';
@@ -358,7 +358,7 @@ const App: React.FC = () => {
                 .filter(figure => weaveContext.activeCategories.includes('ALL') || weaveContext.activeCategories.includes(figure.category));
             controller.signal.throwIfAborted();
             if (buildVersion.current !== version) throw new DOMException('Request cancelled.', 'AbortError');
-            if (!candidates.length) throw new UserFacingError('No historical figures or events were found for this subject. Try another topic.');
+            if (!candidates.length) throw new EmptyCanvasError();
             if (weaveContext.mode === 'figure') setLauncherPhase('verifying');
             const verified = await verifyFollowFigureConnections(service, candidates, weaveContext, storage, controller.signal);
             controller.signal.throwIfAborted();
@@ -378,13 +378,13 @@ const App: React.FC = () => {
         }
     }, [ensureWeaveProvider, commitCanvas]);
 
-    const suggestWeaveTopic = useCallback(async (excludedTopics: string[]) => {
+    const suggestWeaveTopic = useCallback(async (excludedTopics: string[], broadenTopic?: string) => {
         ensureWeaveProvider();
         buildController.current?.abort();
         const controller = new AbortController();
         const version = ++buildVersion.current;
         buildController.current = controller;
-        const suggestion = await serviceRef.current.suggestWeaveTopic(excludedTopics, controller.signal);
+        const suggestion = await serviceRef.current.suggestWeaveTopic(excludedTopics, controller.signal, broadenTopic);
         controller.signal.throwIfAborted();
         if (version !== buildVersion.current) throw new DOMException('Request cancelled.', 'AbortError');
         return suggestion;

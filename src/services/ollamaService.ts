@@ -215,8 +215,8 @@ export class OllamaService implements IAIService {
     return validateWeaveQuery(this.generate.bind(this), request, signal);
   }
 
-  suggestWeaveTopic(excludedTopics?: string[], signal?: AbortSignal): Promise<WeaveValidationResult> {
-    return suggestWeaveTopic(this.generate.bind(this), excludedTopics, signal);
+  suggestWeaveTopic(excludedTopics?: string[], signal?: AbortSignal, broadenTopic?: string): Promise<WeaveValidationResult> {
+    return suggestWeaveTopic(this.generate.bind(this), excludedTopics, signal, broadenTopic);
   }
 
   fetchHistoricalFigures(start: number, end: number, signal?: AbortSignal, context?: WeaveGenerationContext): Promise<HistoricalFigure[]> {

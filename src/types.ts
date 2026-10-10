@@ -153,7 +153,7 @@ export type InteractionMode = 'select' | 'pan' | 'zoom';
 
 export interface IAIService {
   validateWeaveQuery(request: WeaveRequest, signal?: AbortSignal): Promise<WeaveValidationResult>;
-  suggestWeaveTopic(excludedTopics?: string[], signal?: AbortSignal): Promise<WeaveValidationResult>;
+  suggestWeaveTopic(excludedTopics?: string[], signal?: AbortSignal, broadenTopic?: string): Promise<WeaveValidationResult>;
   fetchHistoricalFigures(start: number, end: number, signal?: AbortSignal, context?: WeaveGenerationContext): Promise<HistoricalFigure[]>;
   fetchRelatedFigures(target: HistoricalFigure, allFigures: HistoricalFigure[], signal?: AbortSignal): Promise<string[]>;
   discoverRelatedFigures(target: HistoricalFigure, existingNames: string[], start: number, end: number, signal?: AbortSignal, context?: WeaveGenerationContext): Promise<HistoricalFigure[]>;

@@ -159,7 +159,7 @@ const RelationshipPopover: React.FC<RelationshipPopoverProps> = ({
 
         <div className="w-full h-full bg-surface rounded-xl shadow-2xl flex flex-col overflow-hidden border border-border">
             {/* Header Section */}
-            <div className="bg-surface-dialog-header/80 border-b border-border p-6 flex-shrink-0">
+            <div className="biography-header-container bg-surface-dialog-header/80 border-b border-border p-6 flex-shrink-0">
                 {mode === 'relationship' && source && target ? (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 relative">
                         <FigureCard 
@@ -185,10 +185,8 @@ const RelationshipPopover: React.FC<RelationshipPopoverProps> = ({
                         />
                     </div>
                 ) : mode === 'single' && target ? (
-                    <div className={`grid grid-cols-1 gap-6 items-start ${target.imageUrl
-                        ? 'md:grid-cols-[minmax(0,3fr)_minmax(0,4fr)_7rem]'
-                        : 'md:grid-cols-[minmax(0,3fr)_minmax(0,4fr)]'}`}>
-                        <div className="min-w-0 space-y-2">
+                    <div className={`biography-header ${target.imageUrl ? '' : 'biography-header--no-portrait'}`}>
+                        <div className="biography-header-details min-w-0 space-y-2">
                             <h2 className="text-2xl font-bold text-content-primary leading-tight break-words">{target.name}</h2>
                             <p className="text-sm text-success-heading font-bold uppercase tracking-wide">{target.occupation}</p>
                             <p className="text-base text-content-muted font-mono font-semibold">
@@ -196,12 +194,12 @@ const RelationshipPopover: React.FC<RelationshipPopoverProps> = ({
                             </p>
                         </div>
 
-                        <MarkdownContent className="min-w-0 text-base text-content-body leading-relaxed font-sans">
+                        <MarkdownContent className="biography-header-summary min-w-0 text-base text-content-body leading-relaxed font-sans">
                             {target.shortDescription || (isDeepDiveData(data) ? data.summary : "Loading details...")}
                         </MarkdownContent>
 
                         {target.imageUrl && (
-                            <div className="w-28 h-28 bg-surface-placeholder rounded-md overflow-hidden shadow-sm border border-border-subtle">
+                            <div className="biography-header-portrait w-28 h-28 bg-surface-placeholder rounded-md overflow-hidden shadow-sm border border-border-subtle">
                                 <img src={target.imageUrl} alt={target.name} className="w-full h-full object-cover object-top" />
                             </div>
                         )}
