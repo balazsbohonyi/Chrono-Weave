@@ -31,6 +31,17 @@ The app uses Google Gemini, OpenRouter, or Ollama to generate historical data an
 - **Topic-aware Timelines**: AI interprets your prompt to determine the historical period and relevant categories
 - **Preserved Canvas**: Your existing timeline stays in place until a new build succeeds
 
+### Canvas History
+
+Keep up to **20 previous canvases plus the current canvas**, saved automatically in this browser's localStorage and retained across reloads.
+
+- **History Controls**: Use the stacked horizontal lines on the left of the canvas, or the vertical ticks below the launcher's header at the top right
+- **Quick Previews**: Hover or focus a marker to see its prompt, prompting type, historical duration and year range, positive figure/event counts, created date, and unique verified connection count. Long prompts end with an ellipsis
+- **Restore Your Exploration**: Click or tap a marker to restore its figures, events, discoveries, cached biographies and relationships, canvas layout, zoom, pan, filters, search, and sidebar state
+- **Keyboard Navigation**: Use arrow keys to move between markers, Home/End to jump to the first/last entry, and Enter to open a canvas
+
+History stays ordered by creation date, newest first. Reopening a canvas saves the outgoing canvas without duplicating entries or changing their creation dates. New canvases replace the oldest history entry once the limit is reached. Switching canvases closes dialogs and cancels pending work immediately; failed or cancelled builds preserve the current canvas.
+
 ### 🎨 Interactive Timeline Canvas
 - Visualize historical figures and events as bars on a horizontal timeline
 - Zoom and pan the canvas for detailed exploration
@@ -107,7 +118,7 @@ Choose a card based on how you want to explore history:
 
 1. Open a card and enter your years or prompt. For topic cards, you can click an example to fill the input and edit it.
 2. Click **Weave**. The app validates the request before generating the timeline. For topic prompts, AI infers the year range and relevant categories; **Strict Time Span** keeps your entered years and permits all categories. Use whole-number years, with negative numbers for BCE dates (for example, `-500` for 500 BCE), and an end year later than the start year. Future years are not accepted.
-3. If validation or generation fails, the form shows an error so you can revise the request and try again. A successful build replaces the previous timeline and is saved locally, including its topic and category scope.
+3. If validation or generation fails, the form shows an error so you can revise the request and try again. A successful build becomes the current canvas, archives the previous canvas in history, and is saved locally, including its topic and category scope.
 
 The canvas adds space around the requested period for readability; this padding does not broaden the historical subject. Topic timelines offer only the relevant category filters, and **Expand Timeline** continues to respect the original topic.
 
