@@ -7,6 +7,7 @@ interface ActionBarProps {
     onDiscover: (figure: HistoricalFigure) => void;
     onTrace: (figure: HistoricalFigure) => void;
     onInspect: (figure: HistoricalFigure) => void;
+    onDismiss: () => void;
     isDiscovering: boolean;
     isFollowingFigure?: boolean;
     focusFigureId?: string;
@@ -19,6 +20,7 @@ const ActionBar: React.FC<ActionBarProps> = ({
     onDiscover,
     onTrace,
     onInspect,
+    onDismiss,
     isDiscovering,
     isFollowingFigure = false,
     focusFigureId,
@@ -58,7 +60,10 @@ const ActionBar: React.FC<ActionBarProps> = ({
                     <button
                         key={item.id}
                         type="button"
-                        onClick={item.onClick}
+                        onClick={event => {
+                            onDismiss();
+                            item.onClick(event);
+                        }}
                         disabled={item.isLoading}
                         className={`
                         w-full flex items-center gap-3 px-3 py-1.5 text-base font-normal transition-all text-left group

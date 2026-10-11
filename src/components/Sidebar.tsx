@@ -5,6 +5,7 @@ import { fetchBatchFigureDetails } from '../services/wikiService';
 import { formatYear } from '../utils/formatters';
 
 import SidebarCardActions from './SidebarCardActions';
+import Tooltip from './Tooltip';
 
 interface SidebarProps {
     initialView?: SidebarViewState;
@@ -57,6 +58,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 
     // Refs for tracking positions
     const scrollContainerRef = useRef<HTMLDivElement>(null);
+    const sidebarRef = useRef<HTMLDivElement>(null);
 
     // Filter selected figures based on Global Categories First
     const categoryFilteredFigures = useMemo(() => {
@@ -146,6 +148,20 @@ const Sidebar: React.FC<SidebarProps> = ({
     }, [selectedFigures]);
 
     const hasSelection = selectedFigures.length > 0;
+    const toggleLabel = isCollapsed ? 'Show sidebar' : 'Hide sidebar';
+
+    useEffect(() => {
+        const handleShortcut = (event: KeyboardEvent) => {
+            if (event.defaultPrevented || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey
+                || (event.key.toLowerCase() !== 'b' && event.code !== 'KeyB')
+                || !hasSelection || sidebarRef.current?.closest('[inert]')) return;
+            event.preventDefault();
+            if (!event.repeat) onToggleCollapse();
+        };
+        window.addEventListener('keydown', handleShortcut);
+        return () => window.removeEventListener('keydown', handleShortcut);
+    }, [hasSelection, onToggleCollapse]);
+
     const transformClass = (hasSelection && !isCollapsed) ? 'translate-x-0' : 'translate-x-full';
 
     // Dynamic Top Offset: Align sidebar top with the bottom of the filters bar
@@ -153,26 +169,29 @@ const Sidebar: React.FC<SidebarProps> = ({
     const heightClass = isLegendOpen ? 'h-[calc(100vh-114px)]' : 'h-[calc(100vh-52px)]';
 
     return (
-        <div className={`absolute right-0 w-[34rem] bg-surface/50 backdrop-blur-xl border-l border-border shadow-2xl flex flex-col z-40 transition-all duration-300 ease-in-out font-sans ${transformClass} ${topClass} ${heightClass}`}>
+        <div id="canvas-sidebar" ref={sidebarRef} className={`absolute right-0 w-[34rem] bg-surface/50 backdrop-blur-xl border-l border-border shadow-2xl flex flex-col z-40 transition-all duration-300 ease-in-out font-sans ${transformClass} ${topClass} ${heightClass}`}>
 
-            {/* Toggle Slide Button with Plain White Background */}
+            {/* Keep the tooltip anchor aligned with the floating trigger. */}
             {hasSelection && (
-                <button
-                    onClick={onToggleCollapse}
-                    className="absolute top-1/2 -left-6 w-6 h-16 bg-surface border border-border shadow-lg rounded-l-xl flex items-center justify-center text-content-secondary hover:text-accent-text hover:bg-surface transition-all z-50 focus:outline-none group"
-                    style={{ transform: 'translateY(-50%)' }}
-                    title={isCollapsed ? "Show Sidebar" : "Hide Sidebar"}
-                >
-                    {isCollapsed ? (
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 opacity-70 group-hover:opacity-100" viewBox="0 0 20 20" fill="currentColor">
-                            <path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" />
-                        </svg>
-                    ) : (
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 opacity-70 group-hover:opacity-100" viewBox="0 0 20 20" fill="currentColor">
-                            <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
-                        </svg>
-                    )}
-                </button>
+                <div data-canvas-controls className="absolute top-1/2 -left-6 z-50" style={{ transform: 'translateY(-50%)' }}>
+                    <Tooltip text={`${toggleLabel} (Ctrl/Cmd + B)`}>
+                        <button type="button"
+                            onClick={onToggleCollapse}
+                            className="w-6 h-16 bg-surface border border-border shadow-lg rounded-l-xl flex items-center justify-center text-content-secondary hover:text-accent-text hover:bg-surface transition-all focus:outline-none group"
+                            aria-label={toggleLabel} aria-expanded={!isCollapsed} aria-controls="canvas-sidebar" aria-keyshortcuts="Control+b Meta+b"
+                        >
+                            {isCollapsed ? (
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 opacity-70 group-hover:opacity-100" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" />
+                                </svg>
+                            ) : (
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 opacity-70 group-hover:opacity-100" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
+                                </svg>
+                            )}
+                        </button>
+                    </Tooltip>
+                </div>
             )}
 
             <div className="p-6 border-b border-border/50 bg-surface/30 flex items-center justify-between">

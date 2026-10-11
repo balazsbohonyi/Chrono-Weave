@@ -38,7 +38,7 @@ export class CanvasCache implements Storage {
 
 export const defaultCanvasView = (): CanvasViewSnapshot => ({
   cameras: {}, selectedYear: null, selectedFigureIds: [], selectedCategories: [],
-  isSidebarCollapsed: false, isLegendOpen: false,
+  isSidebarCollapsed: true, isLegendOpen: false,
   sidebar: { mode: 'FIGURES', scrollPositions: { FIGURES: 0, EVENTS: 0 } },
   searchQuery: '', highlightedFigureIds: [], currentSearchIndex: 0,
 });
@@ -66,7 +66,7 @@ function normalizeView(value: unknown, figures: HistoricalFigure[]): CanvasViewS
   view.highlightedFigureIds = validIds(value.highlightedFigureIds);
   view.selectedCategories = Array.isArray(value.selectedCategories)
     ? CATEGORY_LIST.filter(category => (value.selectedCategories as unknown[]).includes(category)) : [];
-  view.isSidebarCollapsed = value.isSidebarCollapsed === true;
+  if (typeof value.isSidebarCollapsed === 'boolean') view.isSidebarCollapsed = value.isSidebarCollapsed;
   view.isLegendOpen = value.isLegendOpen === true;
   view.searchQuery = typeof value.searchQuery === 'string' ? value.searchQuery.slice(0, 2000) : '';
   view.currentSearchIndex = Number.isSafeInteger(value.currentSearchIndex) && (value.currentSearchIndex as number) >= 0

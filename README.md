@@ -45,6 +45,7 @@ History stays ordered by creation date, newest first. Reopening a canvas saves t
 ### 🎨 Interactive Timeline Canvas
 - Visualize historical figures and events as bars on a horizontal timeline
 - Zoom and pan the canvas for detailed exploration
+- Use the bottom-left floating toolbar to switch layouts or reset zoom; reset stays visible and is disabled at 100%
 - Color-coded by category (Artists, Scientists, Leaders, Writers, etc.)
 - Ctrl+click (Command+click on macOS) to select a year; Alt+click to clear it
 - Click a figure to open its actions; press Escape or click away to dismiss them
@@ -71,15 +72,18 @@ History stays ordered by creation date, newest first. Reopening a canvas saves t
 ### 🏷️ Category Filtering & Legend
 - **8 Figure Categories**: Artists, Business, Entertainers, Explorers, Leaders & Baddies, Scientists, Thinkers, Writers
 - **Historical Events**: Separate category for major historical events (wars, treaties, movements)
-- **Visual Legend**: Toggle categories on/off to focus on specific disciplines
+- **Visual Legend**: Open filters with the header's filter icon, toggle categories to focus on specific disciplines, and close the panel with the same icon or its close button
 - **Color Coding**: Each category has a distinct color for easy identification
 - **Bulk Filtering**: Reset all filters or select multiple categories at once
+- **Active Filter Count**: A small red badge on the filter icon shows how many categories are selected
 
 ### 🔎 Figure Search & Navigation
-- **Real-time Search**: Type figure names to instantly highlight matching results
-- **Search Navigation**: Navigate through search results with next/previous buttons
-- **Result Counter**: See how many figures match your search
+- **Real-time Search**: Toggle search with the header's search icon or Ctrl/Cmd + /, then type figure names to instantly highlight matching results
+- **Search Navigation**: Navigate through search results with the buttons inside the search field, Up/Down arrow keys, or Enter/Shift+Enter
+- **Result Counter**: See the current match and total number of results inside the search field
 - **Search Focus**: Automatically highlights and focuses on search results
+
+The header normally shows the canvas prompt, capitalized and truncated to one line. Search replaces that prompt while open. Close it with the search icon, Ctrl/Cmd + /, or Escape to restore the prompt and clear the search highlights. The clear button resets the query while keeping search open. Icon controls use custom tooltips on hover and keyboard focus.
 
 ### ⚙️ Flexible AI Backend
 - **Provider Selection**: Switch between Google Gemini, OpenRouter, and Ollama
@@ -89,7 +93,7 @@ History stays ordered by creation date, newest first. Reopening a canvas saves t
 - **Persistent Settings**: Your provider and model preferences are saved locally
 
 ### 📱 Responsive Interface
-- **Collapsible Sidebar**: Shows figures active in selected year or global figure list
+- **Collapsible Sidebar**: Starts hidden on new canvases and shows figures active in the selected year or global figure list when opened; toggle with its tooltip-enabled trigger or Ctrl/Cmd + B
 - **Figure Details Panel**: View full descriptions, images, and occupation details
 - **Toast Notifications**: Real-time feedback on discoveries, searches, and actions
 - **Progress Overlays**: Clear loading states during data fetching and analysis

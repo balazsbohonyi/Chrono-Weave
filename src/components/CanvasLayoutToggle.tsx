@@ -1,5 +1,6 @@
 import React from 'react';
 import type { CanvasLayoutMode } from '../types';
+import Tooltip from './Tooltip';
 
 interface CanvasLayoutToggleProps {
   mode: CanvasLayoutMode;
@@ -12,12 +13,12 @@ const CanvasLayoutToggle: React.FC<CanvasLayoutToggleProps> = ({ mode, onToggle,
   const label = showTimeline ? 'Switch to year-based timeline' : 'Switch to gallery card layout';
 
   return (
-    <button type="button" className="canvas-floating-button canvas-layout-toggle" onClick={event => {
+    <Tooltip text={label}><button type="button" className="canvas-floating-button canvas-layout-toggle" onClick={event => {
       if (event.detail > 0) event.currentTarget.blur();
       onToggle();
     }}
-      disabled={disabled} aria-label={label} title={label}>
-      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      disabled={disabled} aria-label={label}>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
         strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         {showTimeline ? <>
           <path d="M3 20h18M6 18v3M12 18v3M18 18v3" />
@@ -31,7 +32,7 @@ const CanvasLayoutToggle: React.FC<CanvasLayoutToggleProps> = ({ mode, onToggle,
           <rect x="15" y="14" width="7" height="6" rx="1.5" />
         </>}
       </svg>
-    </button>
+    </button></Tooltip>
   );
 };
 

@@ -2,11 +2,11 @@
 import React, { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from 'react';
 import TimelineCanvas from './components/TimelineCanvas';
 import GalleryCanvas from './components/GalleryCanvas';
-import CanvasLayoutToggle from './components/CanvasLayoutToggle';
 import CanvasHistory from './components/CanvasHistory';
 import type { CanvasProps } from './components/CanvasProps';
 import { CANVAS_LAYOUT_VERSION, getCanvasFocusFigure, prepareCanvasLayout } from './utils/canvasLayout';
 import ControlPanel from './components/ControlPanel';
+import { formatCanvasPrompt } from './utils/formatters';
 import WeaveLauncherOverlay from './components/WeaveLauncherOverlay';
 import Sidebar from './components/Sidebar';
 import RelationshipPopover from './components/RelationshipPopover';
@@ -93,7 +93,7 @@ const App: React.FC = () => {
     const [isTracing, setIsTracing] = useState(false);
 
     // Sidebar State
-    const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+    const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
 
     // Legend State (Now Top Bar)
     const [isLegendOpen, setIsLegendOpen] = useState(false);
@@ -790,10 +790,14 @@ const App: React.FC = () => {
         <div className="relative w-screen h-screen overflow-hidden font-sans text-content-primary bg-canvas" data-canvas-wheel-scope>
             <div className="absolute inset-0" inert={isLauncherOpen || !!relationshipState || popoverState.isOpen || isSettingsOpen}>
             <ControlPanel
+                key={`controls-${activeCanvas?.id ?? 'empty'}`}
+                canvasPrompt={figures.length ? formatCanvasPrompt(config) : ''}
                 searchQuery={searchQuery}
                 onOpenLauncher={openLauncher}
                 isBuilding={loading || launcherPhase !== 'idle'}
                 hasFigures={figures.length > 0}
+                hasCategoryFilters={hasCategoryFilters}
+                selectedCategoryCount={selectedCategories.size}
                 onSearch={handleSearch}
                 searchResultCount={highlightedFigureIds.length}
                 currentResultIndex={currentSearchIndex}
@@ -801,7 +805,7 @@ const App: React.FC = () => {
                 onPrevResult={handlePrevSearchResult}
                 onOpenSettings={() => setIsSettingsOpen(true)}
                 onToggleLegend={() => setIsLegendOpen(prev => !prev)}
-                isLegendOpen={isLegendOpen}
+                isLegendOpen={hasCategoryFilters && isLegendOpen}
             />
 
             {hasCategoryFilters && <Legend
@@ -828,6 +832,7 @@ const App: React.FC = () => {
                     initialLayout={initialLayout}
                     initialCamera={cameras.current[config.layoutMode]}
                     onCameraChange={config.layoutMode === 'gallery' ? handleGalleryCamera : handleTimelineCamera}
+                    onToggleLayout={toggleCanvasLayout}
                     seedFigureId={focusFigure?.id}
                     isSidebarOpen={sortedSidebarFigures.length > 0 && !isSidebarCollapsed}
                     modalActive={isLauncherOpen || !!relationshipState || popoverState.isOpen || isSettingsOpen}
@@ -849,18 +854,12 @@ const App: React.FC = () => {
                 />
             </div>
 
-            {figures.length > 0 && <CanvasLayoutToggle
-                mode={config.layoutMode}
-                onToggle={toggleCanvasLayout}
-                disabled={isBusy}
-            />}
-
             {loading && !isLauncherOpen && (
                 <ProgressOverlay title="CONSULTING THE ARCHIVES" />
             )}
 
             <Sidebar
-                key={activeCanvas?.id}
+                key={`sidebar-${activeCanvas?.id ?? 'empty'}`}
                 initialView={initialSidebarView}
                 onViewChange={handleSidebarView}
                 selectedFigures={sortedSidebarFigures}

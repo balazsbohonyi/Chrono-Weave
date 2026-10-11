@@ -4,7 +4,7 @@ import { ViewState } from '../types';
 import { CATEGORY_COLORS, CATEGORY_BAR_TEXT_COLORS } from '../constants';
 import { formatYear } from '../utils/formatters';
 import ActionBar from './ActionBar';
-import CanvasZoomReset from './CanvasZoomReset';
+import CanvasToolbar from './CanvasToolbar';
 import { centerCameraOnBounds } from '../utils/canvasCamera';
 import { listenForCanvasWheel } from '../utils/canvasWheel';
 import { BASE_PIXELS_PER_YEAR, ROW_HEIGHT, calculateTextWidth, calculateTimelineLayout } from '../utils/timelineLayout';
@@ -32,6 +32,7 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
   initialLayout,
   initialCamera,
   onCameraChange,
+  onToggleLayout,
   modalActive,
   relationshipSourceId,
   highlightedFigureIds,
@@ -82,7 +83,7 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
   const [cursorX, setCursorX] = useState<number | null>(null);
   const [hoverYearVal, setHoverYearVal] = useState<number | null>(null);
 
-  // Figure actions stay open until Escape or an explicit click away.
+  // Figure actions stay open until an action is selected, Escape, or a click away.
   const [actionFigureId, setActionFigureId] = useState<string | null>(null);
   const [actionBarCoords, setActionBarCoords] = useState<{top: number, left: number} | null>(null);
 
@@ -1050,7 +1051,7 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
             style={{ left: cursorX }}
         >
             <div
-                className="absolute left-2 bg-accent-solid text-on-accent text-xs font-mono px-2 py-1 rounded shadow-lg transition-all duration-300 z-[100]"
+                className="absolute left-2 bg-accent-solid text-on-accent text-xs font-mono px-2 py-1 rounded shadow-lg transition-all duration-300 z-[100] whitespace-nowrap"
                 style={{ bottom: '35px' }}
             >
                 {formatYear(Math.floor(hoverYearVal || 0))}
@@ -1065,6 +1066,10 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
               onDiscover={onDiscover}
               onTrace={onTrace}
               onInspect={onInspect}
+              onDismiss={() => {
+                  setActionFigureId(null);
+                  setActionBarCoords(null);
+              }}
               isDiscovering={!!isDiscovering}
               isFollowingFigure={isFollowingFigure}
               focusFigureId={seedFigureId}
@@ -1073,7 +1078,8 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
           />
       )}
     </div>
-    <CanvasZoomReset scale={viewState.scale} onReset={resetZoom} disabled={modalActive} />
+    <CanvasToolbar mode="timeline" scale={viewState.scale} onResetZoom={resetZoom} onToggleLayout={onToggleLayout}
+      disabled={modalActive || isBusy || !figures.length} />
     </>
   );
 };

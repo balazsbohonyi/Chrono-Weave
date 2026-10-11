@@ -5,7 +5,7 @@ import { calculateGalleryLayout, GALLERY_CARD_HEIGHT, GALLERY_CARD_WIDTH } from 
 import { useFigurePortraits } from '../hooks/useFigurePortraits';
 import FigureCard from './FigureCard';
 import ActionBar from './ActionBar';
-import CanvasZoomReset from './CanvasZoomReset';
+import CanvasToolbar from './CanvasToolbar';
 import { centerCameraOnBounds, pinchCamera, zoomCameraAt, type CanvasCamera, type Point } from '../utils/canvasCamera';
 import { listenForCanvasWheel } from '../utils/canvasWheel';
 
@@ -16,7 +16,7 @@ const GalleryCanvas: React.FC<CanvasProps> = ({ figures, modalActive, highlighte
   isSearchFocusActive = false, newlyDiscoveredIds, onDiscover, onTrace, onInspect, onRelationship,
   isFollowingFigure = false,
   isDiscovering = false, onCanvasInteraction, isBusy = false, selectedCategories,
-  isLegendCollapsed, seedFigureId, isSidebarOpen = false, relationshipSourceId, initialCamera, onCameraChange }) => {
+  isLegendCollapsed, seedFigureId, isSidebarOpen = false, relationshipSourceId, initialCamera, onCameraChange, onToggleLayout }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [camera, setCamera] = useState<CanvasCamera>(initialCamera ?? { x: 0, y: 0, scale: 1 });
   useLayoutEffect(() => { onCameraChange?.(camera); }, [camera, onCameraChange]);
@@ -279,11 +279,13 @@ const GalleryCanvas: React.FC<CanvasProps> = ({ figures, modalActive, highlighte
       {actionFigure && actions && onDiscover && onTrace && onInspect && !isDiscovering && !isBusy && (
         <ActionBar figure={actionImage ? { ...actionFigure, imageUrl: actionImage } : actionFigure}
           onDiscover={onDiscover} onTrace={onTrace} onInspect={onInspect} isDiscovering={isDiscovering}
+          onDismiss={() => setActions(null)}
           isFollowingFigure={isFollowingFigure} focusFigureId={seedFigureId} onRelationship={onRelationship}
           style={{ top: actions.top, left: actions.left }} />
       )}
     </div>
-    <CanvasZoomReset scale={camera.scale} onReset={resetZoom} disabled={modalActive} />
+    <CanvasToolbar mode="gallery" scale={camera.scale} onResetZoom={resetZoom} onToggleLayout={onToggleLayout}
+      disabled={modalActive || isBusy || !figures.length} />
     </>
   );
 };

@@ -16,6 +16,7 @@ export interface CanvasProps {
   initialLayout?: { figures: HistoricalFigure[]; result: TimelineLayoutResult } | null;
   initialCamera?: CanvasCamera;
   onCameraChange?: (camera: CanvasCamera) => void;
+  onToggleLayout?: () => void;
   modalActive: boolean;
   relationshipSourceId?: string;
   highlightedFigureIds: string[];
