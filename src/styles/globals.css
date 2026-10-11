@@ -311,6 +311,8 @@ input[type=number] {
 .relationship-card:focus-visible, .relationship-retry:focus-visible { outline: 3px solid rgb(var(--color-accent-focus)); outline-offset: 4px; }
 .gallery-card { position: absolute; max-width: none; min-height: 0; padding: 0 18px; cursor: pointer; }
 .gallery-card h2, .gallery-card .relationship-occupation { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+/* Keep font descenders inside the clipped name line boxes. */
+.gallery-card h2 { line-height: 1.3; }
 .gallery-focused { border-color: rgb(var(--color-timeline-search)); box-shadow: 0 0 0 3px rgb(var(--color-timeline-search)), 0 8px 28px rgb(var(--color-shadow) / 0.2); }
 .gallery-new:not(.gallery-focused):not(.relationship-source) { box-shadow: 0 0 0 2px rgb(var(--color-accent-focus)), 0 8px 28px rgb(var(--color-shadow) / 0.2); }
 @media (max-width: 680px) {
