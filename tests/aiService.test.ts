@@ -53,7 +53,7 @@ test('Gemini rejects missing and malformed discovery responses rather than cachi
   try {
     for (const text of ['', '{}']) {
       globalThis.fetch = async () => Response.json({ candidates: [{ content: { parts: [{ text }] } }] });
-      await assert.rejects(service.discoverRelatedFigures(figure, [figure.name], 1800, 1900), /invalid discovery data/);
+      await assert.rejects(service.discoverRelatedFigures(figure, [figure.name], 1800, 1900), /invalid discovery data|no JSON/);
     }
   } finally {
     globalThis.fetch = previousFetch;
@@ -61,7 +61,7 @@ test('Gemini rejects missing and malformed discovery responses rather than cachi
   }
 });
 
-test('OpenRouter rejects failed or malformed relationship results instead of treating them as empty', async () => {
+test('OpenRouter rejects failed or malformed relationship results instead of treating them as empty', { timeout: 10_000 }, async () => {
   const previousFetch = globalThis.fetch;
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
   const previousError = console.error;

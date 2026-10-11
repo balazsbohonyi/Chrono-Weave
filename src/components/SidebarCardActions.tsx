@@ -9,20 +9,27 @@ interface SidebarCardActionsProps {
     onInspect: (figure: HistoricalFigure) => void;
     onTrace: (figure: HistoricalFigure) => Promise<void>;
     isTracing: boolean;
+    isFollowingFigure?: boolean;
+    focusFigureId?: string;
+    onRelationship?: (figure: HistoricalFigure) => void;
 }
 
-const SidebarCardActions: React.FC<SidebarCardActionsProps> = ({ figure, onDiscover, onInspect, onTrace, isTracing }) => {
+const SidebarCardActions: React.FC<SidebarCardActionsProps> = ({ figure, onDiscover, onInspect, onTrace, isTracing,
+    isFollowingFigure = false, focusFigureId, onRelationship }) => {
     const actions = useFigureActions({
         figure,
         onDiscover,
         onTrace,
         onInspect,
         isDiscovering: false,
-        isTracing
+        isTracing,
+        isFollowingFigure,
+        focusFigureId,
+        onRelationship
     });
 
     return (
-        <div className="absolute bottom-0 left-0 right-0 p-2 flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-10">
+        <div className="absolute bottom-0 left-0 right-0 p-2 flex justify-end gap-2 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto transition-opacity duration-300 z-10">
             {actions.map(action => (
                 <Tooltip key={action.id} text={action.label}>
                     <button

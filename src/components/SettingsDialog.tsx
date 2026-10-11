@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useEnvironment } from '../contexts/EnvironmentContext';
 import { createAIService } from '../services/aiService';
 import { OllamaService } from '../services/ollamaService';
+import { getUserErrorMessage } from '../utils/userErrors';
 import {
   AppConfig, AIProvider, OllamaMode, defaultModel, isConfigValid, providerNames,
   readProviderConfig, saveProviderConfig, settingsKey,
@@ -67,7 +68,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose, onSave
     OllamaService.hasEnvironmentKey(controller.signal).then(hasKey => {
       if (!controller.signal.aborted) setHasEnvironmentKey(hasKey);
     }).catch(error => {
-      if (!controller.signal.aborted) setRelayError(error instanceof Error ? error.message : 'Cannot reach the cloud relay.');
+      if (!controller.signal.aborted) setRelayError(getUserErrorMessage(error, 'We could not connect to your cloud provider. Please try again.'));
     });
     return () => controller.abort();
   }, [isOpen, form.provider, form.ollamaMode]);
@@ -84,7 +85,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose, onSave
         const names = await new OllamaService(form).listModels(controller.signal);
         if (!controller.signal.aborted) setModels(names);
       } catch (error) {
-        if (!controller.signal.aborted) setListError(error instanceof Error ? error.message : 'Could not load models.');
+        if (!controller.signal.aborted) setListError(getUserErrorMessage(error, 'We could not load the available models. Please try again.'));
       } finally { if (!controller.signal.aborted) setIsListing(false); }
     }, 300);
     return () => { clearTimeout(timer); controller.abort(); };
@@ -111,9 +112,9 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose, onSave
       if (testVersion.current !== version || controller.signal.aborted) return;
       setTestResult({ success: result.success, message: result.success
         ? `Connection successful to ${configLabel(form)} using ${form.model}.`
-        : `Connection failed: ${result.error || 'The provider did not return a usable response.'}` });
+        : getUserErrorMessage(result.error, 'We could not connect with these settings. Please check them and try again.') });
     } catch (error) {
-      if (testVersion.current === version) setTestResult({ success: false, message: error instanceof Error ? error.message : 'Connection test failed.' });
+      if (testVersion.current === version) setTestResult({ success: false, message: getUserErrorMessage(error, 'We could not test the connection. Please try again.') });
     } finally {
       if (testVersion.current === version) setIsTesting(false);
     }
@@ -132,7 +133,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose, onSave
       saveProviderConfig(form, localStorage);
       onSave();
       onClose();
-    } catch (error) { onShowToast(error instanceof Error ? error.message : 'Could not save settings.', 'error'); }
+    } catch (error) { onShowToast(getUserErrorMessage(error, 'Your settings could not be saved. Please try again.'), 'error'); }
   };
 
   if (!isOpen) return null;

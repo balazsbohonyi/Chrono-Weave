@@ -17,6 +17,8 @@ export const EVENT_TYPE_MAX_WORDS = 3;
 export const SHORT_DESCRIPTION_MAX_WORDS = 40;
 // Shared by event prompts and visibility filtering; measured as endYear - startYear.
 export const MIN_EVENT_DURATION = 3;
+export const SURPRISE_MIN_EXAMPLES = 5;
+export const SURPRISE_MAX_EXAMPLES = 8;
 // Shared output constraints for relationship explanations and deep dives.
 export const RELATIONSHIP_SUMMARY_MIN_SENTENCES = 2;
 export const RELATIONSHIP_SUMMARY_MAX_SENTENCES = 3;

@@ -17,6 +17,9 @@ interface UseFigureActionsProps {
     onInspect: (figure: HistoricalFigure) => void;
     isDiscovering: boolean;
     isTracing?: boolean;
+    isFollowingFigure?: boolean;
+    focusFigureId?: string;
+    onRelationship?: (figure: HistoricalFigure) => void;
 }
 
 export const useFigureActions = ({
@@ -25,11 +28,30 @@ export const useFigureActions = ({
     onTrace,
     onInspect,
     isDiscovering,
-    isTracing = false
+    isTracing = false,
+    isFollowingFigure = false,
+    focusFigureId,
+    onRelationship
 }: UseFigureActionsProps): ActionItem[] => {
     const isEvent = figure.category === 'EVENTS';
+    const isFocus = figure.id === focusFigureId;
 
     const actions: (ActionItem | null)[] = [
+        isFollowingFigure && focusFigureId && !isFocus && onRelationship ? {
+            id: 'relationship',
+            label: 'View Relationship',
+            icon: (
+                <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4M16 17H4m0 0l4 4m-4-4l4-4" />
+                </svg>
+            ),
+            onClick: (e: React.MouseEvent) => {
+                e.stopPropagation();
+                onRelationship(figure);
+            },
+            isLoading: false,
+            isVisible: true
+        } : null,
         {
             id: 'inspect',
             label: isEvent ? "Read Details" : "Read Biography",
@@ -45,7 +67,7 @@ export const useFigureActions = ({
             isLoading: false,
             isVisible: true
         },
-        !isEvent ? {
+        !isEvent && (!isFollowingFigure || !isFocus) ? {
             id: 'trace',
             label: "Map Relationships",
             icon: (
@@ -60,7 +82,7 @@ export const useFigureActions = ({
             isLoading: isTracing,
             isVisible: true
         } : null,
-        !isEvent ? {
+        !isEvent && (!isFollowingFigure || isFocus) ? {
             id: 'discover',
             label: "Expand Timeline",
             icon: (

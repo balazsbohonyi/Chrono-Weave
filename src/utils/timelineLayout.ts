@@ -2,8 +2,8 @@ import { HistoricalFigure, DiscoveryCluster, ClusterPlacement } from '../types';
 import { formatYear } from './formatters';
 import { isTimelineFigureVisible } from './timelineFigures';
 import { placeClusterBars } from './discoveryClusters';
-const BASE_PIXELS_PER_YEAR = 10;
-const ROW_HEIGHT = 180;
+export const BASE_PIXELS_PER_YEAR = 10;
+export const ROW_HEIGHT = 180;
 // Helper for line intersection checks (p1->p2 vs p3->p4)
 function linesIntersect(p1: {x:number, y:number}, p2: {x:number, y:number}, p3: {x:number, y:number}, p4: {x:number, y:number}): boolean {
     const {x: x1, y: y1} = p1;
@@ -594,3 +594,5 @@ export function calculateTimelineLayout(figures: HistoricalFigure[], clusters: D
     return { layoutData: tempLayout, totalRows: Math.ceil(effectiveTotalRows) };
 
 }
+
+export type TimelineLayoutResult = ReturnType<typeof calculateTimelineLayout>;

@@ -2,17 +2,35 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { resolveRelationshipAction } from '../src/services/relationshipActions';
 import { saveRelationshipMap } from '../src/utils/relationshipCache';
-import { HistoricalFigure, IAIService } from '../src/types';
+import { HistoricalFigure, IAIService, WeaveGenerationContext } from '../src/types';
 import { figure, MemoryStorage, relationship } from './helpers';
 
 const candidate = (id: string): HistoricalFigure => ({ ...figure, id, name: id });
 const mockService = (overrides: Partial<IAIService> = {}): IAIService => ({
+  validateWeaveQuery: async () => { throw new Error('Unexpected pre-flight request'); },
+  suggestWeaveTopic: async () => { throw new Error('Unexpected topic suggestion'); },
   fetchHistoricalFigures: async () => [], fetchRelatedFigures: async () => [], discoverRelatedFigures: async () => [],
   fetchRelationshipExplanation: async () => relationship, fetchFigureDeepDive: async () => null,
   testConnection: async () => ({ success: true }), ...overrides,
 });
 const options = (service: IAIService, figures: HistoricalFigure[] = [figure]) => ({ service, source: figure, figures, action: 'map' as const,
   config: { start: 1800, end: 1900 }, knownIds: [], storage: new MemoryStorage(), signal: new AbortController().signal, onExpansionFallback: () => {} });
+
+test('expansion retains canvas context and rejects figures outside allowed categories', async () => {
+  const weaveContext: WeaveGenerationContext = {
+    mode: 'theme', query: 'Women in Science', themeDescription: 'Women in Science',
+    inferredStartYear: 1800, inferredEndYear: 1900, activeCategories: ['SCIENTISTS'],
+  };
+  const scientist = candidate('scientist');
+  const artist = { ...candidate('artist'), category: 'ARTISTS' as const };
+  const input = options(mockService({ discoverRelatedFigures: async (_source, _names, _start, _end, _signal, context) => {
+    assert.deepEqual(context, weaveContext);
+    return [scientist, artist];
+  } }));
+  const result = await resolveRelationshipAction({ ...input, action: 'expand', config: { ...input.config, weaveContext } });
+  assert.deepEqual(result.newFigures, [scientist]);
+  assert.deepEqual(result.relatedIds, [scientist.id]);
+});
 
 test('mapping falls back to expansion once and returns only verified new figures', async () => {
   const accepted = candidate('accepted');

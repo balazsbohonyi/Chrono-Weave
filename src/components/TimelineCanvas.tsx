@@ -1,48 +1,24 @@
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { FigureCategory, HistoricalFigure, LayoutData, ViewState, DiscoveryCluster, ClusterPlacement } from '../types';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { ViewState } from '../types';
 import { CATEGORY_COLORS, CATEGORY_BAR_TEXT_COLORS } from '../constants';
 import { formatYear } from '../utils/formatters';
 import ActionBar from './ActionBar';
-import { calculateTextWidth, calculateTimelineLayout } from '../utils/timelineLayout';
-
-interface TimelineCanvasProps {
-  figures: HistoricalFigure[];
-  startYear: number;
-  endYear: number;
-  onHoverYear: (year: number | null) => void;
-  onYearClick: (year: number, figures: HistoricalFigure[]) => void;
-  onEmptyClick: () => void;
-  selectedYear: number | null;
-  clusters: DiscoveryCluster[];
-  clusterPlacements: Record<string, ClusterPlacement>;
-  onPlacementsResolved: (layout: LayoutData[]) => void;
-  modalActive: boolean;
-  relationshipSourceId?: string;
-  highlightedFigureIds: string[];
-  focusedFigureId?: string | null;
-  isSearchFocusActive?: boolean;
-  newlyDiscoveredIds?: Set<string>;
-  onDiscover?: (figure: HistoricalFigure) => void;
-  onTrace?: (figure: HistoricalFigure) => void;
-  onInspect?: (figure: HistoricalFigure) => void;
-  isDiscovering?: boolean;
-  onCanvasInteraction?: () => void;
-  isBusy?: boolean;
-  selectedCategories: Set<FigureCategory>;
-  isLegendCollapsed: boolean;
-}
+import CanvasToolbar from './CanvasToolbar';
+import { centerCameraOnBounds } from '../utils/canvasCamera';
+import { listenForCanvasWheel } from '../utils/canvasWheel';
+import { BASE_PIXELS_PER_YEAR, ROW_HEIGHT, calculateTextWidth, calculateTimelineLayout } from '../utils/timelineLayout';
+import type { CanvasProps } from './CanvasProps';
 
 // Config
-const BASE_PIXELS_PER_YEAR = 10; 
-const ROW_HEIGHT = 180; 
 const AXIS_INTERVAL = 50; 
+const SIDEBAR_WIDTH = 544; // Sidebar's 34rem width at the application's base size.
 const MOUSE_WHEEL_IMPULSE_THRESHOLD_PX = 40;
 const TRACKPAD_STICKY_MS = 300;
 const IS_MAC_PLATFORM = typeof navigator !== 'undefined'
   && /Mac|iPhone|iPad|iPod/i.test(navigator.platform);
 
-const TimelineCanvas: React.FC<TimelineCanvasProps> = ({ 
+const TimelineCanvas: React.FC<CanvasProps> = ({
   figures, 
   startYear, 
   endYear,
@@ -53,6 +29,10 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
   clusters,
   clusterPlacements,
   onPlacementsResolved,
+  initialLayout,
+  initialCamera,
+  onCameraChange,
+  onToggleLayout,
   modalActive,
   relationshipSourceId,
   highlightedFigureIds,
@@ -62,20 +42,27 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
   onDiscover,
   onTrace,
   onInspect,
+  onRelationship,
+  isFollowingFigure = false,
+  seedFigureId,
   isDiscovering = false,
   onCanvasInteraction,
   isBusy = false,
   selectedCategories,
-  isLegendCollapsed
+  isLegendCollapsed,
+  isSidebarOpen = false
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const warnedCategoriesRef = useRef<Set<string>>(new Set());
 
   const [viewState, setViewState] = useState<ViewState>({
-    scale: 1,
-    translateX: 0,
-    translateY: 0,
+    scale: initialCamera?.scale ?? 1,
+    translateX: initialCamera?.x ?? 0,
+    translateY: initialCamera?.y ?? 0,
   });
+  useLayoutEffect(() => {
+    onCameraChange?.({ x: viewState.translateX, y: viewState.translateY, scale: viewState.scale });
+  }, [viewState, onCameraChange]);
   const [isDragging, setIsDragging] = useState(false);
   const [lastMousePos, setLastMousePos] = useState({ x: 0, y: 0 });
   const dragStartPos = useRef({ x: 0, y: 0 });
@@ -96,7 +83,7 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
   const [cursorX, setCursorX] = useState<number | null>(null);
   const [hoverYearVal, setHoverYearVal] = useState<number | null>(null);
 
-  // Figure actions stay open until Escape or an explicit click away.
+  // Figure actions stay open until an action is selected, Escape, or a click away.
   const [actionFigureId, setActionFigureId] = useState<string | null>(null);
   const [actionBarCoords, setActionBarCoords] = useState<{top: number, left: number} | null>(null);
 
@@ -128,8 +115,9 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
   }, [actionFigureId, modalActive]);
 
   const { layoutData, totalRows } = useMemo(
-    () => calculateTimelineLayout(figures, clusters, clusterPlacements),
-    [figures, clusters, clusterPlacements]
+    () => initialLayout?.figures === figures && !clusters.length
+      ? initialLayout.result : calculateTimelineLayout(figures, clusters, clusterPlacements),
+    [figures, clusters, clusterPlacements, initialLayout]
   );
 
   useEffect(() => {
@@ -261,8 +249,7 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
       }
     };
 
-    el.addEventListener('wheel', handleWheel, { passive: false });
-    return () => el.removeEventListener('wheel', handleWheel);
+    return listenForCanvasWheel(el, handleWheel, modalActive);
   }, [highlightedFigureIds, onCanvasInteraction, contentWidth, modalActive]);
 
   // Cleanup trackpad detection timer
@@ -555,10 +542,34 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
 
   // Determine top offset for axes based on filters
   const axisTopOffset = isLegendCollapsed ? '52px' : '114px';
+  const resetZoom = () => {
+    const container = containerRef.current;
+    if (!container) return;
+    onCanvasInteraction?.();
+    setActionFigureId(null);
+    setActionBarCoords(null);
+    const rectangles = [...container.querySelectorAll<HTMLElement>('[data-figure-id]')].map(element => element.getBoundingClientRect());
+    if (!rectangles.length) {
+      setViewState({ scale: 1, translateX: 0, translateY: 0 });
+      return;
+    }
+    const origin = container.getBoundingClientRect();
+    const left = Math.min(...rectangles.map(rect => rect.left)), top = Math.min(...rectangles.map(rect => rect.top));
+    const right = Math.max(...rectangles.map(rect => rect.right)), bottom = Math.max(...rectangles.map(rect => rect.bottom));
+    const camera = centerCameraOnBounds({
+      left: (left - origin.left - viewState.translateX) / viewState.scale,
+      top: (top - origin.top - viewState.translateY) / viewState.scale,
+      width: (right - left) / viewState.scale, height: (bottom - top) / viewState.scale,
+    }, { x: Math.max(1, container.clientWidth - (isSidebarOpen ? SIDEBAR_WIDTH : 0)) / 2,
+      y: (container.clientHeight + (isLegendCollapsed ? 52 : 114)) / 2 });
+    setViewState({ scale: camera.scale, translateX: camera.x, translateY: camera.y });
+  };
 
   return (
+    <>
     <div 
       ref={containerRef}
+      data-layout-mode="timeline"
       className={`relative w-full h-full overflow-hidden select-none bg-canvas touch-none ${cursorClass}`}
       onPointerDown={handlePointerDown}
       onPointerUp={handlePointerUp}
@@ -1040,7 +1051,7 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
             style={{ left: cursorX }}
         >
             <div
-                className="absolute left-2 bg-accent-solid text-on-accent text-xs font-mono px-2 py-1 rounded shadow-lg transition-all duration-300 z-[100]"
+                className="absolute left-2 bg-accent-solid text-on-accent text-xs font-mono px-2 py-1 rounded shadow-lg transition-all duration-300 z-[100] whitespace-nowrap"
                 style={{ bottom: '35px' }}
             >
                 {formatYear(Math.floor(hoverYearVal || 0))}
@@ -1055,11 +1066,21 @@ const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
               onDiscover={onDiscover}
               onTrace={onTrace}
               onInspect={onInspect}
+              onDismiss={() => {
+                  setActionFigureId(null);
+                  setActionBarCoords(null);
+              }}
               isDiscovering={!!isDiscovering}
+              isFollowingFigure={isFollowingFigure}
+              focusFigureId={seedFigureId}
+              onRelationship={onRelationship}
               style={actionBarCoords}
           />
       )}
     </div>
+    <CanvasToolbar mode="timeline" scale={viewState.scale} onResetZoom={resetZoom} onToggleLayout={onToggleLayout}
+      disabled={modalActive || isBusy || !figures.length} />
+    </>
   );
 };
 

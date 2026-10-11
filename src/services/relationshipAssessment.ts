@@ -65,6 +65,29 @@ export function readRelationshipAssessment(source: HistoricalFigure, target: His
   } catch { return null; }
 }
 
+export function countVerifiedConnections(figures: HistoricalFigure[], storage: Storage): number {
+  const byId = new Map(figures.map(figure => [figure.id, figure]));
+  const verified = new Set<string>();
+  const rejected = new Set<string>();
+  for (let index = 0; index < storage.length; index++) {
+    const cacheKey = storage.key(index);
+    if (!cacheKey?.startsWith('chrono_assessment_')) continue;
+    try {
+      const cached = JSON.parse(storage.getItem(cacheKey) || 'null');
+      const endpoints = JSON.parse(cached?.scope);
+      if (!Array.isArray(endpoints) || endpoints.length !== 2) continue;
+      const source = byId.get(endpoints[0]?.[0]);
+      const target = byId.get(endpoints[1]?.[0]);
+      if (!source || !target || source.id === target.id || cacheKey !== key(source, target)) continue;
+      const assessment = readRelationshipAssessment(source, target, storage);
+      if (!assessment) continue;
+      const pair = JSON.stringify([source.id, target.id].sort());
+      (assessment.isRelevant ? verified : rejected).add(pair);
+    } catch { /* Damaged or obsolete entries do not prove a connection. */ }
+  }
+  return [...verified].filter(pair => !rejected.has(pair)).length;
+}
+
 // Discovery and mapping propose candidates; only an explicit evidence-bearing
 // positive assessment admits a connection. Old IDs/descriptions are not proof.
 export async function assessRelationships(

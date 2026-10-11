@@ -1,4 +1,4 @@
-import { HistoricalFigure, IAIService } from '../types';
+import { HistoricalFigure, IAIService, WeaveGenerationContext } from '../types';
 import { readKnownRelationshipIds, readRelationshipMap, validRelatedIds } from '../utils/relationshipCache';
 import { isTimelineFigureVisible } from '../utils/timelineFigures';
 import { assessRelationships } from './relationshipAssessment';
@@ -8,7 +8,7 @@ interface Options {
   source: HistoricalFigure;
   figures: HistoricalFigure[];
   action: 'map' | 'expand';
-  config: { start: number; end: number };
+  config: { start: number; end: number; weaveContext?: WeaveGenerationContext };
   knownIds: string[];
   storage: Storage;
   signal: AbortSignal;
@@ -39,12 +39,14 @@ export async function resolveRelationshipAction({ service, source, figures, acti
     signal.throwIfAborted();
   }
 
-  const candidates = await service.discoverRelatedFigures(source, figures.map(figure => figure.name), config.start, config.end, signal);
+  const candidates = await service.discoverRelatedFigures(source, figures.map(figure => figure.name), config.start, config.end, signal, config.weaveContext);
   signal.throwIfAborted();
   const seenIds = new Set(figures.map(figure => figure.id));
   const seenNames = new Set(figures.map(figure => figure.name.trim().toLowerCase()));
   const proposedNew = candidates.filter(figure => {
     const name = figure.name.trim().toLowerCase();
+    const categories = config.weaveContext?.activeCategories;
+    if (categories && !categories.includes('ALL') && !categories.includes(figure.category)) return false;
     if (!isTimelineFigureVisible(figure) || figure.deathYear < config.start || figure.birthYear > config.end || seenIds.has(figure.id) || seenNames.has(name)) return false;
     seenIds.add(figure.id);
     seenNames.add(name);

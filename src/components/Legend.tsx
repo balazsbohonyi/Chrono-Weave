@@ -2,29 +2,32 @@
 import React from 'react';
 import { FigureCategory } from '../types';
 import { CATEGORY_COLORS, CATEGORY_LIST } from '../constants';
+import Tooltip from './Tooltip';
 
 interface LegendProps {
   selectedCategories: Set<FigureCategory>;
+  availableCategories?: FigureCategory[];
   onToggleCategory: (category: FigureCategory) => void;
   isOpen: boolean;
   onToggleOpen?: () => void;
 }
 
-const Legend: React.FC<LegendProps> = ({ selectedCategories, onToggleCategory, isOpen, onToggleOpen }) => {
+const Legend: React.FC<LegendProps> = ({ selectedCategories, availableCategories = CATEGORY_LIST, onToggleCategory, isOpen, onToggleOpen }) => {
   return (
-    <div className="fixed top-[52px] left-0 w-full z-[55] flex flex-col items-center pointer-events-none">
+    <div id="canvas-category-filters" data-canvas-controls aria-label="Category filters" aria-hidden={!isOpen} inert={!isOpen}
+      className="fixed top-[52px] left-0 w-full z-[45] flex flex-col items-center pointer-events-none">
       
       {/* Collapsible Content Area */}
       <div
         className={`
-          w-full bg-surface/60 backdrop-blur-xl border-border/50
+          relative w-full bg-surface/60 backdrop-blur-xl border-border/50
           transition-all duration-300 ease-in-out overflow-hidden pointer-events-auto
           ${isOpen ? 'max-h-40 opacity-100 border-b' : 'max-h-0 opacity-0 border-none'}
         `}
       >
-        <div className="w-full px-6 py-4 overflow-x-auto no-scrollbar">
+        <div data-canvas-scroll className="legend-category-scroll px-6 py-4 overflow-x-auto no-scrollbar">
             <div className="flex items-center justify-start gap-4 min-w-max">
-                {CATEGORY_LIST.map((category) => {
+                {availableCategories.map((category) => {
                     const isSelected = selectedCategories.has(category);
                     const isDimmed = selectedCategories.size > 0 && !isSelected;
                     const color = CATEGORY_COLORS[category];
@@ -62,27 +65,20 @@ const Legend: React.FC<LegendProps> = ({ selectedCategories, onToggleCategory, i
                 )}
             </div>
         </div>
+        <div className="legend-close-control">
+          <Tooltip text="Hide filters" placement="bottom">
+            <button type="button" className="canvas-control-button" aria-label="Close filters" disabled={!onToggleOpen}
+              onClick={() => {
+                onToggleOpen?.();
+                document.getElementById('canvas-filter-toggle')?.focus({ preventScroll: true });
+              }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                <path d="m6 6 12 12M6 18 18 6" />
+              </svg>
+            </button>
+          </Tooltip>
+        </div>
       </div>
-
-      {/* Toggle Handle - Statically positioned in flex column to move with content */}
-      <button
-        onClick={onToggleOpen}
-        className="h-6 px-6 bg-surface rounded-b-lg flex items-center justify-center text-content-muted hover:text-accent-text hover:bg-surface transition-colors cursor-pointer pointer-events-auto shadow-sm border-none outline-none focus:outline-none focus:ring-0 ring-0"
-        title="Toggle Filters"
-      >
-          {isOpen ? (
-             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-               <path fillRule="evenodd" d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z" clipRule="evenodd" />
-             </svg>
-          ) : (
-             <div className="flex items-center gap-2">
-                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                   <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L12 11.414V15a1 1 0 01-.293.707l-2 2A1 1 0 018 17v-5.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd" />
-                 </svg>
-                 <span className="text-[10px] font-bold uppercase tracking-wider">Filters</span>
-             </div>
-          )}
-      </button>
     </div>
   );
 };

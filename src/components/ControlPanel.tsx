@@ -1,13 +1,15 @@
-
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTheme } from '../contexts/ThemeContext';
+import Tooltip from './Tooltip';
 
 interface ControlPanelProps {
-  startYear: number;
-  endYear: number;
-  onBuild: (start: number, end: number) => void;
+  canvasPrompt: string;
+  searchQuery: string;
+  onOpenLauncher: () => void;
   isBuilding: boolean;
   hasFigures: boolean;
+  hasCategoryFilters: boolean;
+  selectedCategoryCount: number;
   onSearch: (query: string) => void;
   searchResultCount: number;
   currentResultIndex: number;
@@ -19,215 +21,146 @@ interface ControlPanelProps {
 }
 
 const ControlPanel: React.FC<ControlPanelProps> = ({
-  startYear,
-  endYear,
-  onBuild,
-  isBuilding,
-  hasFigures,
-  onSearch,
-  searchResultCount,
-  currentResultIndex,
-  onNextResult,
-  onPrevResult,
-  onOpenSettings,
-  onToggleLegend,
-  isLegendOpen
+  canvasPrompt, searchQuery, onOpenLauncher, isBuilding, hasFigures, hasCategoryFilters, selectedCategoryCount,
+  onSearch, searchResultCount, currentResultIndex, onNextResult, onPrevResult,
+  onOpenSettings, onToggleLegend, isLegendOpen
 }) => {
-  const [localStart, setLocalStart] = useState<string>(startYear.toString());
-  const [localEnd, setLocalEnd] = useState<string>(endYear.toString());
-  const [searchQuery, setSearchQuery] = useState("");
   const { theme, toggleTheme } = useTheme();
   const themeLabel = theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme';
+  const filterLabel = `${isLegendOpen ? 'Hide filters' : 'Show filters'}${selectedCategoryCount > 0
+    ? ` (${selectedCategoryCount} ${selectedCategoryCount === 1 ? 'category' : 'categories'} selected)` : ''}`;
+  const [isSearchOpen, setIsSearchOpen] = useState(() => !!searchQuery);
+  const header = useRef<HTMLElement>(null);
+  const searchInput = useRef<HTMLInputElement>(null);
+  const searchToggle = useRef<HTMLButtonElement>(null);
 
-  // Sync local state with props when they change (e.g. from cache load)
-  React.useEffect(() => {
-    setLocalStart(startYear.toString());
-    setLocalEnd(endYear.toString());
-  }, [startYear, endYear]);
+  useLayoutEffect(() => {
+    if (isSearchOpen) searchInput.current?.focus({ preventScroll: true });
+  }, [isSearchOpen]);
 
-  const handleBuild = () => {
-    const s = parseInt(localStart);
-    const e = parseInt(localEnd);
+  const closeSearch = useCallback(() => {
+    setIsSearchOpen(false);
+    onSearch('');
+    searchToggle.current?.focus({ preventScroll: true });
+  }, [onSearch]);
 
-    if (isNaN(s) || isNaN(e)) {
-      alert("Please enter valid years.");
-      return;
-    }
+  const toggleSearch = useCallback(() => {
+    if (isSearchOpen) closeSearch();
+    else setIsSearchOpen(true);
+  }, [isSearchOpen, closeSearch]);
 
-    if (s >= e) {
-      alert("Start year must be before end year.");
-      return;
-    }
-    onBuild(s, e);
-  };
-
-  const handleSearchKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      if (searchResultCount > 0) {
-        onNextResult();
-      } else {
-        onSearch(searchQuery);
-      }
-    }
-  };
-
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value;
-    setSearchQuery(val);
-    onSearch(val);
-  };
-
-  const handleClearSearch = () => {
-    setSearchQuery("");
-    onSearch("");
-  };
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      const slash = event.key === '/' || (event.code === 'Slash' && !event.shiftKey);
+      if (event.defaultPrevented || !slash || !(event.ctrlKey || event.metaKey) || event.altKey
+        || !hasFigures || isBuilding || header.current?.closest('[inert]')) return;
+      event.preventDefault();
+      if (!event.repeat) toggleSearch();
+    };
+    window.addEventListener('keydown', handleShortcut);
+    return () => window.removeEventListener('keydown', handleShortcut);
+  }, [hasFigures, isBuilding, toggleSearch]);
 
   return (
-    <div className="fixed top-0 left-0 w-full z-50 flex items-center gap-4 bg-surface/60 backdrop-blur-xl px-6 py-2 border-b border-border/50 shadow-sm transition-all h-[52px]">
-      <div className="flex items-center gap-2">
-        <input
-          type="number"
-          placeholder="Start"
-          value={localStart}
-          onChange={(e) => setLocalStart(e.target.value)}
-          className="w-[3.25rem] h-8 px-1 text-sm border border-border-strong rounded-md focus:ring-2 focus:ring-accent-focus outline-none bg-surface/80 placeholder-content-faint text-center transition-all"
-        />
-        <span className="text-content-muted font-medium">–</span>
-        <input
-          type="number"
-          placeholder="End"
-          value={localEnd}
-          onChange={(e) => setLocalEnd(e.target.value)}
-          className="w-[3.25rem] h-8 px-1 text-sm border border-border-strong rounded-md focus:ring-2 focus:ring-accent-focus outline-none bg-surface/80 placeholder-content-faint text-center transition-all"
-        />
+    <header ref={header} data-canvas-controls className="canvas-header">
+      <div className="canvas-header-actions" role="group" aria-label="Canvas actions">
+        <Tooltip text="Weave New Canvas" placement="bottom">
+          <button type="button" onClick={onOpenLauncher} disabled={isBuilding}
+            className="canvas-control-button" aria-label="Weave New Canvas">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="m4 20 1-5L15 5l4 4L9 19l-5 1ZM14 6l4 4M5 3v4M3 5h4M19 2v3M17.5 3.5h3M21 17v4M19 19h4" />
+            </svg>
+          </button>
+        </Tooltip>
+        <Tooltip text={filterLabel} placement="bottom">
+          <button id="canvas-filter-toggle" type="button" onClick={onToggleLegend}
+            disabled={!hasCategoryFilters || isBuilding} className="canvas-control-button canvas-filter-toggle"
+            aria-label={filterLabel}
+            aria-pressed={isLegendOpen} aria-expanded={isLegendOpen} aria-controls="canvas-category-filters">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 4h18l-7 8v7l-4 2v-9L3 4Z" />
+            </svg>
+            {selectedCategoryCount > 0 && <span className="canvas-filter-badge" aria-hidden="true">{selectedCategoryCount}</span>}
+          </button>
+        </Tooltip>
+        <Tooltip text={`${isSearchOpen ? 'Hide search' : 'Search names and events'} (Ctrl/Cmd + /)`} placement="bottom">
+          <button ref={searchToggle} type="button" onClick={toggleSearch}
+            disabled={!hasFigures || isBuilding} className="canvas-control-button" aria-label={isSearchOpen ? 'Hide search' : 'Search names and events'}
+            aria-pressed={isSearchOpen} aria-expanded={isSearchOpen} aria-controls="canvas-search" aria-keyshortcuts="Control+/ Meta+/">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+              <circle cx="10.5" cy="10.5" r="6.5" /><path strokeLinecap="round" d="m16 16 5 5" />
+            </svg>
+          </button>
+        </Tooltip>
       </div>
 
-      <div className="h-6 w-px bg-separator-muted/30"></div>
-
-      <div className="flex flex-col space-y-0">
-        <button
-          onClick={handleBuild}
-          disabled={isBuilding}
-          className="h-8 px-4 bg-accent-solid hover:bg-accent-solid-hover text-on-accent text-xs font-bold uppercase tracking-wider rounded-lg shadow-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center min-w-[120px]"
-        >
-          {isBuilding ? (
-            <>
-              <svg className="animate-spin -ml-1 mr-2 h-3 w-3 text-on-accent" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+      <div className="canvas-header-center">
+        {isSearchOpen ? (
+          <div id="canvas-search" className="canvas-header-search" onKeyDown={event => {
+            if (event.defaultPrevented || searchResultCount <= 1 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+            if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+              event.preventDefault();
+              event.key === 'ArrowDown' ? onNextResult() : onPrevResult();
+            }
+          }}>
+            <div className="canvas-header-search-input">
+              <svg className="canvas-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                <circle cx="10.5" cy="10.5" r="6.5" /><path strokeLinecap="round" d="m16 16 5 5" />
               </svg>
-              Building...
-            </>
-          ) : (
-            'WEAVE HISTORY'
-          )}
-        </button>
-      </div>
-
-      <div className="h-6 w-px bg-separator-muted/30"></div>
-
-      <div className={`relative flex items-center group flex-1 max-w-[250px] transition-opacity duration-300 ${!hasFigures ? 'opacity-50 grayscale' : 'opacity-100'}`}>
-        <div className="absolute left-3 text-content-faint pointer-events-none z-10">
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
-        </div>
-
-        <div className="relative w-full">
-          <input
-            type="text"
-            placeholder="Search names and events..."
-            value={searchQuery}
-            onChange={handleInputChange}
-            onKeyDown={handleSearchKeyDown}
-            disabled={!hasFigures}
-            className="w-full h-8 pl-9 pr-10 text-sm border border-border-strong rounded-md focus:ring-2 focus:ring-accent-focus outline-none bg-surface/80 placeholder-content-faint transition-all disabled:bg-surface-muted disabled:cursor-not-allowed"
-          />
-
-          {searchResultCount > 1 ? (
-            <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 bg-surface-muted/80 rounded px-1 py-0.5 border border-border">
-              <span className="text-xs text-content-muted font-medium px-1 border-r border-border-strong mr-1 min-w-[40px] text-center">
-                {currentResultIndex + 1} of {searchResultCount}
-              </span>
-              <button
-                onClick={onPrevResult}
-                className="p-1 hover:bg-surface hover:text-accent-text rounded text-content-muted transition-colors"
-                title="Previous Result"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                </svg>
-              </button>
-              <button
-                onClick={onNextResult}
-                className="p-1 hover:bg-surface hover:text-accent-text rounded text-content-muted transition-colors"
-                title="Next Result"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                </svg>
-              </button>
-
-              <div className="w-px h-3 bg-separator mx-1"></div>
-
-              <button
-                onClick={handleClearSearch}
-                className="p-1 text-content-faint hover:text-danger-marker rounded-full hover:bg-danger-soft transition-colors"
-                title="Clear Search"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
+              <input ref={searchInput} type="text" aria-label="Search names and events" placeholder="Search names and events..."
+                value={searchQuery} onChange={event => onSearch(event.target.value)} disabled={!hasFigures}
+                onKeyDown={event => {
+                  if (event.key === 'Escape') { event.preventDefault(); closeSearch(); }
+                  if (event.key === 'Enter') {
+                    if (searchResultCount > 0) event.shiftKey ? onPrevResult() : onNextResult();
+                    else onSearch(searchQuery);
+                  }
+                }} />
+              <div className="canvas-search-field-actions">
+                {searchResultCount > 1 && <div className="canvas-search-results">
+                  <span aria-live="polite">{currentResultIndex + 1} of {searchResultCount}</span>
+                  <Tooltip text="Previous result (↑)" placement="bottom">
+                    <button type="button" className="canvas-control-button" aria-label="Previous result" onClick={onPrevResult}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg>
+                    </button>
+                  </Tooltip>
+                  <Tooltip text="Next result (↓)" placement="bottom">
+                    <button type="button" className="canvas-control-button" aria-label="Next result" onClick={onNextResult}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
+                    </button>
+                  </Tooltip>
+                </div>}
+                {searchQuery && <Tooltip text="Clear search" placement="bottom">
+                  <button type="button" className="canvas-control-button canvas-search-clear" aria-label="Clear search"
+                    onClick={() => { onSearch(''); searchInput.current?.focus({ preventScroll: true }); }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6" /></svg>
+                  </button>
+                </Tooltip>}
+              </div>
             </div>
-          ) : (
-            searchQuery && (
-              <button
-                onClick={handleClearSearch}
-                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-content-faint hover:text-content-secondary rounded-full hover:bg-surface-muted"
-                aria-label="Clear search"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            )
-          )}
-        </div>
+          </div>
+        ) : <p className="canvas-header-prompt">{canvasPrompt || 'ChronoWeave'}</p>}
       </div>
 
-      {/* Theme and settings controls stay visible while the timeline is busy. */}
-      <div className="ml-auto flex items-center">
-        <button
-          type="button"
-          onClick={toggleTheme}
-          className="p-2 text-content-muted hover:text-content-heading hover:bg-interaction/5 rounded-lg transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-marker focus-visible:outline-offset-2"
-          aria-label={themeLabel}
-          title={themeLabel}
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
-            {theme === 'light' ? (
-              <path strokeLinecap="round" strokeLinejoin="round" d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
-            ) : (
-              <>
-                <circle cx="12" cy="12" r="4" />
-                <path strokeLinecap="round" d="M12 2v2m0 16v2M2 12h2m16 0h2M4.93 4.93l1.42 1.42m11.3 11.3l1.42 1.42M4.93 19.07l1.42-1.42m11.3-11.3l1.42-1.42" />
-              </>
-            )}
-          </svg>
-        </button>
-        <button
-          onClick={onOpenSettings}
-          className="p-2 text-content-muted hover:text-content-heading hover:bg-interaction/5 rounded-lg transition-colors"
-          title="Settings"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-          </svg>
-        </button>
+      <div className="canvas-header-settings" role="group" aria-label="Appearance and settings">
+        <Tooltip text={themeLabel} placement="bottom">
+          <button type="button" onClick={toggleTheme} className="canvas-control-button" aria-label={themeLabel}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+              {theme === 'light' ? <path strokeLinecap="round" strokeLinejoin="round" d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z" />
+                : <><circle cx="12" cy="12" r="4" /><path strokeLinecap="round" d="M12 2v2m0 16v2M2 12h2m16 0h2M4.93 4.93l1.42 1.42m11.3 11.3l1.42 1.42M4.93 19.07l1.42-1.42m11.3-11.3l1.42-1.42" /></>}
+            </svg>
+          </button>
+        </Tooltip>
+        <Tooltip text="Settings" placement="bottom">
+          <button type="button" onClick={onOpenSettings} disabled={isBuilding} className="canvas-control-button" aria-label="Settings">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 0 0-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 0 0-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 0 0-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 0 0-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 0 0 1.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065Z" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+          </button>
+        </Tooltip>
       </div>
-    </div>
+    </header>
   );
 };
 
