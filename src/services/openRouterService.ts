@@ -1,6 +1,7 @@
 import { generateRelationshipAssessment } from './relationshipAssessment';
 
-import { DeepDiveData, FigureCategory, HistoricalFigure, IAIService, RelationshipExplanation, WeaveGenerationContext, WeaveRequest, WeaveValidationResult } from "../types";
+import { ConnectionPathOptions, ConnectionPathProposal, DeepDiveData, FigureCategory, HistoricalFigure, IAIService, NewPerson, RelationshipExplanation, WeaveGenerationContext, WeaveRequest, WeaveValidationResult } from "../types";
+import { requestConnectionPath, requestResolveFigure } from './pathService';
 import {
   buildDiscoveryPrompt,
   buildRelatedFiguresPrompt,
@@ -128,6 +129,14 @@ export class OpenRouterService implements IAIService {
 
     fetchHistoricalFigures(start: number, end: number, signal?: AbortSignal, context?: WeaveGenerationContext): Promise<HistoricalFigure[]> {
         return generateWeaveTimeline(this.generate.bind(this), start, end, signal, context);
+    }
+
+    fetchConnectionPath(from: HistoricalFigure, to: HistoricalFigure, options: ConnectionPathOptions, signal?: AbortSignal): Promise<ConnectionPathProposal | null> {
+        return requestConnectionPath(this.generate.bind(this), from, to, options, signal);
+    }
+
+    resolveFigure(name: string, signal?: AbortSignal): Promise<NewPerson | null> {
+        return requestResolveFigure(this.generate.bind(this), name, signal);
     }
 
     async fetchRelatedFigures(target: HistoricalFigure, allFigures: HistoricalFigure[]): Promise<string[]> {

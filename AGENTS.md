@@ -57,6 +57,8 @@ Documentation and plans live under `ai-docs/plans/`.
      - `discoverRelatedFigures()`: Expand timeline with new related figures
      - `fetchRelationshipExplanation()`: Explain connection between two figures
      - `fetchFigureDeepDive()`: Generate detailed biography/quotes
+     - `fetchConnectionPath()`: Propose a chain of personal contacts between two people (Six Degrees); the app verifies every link
+     - `resolveFigure()`: Identify one typed name as a person, or `null`
      - `testConnection()`: Validate API credentials and model availability
 
 3. **Data Fetching** (`src/services/wikiService.ts`)
@@ -128,6 +130,7 @@ All components are in `src/components/`:
 - **Toast**: Notification system
 - **ActionBar**: Hover toolbar with Discover/Trace/Inspect buttons
 - **FloatingToolbar**: Secondary interaction toolbar
+- **ConnectionPicker / ConnectionProgress / ConnectionPanel / ConnectionThread**: Six Degrees — choosing the other end, the live search card, the sidebar Connection tab, and the SVG thread (state and flow live in `src/hooks/useConnection.ts`, the search in `src/services/connectionPath.ts`)
 
 ## Configuration Constants
 

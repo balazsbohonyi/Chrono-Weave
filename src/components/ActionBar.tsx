@@ -7,6 +7,7 @@ interface ActionBarProps {
     onDiscover: (figure: HistoricalFigure) => void;
     onTrace: (figure: HistoricalFigure) => void;
     onInspect: (figure: HistoricalFigure) => void;
+    onConnect?: (figure: HistoricalFigure) => void;
     onDismiss: () => void;
     isDiscovering: boolean;
     isFollowingFigure?: boolean;
@@ -20,6 +21,7 @@ const ActionBar: React.FC<ActionBarProps> = ({
     onDiscover,
     onTrace,
     onInspect,
+    onConnect,
     onDismiss,
     isDiscovering,
     isFollowingFigure = false,
@@ -38,6 +40,7 @@ const ActionBar: React.FC<ActionBarProps> = ({
         onDiscover,
         onTrace,
         onInspect,
+        onConnect,
         isDiscovering,
         isFollowingFigure,
         focusFigureId,

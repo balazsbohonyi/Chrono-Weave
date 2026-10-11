@@ -5,13 +5,14 @@ import { CLUSTER_STORAGE_KEY, emptyClusters, restoreClusters, serializeClusters 
 import { filterTimelineFigures } from './timelineFigures';
 import { normalizeWeaveContext } from './weave';
 import { countVerifiedConnections } from '../services/relationshipAssessment';
+import { PATH_CACHE_PREFIX } from './connectionPaths';
 
 export const CANVAS_HISTORY_KEY = 'chrono_canvas_history';
 export const CANVAS_HISTORY_LIMIT = 20;
 export const LEGACY_DATA_KEY = 'chrono_timeline_data';
 export const LEGACY_CONFIG_KEY = 'chrono_timeline_config';
 
-const isCanvasCacheKey = (key: string) => ['chrono_map_', 'chrono_assessment_', 'chrono_rel_', 'chrono_deepdive_']
+const isCanvasCacheKey = (key: string) => ['chrono_map_', 'chrono_assessment_', 'chrono_rel_', 'chrono_deepdive_', PATH_CACHE_PREFIX]
   .some(prefix => key.startsWith(prefix));
 const isObject = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const createCanvasId = () => globalThis.crypto?.randomUUID?.() ?? `canvas-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;

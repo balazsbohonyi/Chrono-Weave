@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { assessRelationships, countVerifiedConnections, generateRelationshipAssessment, parseRelationshipAssessment, readRelationshipAssessment, RelationshipAssessmentError } from '../src/services/relationshipAssessment';
+import { assessRelationships, countVerifiedConnections, generateRelationshipAssessment, parseRelationshipAssessment, readPairAssessment, readRelationshipAssessment, RelationshipAssessmentError } from '../src/services/relationshipAssessment';
 import { figure, MemoryStorage, relationship, sections } from './helpers';
 import { RELATIONSHIP_NARRATIVE_VERSION } from '../src/constants';
 
@@ -189,4 +189,18 @@ test('unavailable storage does not bypass relationship assessment', async () => 
   const service = { fetchRelationshipExplanation: async () => relationship };
   const result = await assessRelationships(service, figure, [{ ...figure, id: 'other' }], storage);
   assert.deepEqual([...result.keys()], ['other']);
+});
+
+test('a pair is one relationship whichever direction was assessed, and a rejection in either direction wins', async () => {
+  const babbage = { ...figure, id: 'babbage', name: 'Charles Babbage' };
+  const storage = new MemoryStorage();
+  assert.equal(readPairAssessment(figure, babbage, storage), null);
+  await assessRelationships({ fetchRelationshipExplanation: async () => relationship }, figure, [babbage], storage);
+  assert.equal(readPairAssessment(figure, babbage, storage)?.isRelevant, true);
+  assert.equal(readPairAssessment(babbage, figure, storage)?.isRelevant, true);
+  // The directional reader still only answers for the direction that was assessed.
+  assert.equal(readRelationshipAssessment(babbage, figure, storage), null);
+  await assessRelationships({ fetchRelationshipExplanation: async () => ({ ...relationship, isRelevant: false, evidence: '' }) }, babbage, [figure], storage);
+  assert.equal(readPairAssessment(figure, babbage, storage)?.isRelevant, false);
+  assert.equal(readPairAssessment(babbage, figure, storage)?.isRelevant, false);
 });

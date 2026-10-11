@@ -1,5 +1,6 @@
 import type { FigureCategory, HistoricalFigure } from '../types';
 import type { LayoutBounds } from './canvasLayout';
+import type { CameraBounds } from './canvasCamera';
 import { relationshipRows } from './relationshipRows';
 
 export const GALLERY_CARD_WIDTH = 320;
@@ -60,3 +61,6 @@ export function calculateGalleryLayout(figures: HistoricalFigure[]): GalleryLayo
       height: rows.length * pitchY - GALLERY_TIER_GAP },
   };
 }
+
+// World-space box around a card, used to point the camera at it.
+export const galleryCardBounds = ({ x, y }: Pick<GalleryPlacement, 'x' | 'y'>): CameraBounds => ({ left: x, top: y, width: GALLERY_CARD_WIDTH, height: GALLERY_CARD_HEIGHT });

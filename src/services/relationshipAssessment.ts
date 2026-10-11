@@ -65,6 +65,14 @@ export function readRelationshipAssessment(source: HistoricalFigure, target: His
   } catch { return null; }
 }
 
+// Assessments are cached per direction. A pair is one relationship, so either direction answers,
+// and a cached rejection in either direction wins over a cached confirmation.
+export function readPairAssessment(first: HistoricalFigure, second: HistoricalFigure, storage: Storage): RelationshipExplanation | null {
+  const found = [readRelationshipAssessment(first, second, storage), readRelationshipAssessment(second, first, storage)]
+    .filter((assessment): assessment is RelationshipExplanation => assessment !== null);
+  return found.find(assessment => !assessment.isRelevant) ?? found[0] ?? null;
+}
+
 export function countVerifiedConnections(figures: HistoricalFigure[], storage: Storage): number {
   const byId = new Map(figures.map(figure => [figure.id, figure]));
   const verified = new Set<string>();

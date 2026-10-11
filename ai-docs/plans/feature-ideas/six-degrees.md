@@ -161,3 +161,17 @@ Both tasks follow the shared-foundation pattern:
    - **Camera:** `flyCamera` easing, cancellation, and reduced motion.
 
 Run `bun test`, `npm run typecheck`, and `npm run build`, and update the README's Key Features section.
+
+## Implementation notes (v1)
+
+Decisions made while building, where the plan left room:
+
+- **Modules.** `src/services/pathService.ts` holds the provider-neutral AI task layer (prompt wiring, reference mapping, the pure proposal validator, `requestConnectionPath`, `requestResolveFigure`). `src/services/connectionPath.ts` holds the orchestrator (`findConnection`), the feasibility check, the catalog builder, and `resolveConnectionTarget` for typed names. `src/utils/connectionPaths.ts` is the `chrono_path_` cache, `src/utils/weaveConnection.ts` is the pure weave-in (clusters per run, range, filters), and `src/hooks/useConnection.ts` is the App-side state and flow.
+- **References, not canvas ids.** The model sees `A`, `B`, and short catalog ids `c1…cN`; they are mapped back to real ids before validation. Models copy them reliably, and prompts are shorter.
+- **Direct link only between contemporaries.** The "Checking for a direct link" step is skipped, with no AI call and no progress row, when the two lifespans never overlapped. Such a pair cannot have met.
+- **Repairs exclude the rest of the chain.** `fetchConnectionPath` options carry an optional `exclude` list (everyone else already in the chain), so a bridge cannot reuse them. A bridge needs at least one new person, since the direct link just failed.
+- **Verification is both-direction.** Assessments are cached per direction, so `readPairAssessment` treats a pair as one relationship, and a cached rejection in either direction wins. "Why?" uses it too.
+- **Verification limit.** The existing relationship verification still accepts specific influence through a work. Only lifespan overlap (checked in the validator and again before every link) keeps such links from being chains of strangers, so Six Degrees can occasionally accept a documented contact-by-correspondence-of-ideas link that was not a personal meeting. Tightening this means a contact-specific verification prompt, which the plan leaves out of v1.
+- **Woven-in people stay.** `discardRejectedFollowFigureCandidates` keeps anyone on a saved path, and a themed canvas widens `activeCategories` for the categories it gains, so reloading the canvas does not drop them.
+- **Camera contract.** A canvas receives `connection: { nodeIds, playId, animate }`. `animate` turns false once the reveal has ended, so a canvas that remounts (for example on a layout toggle) shows the finished thread instead of replaying it.
+- **Not built.** The launcher Surprise Me card (stretch goal) and any undo for woven-in people.

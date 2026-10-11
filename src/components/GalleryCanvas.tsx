@@ -1,10 +1,13 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { HistoricalFigure } from '../types';
 import type { CanvasProps } from './CanvasProps';
-import { calculateGalleryLayout, GALLERY_CARD_HEIGHT, GALLERY_CARD_WIDTH } from '../utils/galleryLayout';
+import { calculateGalleryLayout, galleryCardBounds, GALLERY_CARD_HEIGHT, GALLERY_CARD_WIDTH } from '../utils/galleryLayout';
+import { galleryThread } from '../utils/connectionThread';
 import { useFigurePortraits } from '../hooks/useFigurePortraits';
+import { useConnectionReveal } from '../hooks/useConnectionReveal';
 import FigureCard from './FigureCard';
 import ActionBar from './ActionBar';
+import ConnectionThread from './ConnectionThread';
 import CanvasToolbar from './CanvasToolbar';
 import { centerCameraOnBounds, pinchCamera, zoomCameraAt, type CanvasCamera, type Point } from '../utils/canvasCamera';
 import { listenForCanvasWheel } from '../utils/canvasWheel';
@@ -16,7 +19,8 @@ const GalleryCanvas: React.FC<CanvasProps> = ({ figures, modalActive, highlighte
   isSearchFocusActive = false, newlyDiscoveredIds, onDiscover, onTrace, onInspect, onRelationship,
   isFollowingFigure = false,
   isDiscovering = false, onCanvasInteraction, isBusy = false, selectedCategories,
-  isLegendCollapsed, seedFigureId, isSidebarOpen = false, relationshipSourceId, initialCamera, onCameraChange, onToggleLayout }) => {
+  isLegendCollapsed, seedFigureId, isSidebarOpen = false, relationshipSourceId, initialCamera, onCameraChange, onToggleLayout,
+  onConnect, pickingSource = null, isPickable, onPick, connection, connectionCurrentId, connectionFocus, onConnectionStep, onConnectionRevealEnd }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [camera, setCamera] = useState<CanvasCamera>(initialCamera ?? { x: 0, y: 0, scale: 1 });
   useLayoutEffect(() => { onCameraChange?.(camera); }, [camera, onCameraChange]);
@@ -32,6 +36,27 @@ const GalleryCanvas: React.FC<CanvasProps> = ({ figures, modalActive, highlighte
   const headerHeight = isLegendCollapsed ? 52 : 114;
   const usableWidth = Math.max(1, viewport.width - (isSidebarOpen ? SIDEBAR_WIDTH : 0));
   const searchActive = isSearchFocusActive && highlightedFigureIds.length > 0;
+
+  // Six Degrees: the shared reveal frames the chain, flies card to card, and draws the thread.
+  const cameraRef = useRef(camera);
+  cameraRef.current = camera;
+  const reveal = useConnectionReveal({
+    connection, focus: connectionFocus, onStep: onConnectionStep, onEnd: onConnectionRevealEnd,
+    getBounds: id => {
+      const item = layout.placements.find(placement => placement.figure.id === id);
+      return item ? galleryCardBounds(item) : null;
+    },
+    getCamera: () => cameraRef.current,
+    setCamera,
+    getArea: () => viewport.width ? { left: 0, top: headerHeight, width: usableWidth, height: Math.max(1, viewport.height - headerHeight) } : null,
+  });
+  const revealWasActive = useRef(false);
+  const connectionIds = useMemo(() => new Set(connection?.nodeIds ?? []), [connection]);
+  const threadSegments = useMemo(() => {
+    const byId = new Map(layout.placements.map(placement => [placement.figure.id, placement]));
+    const chain = (connection?.nodeIds ?? []).map(id => byId.get(id));
+    return chain.length > 1 && chain.every(Boolean) ? galleryThread(chain as typeof layout.placements) : [];
+  }, [connection, layout]);
 
   useLayoutEffect(() => {
     const container = containerRef.current;
@@ -110,6 +135,7 @@ const GalleryCanvas: React.FC<CanvasProps> = ({ figures, modalActive, highlighte
     const wheel = (event: WheelEvent) => {
       if (modalActive) return;
       event.preventDefault();
+      reveal.interrupt();
       onCanvasInteraction?.();
       setActions(null);
       const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? container.clientHeight : 1;
@@ -141,7 +167,11 @@ const GalleryCanvas: React.FC<CanvasProps> = ({ figures, modalActive, highlighte
       container.removeEventListener('mousedown', suppressMiddleClick);
       container.removeEventListener('auxclick', suppressMiddleClick);
     };
-  }, [modalActive, onCanvasInteraction]);
+  }, [modalActive, onCanvasInteraction, reveal.interrupt]);
+
+  useEffect(() => {
+    if (pickingSource) setActions(null);
+  }, [pickingSource]);
 
   useEffect(() => {
     if (!actions) return;
@@ -163,6 +193,11 @@ const GalleryCanvas: React.FC<CanvasProps> = ({ figures, modalActive, highlighte
   }, [actions, modalActive]);
 
   const activateFigure = (figure: HistoricalFigure, point: Point) => {
+    // Choosing the other end of a Six Degrees chain: a card picks, and never opens actions.
+    if (pickingSource) {
+      if (!modalActive && figure.id !== pickingSource.id && isPickable?.(figure)) onPick?.(figure);
+      return;
+    }
     if (isBusy || isDiscovering || modalActive) return;
     if (!onDiscover || !onTrace || !onInspect) return;
     const bounds = containerRef.current!.getBoundingClientRect();
@@ -175,6 +210,8 @@ const GalleryCanvas: React.FC<CanvasProps> = ({ figures, modalActive, highlighte
   const pointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (modalActive || (event.button !== 0 && event.button !== 1)) return;
     if (event.button !== 1) event.preventDefault();
+    // Touching the canvas takes the camera back from a running reveal; a plain click also skips to its end.
+    revealWasActive.current = reveal.interrupt();
     const point = { x: event.clientX, y: event.clientY };
     if (!pointers.current.size) hadMultiplePointers.current = false;
     pointers.current.set(event.pointerId, point);
@@ -218,7 +255,11 @@ const GalleryCanvas: React.FC<CanvasProps> = ({ figures, modalActive, highlighte
     const current = drag.current;
     pointers.current.delete(event.pointerId);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-    if (!cancelled && !hadMultiplePointers.current && current?.pointerId === event.pointerId && !current.moved && event.button === 0) {
+    if (!cancelled && !hadMultiplePointers.current && current?.pointerId === event.pointerId && !current.moved && event.button === 0
+        && revealWasActive.current) {
+      revealWasActive.current = false;
+      reveal.settle();
+    } else if (!cancelled && !hadMultiplePointers.current && current?.pointerId === event.pointerId && !current.moved && event.button === 0) {
       const target = document.elementFromPoint(event.clientX, event.clientY);
       const id = target?.closest('[data-figure-id]')?.getAttribute('data-figure-id');
       const figure = figures.find(figure => figure.id === id);
@@ -249,13 +290,23 @@ const GalleryCanvas: React.FC<CanvasProps> = ({ figures, modalActive, highlighte
       <div data-gallery-board className="absolute top-0 left-0 will-change-transform"
         style={{ width: layout.bounds.width, height: layout.bounds.height, transformOrigin: 'top left',
           transform: `translate(${camera.x}px, ${camera.y}px) scale(${camera.scale})` }}>
+        {threadSegments.length > 0 && (
+          <svg className="absolute top-0 left-0 overflow-visible pointer-events-none" style={{ zIndex: 0 }}
+            width={layout.bounds.width} height={layout.bounds.height} aria-hidden="true">
+            <ConnectionThread segments={threadSegments} progress={reveal.progress} strokeWidth={5 / camera.scale} />
+          </svg>
+        )}
         {layout.placements.map(({ figure, x, y }) => {
           const isFocused = searchActive && focusedFigureId === figure.id;
-          const isDimmed = searchActive ? !isFocused : selectedCategories.size > 0 && !selectedCategories.has(figure.category);
+          const isPickingSource = pickingSource?.id === figure.id;
+          const isDimmed = pickingSource ? !isPickingSource && !isPickable?.(figure)
+            : searchActive ? !isFocused : selectedCategories.size > 0 && !selectedCategories.has(figure.category);
+          const isChained = !pickingSource && connectionIds.has(figure.id);
           return <FigureCard key={figure.id} figure={figure} imageUrl={figure.imageUrl || portraits.get(figure.id)}
-            isSource={figure.id === seedFigureId} data-figure-id={figure.id}
-            aria-label={`Actions for ${figure.name}`}
-            className={`gallery-card ${isFocused ? 'gallery-focused' : ''} ${newlyDiscoveredIds?.has(figure.id) ? 'gallery-new' : ''}`}
+            isSource={figure.id === seedFigureId || isPickingSource} data-figure-id={figure.id}
+            aria-label={pickingSource ? `Connect ${pickingSource.name} to ${figure.name}` : `Actions for ${figure.name}`}
+            aria-disabled={pickingSource ? isDimmed || isPickingSource : undefined}
+            className={`gallery-card ${isFocused ? 'gallery-focused' : ''} ${newlyDiscoveredIds?.has(figure.id) ? 'gallery-new' : ''} ${isChained ? 'gallery-connected' : ''} ${isChained && connectionCurrentId === figure.id ? 'gallery-current' : ''}`}
             style={{ left: x, top: y, width: GALLERY_CARD_WIDTH, height: GALLERY_CARD_HEIGHT,
               opacity: isDimmed ? 0.15 : 1, filter: isDimmed ? 'grayscale(1)' : undefined }}
             onFocus={() => {
@@ -276,9 +327,9 @@ const GalleryCanvas: React.FC<CanvasProps> = ({ figures, modalActive, highlighte
             }} />;
         })}
       </div>
-      {actionFigure && actions && onDiscover && onTrace && onInspect && !isDiscovering && !isBusy && (
+      {actionFigure && actions && onDiscover && onTrace && onInspect && !isDiscovering && !isBusy && !pickingSource && (
         <ActionBar figure={actionImage ? { ...actionFigure, imageUrl: actionImage } : actionFigure}
-          onDiscover={onDiscover} onTrace={onTrace} onInspect={onInspect} isDiscovering={isDiscovering}
+          onDiscover={onDiscover} onTrace={onTrace} onInspect={onInspect} onConnect={onConnect} isDiscovering={isDiscovering}
           onDismiss={() => setActions(null)}
           isFollowingFigure={isFollowingFigure} focusFigureId={seedFigureId} onRelationship={onRelationship}
           style={{ top: actions.top, left: actions.left }} />

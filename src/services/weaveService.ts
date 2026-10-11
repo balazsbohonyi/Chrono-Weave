@@ -12,7 +12,7 @@ import {
 } from '../utils/weave';
 import { buildEventsPrompt, buildPeoplePrompt, buildWeaveSuggestionPrompt, buildWeaveValidationPrompt } from './prompts';
 
-export type JsonTask = 'people' | 'events' | 'preflight' | 'suggestion';
+export type JsonTask = 'people' | 'events' | 'preflight' | 'suggestion' | 'path' | 'resolve';
 export type JsonGenerator = <T>(prompt: string, validate: (value: unknown) => T, signal?: AbortSignal, task?: JsonTask) => Promise<T>;
 
 export async function validateWeaveQuery(generate: JsonGenerator, request: WeaveRequest, signal?: AbortSignal): Promise<WeaveValidationResult> {

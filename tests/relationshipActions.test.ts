@@ -11,6 +11,7 @@ const mockService = (overrides: Partial<IAIService> = {}): IAIService => ({
   suggestWeaveTopic: async () => { throw new Error('Unexpected topic suggestion'); },
   fetchHistoricalFigures: async () => [], fetchRelatedFigures: async () => [], discoverRelatedFigures: async () => [],
   fetchRelationshipExplanation: async () => relationship, fetchFigureDeepDive: async () => null,
+  fetchConnectionPath: async () => null, resolveFigure: async () => null,
   testConnection: async () => ({ success: true }), ...overrides,
 });
 const options = (service: IAIService, figures: HistoricalFigure[] = [figure]) => ({ service, source: figure, figures, action: 'map' as const,
