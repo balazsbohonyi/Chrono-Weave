@@ -6,13 +6,13 @@ Seven features that add story, motion, play, parallel exploration, and historica
 | --- | --- | --- | --- |
 | [Time-Lapse playback](time-lapse.md) | Sweep the selected year across the canvas; bars light up and fade as lives begin and end | Optional ticker only | S–M |
 | [Guided Story Tour](story-tour.md) | AI-written narrated tour; the camera flies between figures with captions | 1 new method | M–L |
-| [Six Degrees](six-degrees.md) | Connect two distant figures through a verified chain of relationships | 1 new method + existing verification | L |
+| [Six Degrees](six-degrees.md) | Connect two people (up to ~400 years apart) through a verified chain of personal contacts | 2 new methods + existing verification | L |
 | [Dinner Party / Persona Chat](persona-chat.md) | Chat with a figure, or seat several at a table to debate | 1 new method | M |
 | [Who Am I? quiz](who-am-i-quiz.md) | Clue-by-clue riddles answered by clicking the right bar | 1 new method | M |
 | [Meanwhile: parallel histories](meanwhile.md) | Compare two saved canvases on a shared time axis, with optional AI comparisons | 1 optional explanation method; companion generation later | M–L |
 | [Explore their work](explore-their-work.md) | Inspect sourced artworks, documents, inventions, and other historical objects | 1 optional explanation method + source retrieval | M–L + editorial work |
 
-Suggested order: Time-Lapse, then Story Tour (reuses the playback transport and the camera animation), then Six Degrees. Persona Chat and the quiz are independent.
+Suggested order: Time-Lapse, then Story Tour (reuses the playback transport and the camera animation), then Six Degrees. Persona Chat and the quiz are independent. If Six Degrees is built first, it builds the animated camera foundation itself (its step 0).
 
 The two exploration plans are independent of that sequence and of the playback/animated-camera foundations. Between them, build **Meanwhile** first to reuse canvas history, then **Explore their work** for richer visual and sourced learning. Their first versions do not add or replace timeline figures: Meanwhile reads two snapshots, and museum objects use a separate model. Each plan specifies its own cache ownership and modal lifecycle.
 
@@ -28,7 +28,7 @@ Several plans depend on the same building blocks. Build each once, in the first 
    - a new `JsonTask` value with a Gemini response schema; OpenRouter and Ollama use plain JSON;
    - implement in `geminiService.ts`, `openRouterService.ts`, and `ollamaService.ts`, and add the methods to any test doubles.
 4. **Canvas-scoped caches.** New cache prefixes (`chrono_tour_`, `chrono_path_`, `chrono_quiz_`, `chrono_persona_`, `chrono_compare_`, `chrono_objects_`, `chrono_object_explanation_`) must be added to `isCanvasCacheKey` in `src/utils/canvasHistory.ts` so they are saved with, restored with, and evicted with their canvas. Comparison results belong to the primary canvas and fingerprint both inputs; museum caches store bounded metadata and text, not image bytes.
-5. **Grounding rule.** The AI can only reference figures by ID from a supplied catalog of the current canvas (`{id, name, birthYear, deathYear, category, occupation}`). Parsers drop unknown IDs. Meanwhile supplies two catalogs and uses canvas-qualified references; Explore their work additionally supplies reviewed object/source records and validates their source references. In the first versions, only Six Degrees may add timeline figures, and only after relationship verification. Meanwhile's later companion generation creates a separate saved canvas through the existing build pipeline.
+5. **Grounding rule.** The AI can only reference figures by ID from a supplied catalog of the current canvas (`{id, name, birthYear, deathYear, category, occupation}`). Parsers drop unknown IDs, except where the referenced figures form an ordered chain: Six Degrees rejects a whole path proposal containing an unknown ID (triggering the corrective retry), because dropping a node would silently break the chain. Meanwhile supplies two catalogs and uses canvas-qualified references; Explore their work additionally supplies reviewed object/source records and validates their source references. In the first versions, only Six Degrees may add timeline figures, and only after relationship verification. Meanwhile's later companion generation creates a separate saved canvas through the existing build pipeline.
 6. **Busy/modal rules.** Each mode is mutually exclusive with the others and with launching, history switching, discovery, and mapping. Switching canvases (`CanvasHistory`) or opening the launcher stops the active mode and aborts its requests, matching how `buildController`/`traceController` work today.
 
 Run `bun test`, `npm run typecheck`, and `npm run build` after each plan, and update the README's Key Features section.
