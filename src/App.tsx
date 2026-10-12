@@ -25,7 +25,9 @@ import { createAIService } from './services/aiService';
 import { assessRelationships, readPairAssessment } from './services/relationshipAssessment';
 import { useConnection } from './hooks/useConnection';
 import ConnectionPicker from './components/ConnectionPicker';
-import ConnectionProgress from './components/ConnectionProgress';
+import ConnectionExplorer from './components/ConnectionExplorer';
+import { migrateLegacyConnectionMembers } from './utils/connectionPaths';
+import { figurePerson, identifyPerson, type ContactAssessment } from './services/connectionGraph';
 import type { WovenCanvas } from './utils/weaveConnection';
 import { isConfigValid, providerNames } from './utils/providerConfig';
 import { filterTimelineFigures } from './utils/timelineFigures';
@@ -198,6 +200,7 @@ const App: React.FC = () => {
 
     const connection = useConnection({
         figures, config, clusters: clusterState, selectedCategories, storage: canvasStorage.current, service: aiService,
+        canvasId: activeCanvas?.id ?? 'empty', provenance: { provider: getEffectiveConfig().provider, model: getEffectiveConfig().model },
         getPlacements: () => currentPlacements.current,
         begin: beginRelationshipAction,
         applyWoven: (woven: WovenCanvas) => {
@@ -264,6 +267,7 @@ const App: React.FC = () => {
         launcherInvoker.current = null;
         overlayInvoker.current = null;
         const storage = new CanvasCache(canvas.cache, () => scheduleSaveRef.current());
+        migrateLegacyConnectionMembers(storage);
         const data = discardRejectedFollowFigureCandidates(canvas.figures, canvas.config.weaveContext, storage, canvas.config.seedFigureId);
         const layout = prepareCanvasLayout(data, canvas.config.layoutMode, canvas.config.layoutVersion, canvas.config.layoutSelection);
         canvasStorage.current = storage;
@@ -634,6 +638,26 @@ const App: React.FC = () => {
         }
     };
 
+    // Six Degrees Why bypasses every general/contact legacy cache and never prunes a figure.
+    const openConnectionExplanation = async (source: HistoricalFigure, target: HistoricalFigure, contact?: ContactAssessment) => {
+        if (!contact || contact.verdict !== 'accepted') return;
+        overlayInvoker.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        const version = operationVersion.current, request = ++popoverVersion.current;
+        const signal = operationController.current.signal;
+        const isCurrent = () => !signal.aborted && operationVersion.current === version && popoverVersion.current === request;
+        const fallback: RelationshipExplanation = { isRelevant: true, evidence: contact.evidence, summary: contact.evidence,
+            sections: [{ title: 'AI-supported contact', content: contact.episode ? `${contact.evidence} Episode: ${contact.episode}.` : contact.evidence }] };
+        setPopoverState({ isOpen: true, source, target, mode: 'relationship', loading: true, data: { explanation: fallback, sourceDetail: undefined, targetDetail: undefined } });
+        let explanation = fallback;
+        try {
+            const people = [];
+            const first = identifyPerson(people, figurePerson(source)), second = identifyPerson(people, figurePerson(target));
+            explanation = await aiService.explainPersonalContact(first, second, contact, signal);
+        } catch { /* Accepted compact evidence is sufficient when narrative expansion fails. */ }
+        if (isCurrent()) setPopoverState({ isOpen: true, source, target, mode: 'relationship', loading: false,
+            data: { explanation, sourceDetail: undefined, targetDetail: undefined } });
+    };
+
     const handleRelationshipCardClick = (targetFigure: HistoricalFigure) => {
         if (relationshipState) return openFigureRelationship(relationshipState.sourceFigure, targetFigure);
     };
@@ -839,7 +863,7 @@ const App: React.FC = () => {
 
     return (
         <div className="relative w-screen h-screen overflow-hidden font-sans text-content-primary bg-canvas" data-canvas-wheel-scope>
-            <div className="absolute inset-0" inert={isLauncherOpen || !!relationshipState || popoverState.isOpen || isSettingsOpen}>
+            <div className="absolute inset-0" inert={isLauncherOpen || !!relationshipState || popoverState.isOpen || isSettingsOpen || connection.explorerOpen}>
             <ControlPanel
                 key={`controls-${activeCanvas?.id ?? 'empty'}`}
                 canvasPrompt={figures.length ? formatCanvasPrompt(config) : ''}
@@ -896,7 +920,7 @@ const App: React.FC = () => {
                     onConnectionStep={connection.setCurrentIndex}
                     onConnectionRevealEnd={connection.endReveal}
                     onConnectionExit={connection.close}
-                    modalActive={isLauncherOpen || !!relationshipState || popoverState.isOpen || isSettingsOpen}
+                    modalActive={isLauncherOpen || !!relationshipState || popoverState.isOpen || isSettingsOpen || connection.explorerOpen}
                     relationshipSourceId={relationshipState?.sourceFigure.id}
                     highlightedFigureIds={highlightedFigureIds}
                     focusedFigureId={focusedFigureId}
@@ -933,8 +957,8 @@ const App: React.FC = () => {
                 />
             )}
 
-            {connection.isConnecting && connection.progress && (
-                <ConnectionProgress progress={connection.progress} onCancel={connection.cancelSearch} />
+            {connection.isConnecting && connection.progress && !connection.explorerOpen && (
+                <ProgressOverlay title={connection.progress.label} />
             )}
 
             <Sidebar
@@ -950,8 +974,9 @@ const App: React.FC = () => {
                 connection={{
                     isVisible: connection.isTabVisible, tabRequest: connection.tabRequest,
                     connection: connection.active, currentIndex: connection.currentIndex, recent: connection.recent,
-                    canvasIds, isBusy, onClose: connection.close, onRetry: connection.retry, onReplay: connection.replay,
-                    onFocusPerson: connection.focusPerson, onExplain: (from, to) => openFigureRelationship(from, to, { contactOnly: true }),
+                    canvasIds, isBusy, onClose: connection.close, onReplay: connection.replay,
+                    onFocusPerson: connection.focusPerson, onExplain: openConnectionExplanation,
+                    checkpoints: connection.checkpoints, onOpenCheckpoint: connection.openCheckpoint,
                 }}
                 activeTracingFigureId={relationshipState?.sourceFigure.id}
                 focusFigureId={focusFigure?.id}
@@ -966,7 +991,9 @@ const App: React.FC = () => {
 
             </div>
 
-            {!isLauncherOpen && !isSettingsOpen && <CanvasHistory canvases={history} onSelect={commitCanvas} />}
+            {connection.explorerOpen && <ConnectionExplorer session={connection.exploration} phase={connection.progress?.label} busy={connection.isConnecting}
+                onStop={connection.stop} onContinue={() => connection.continueSearch()} onFresh={() => connection.continueSearch(true)} onClose={connection.cancelSearch} />}
+            {!connection.explorerOpen && !isLauncherOpen && !isSettingsOpen && <CanvasHistory canvases={history} onSelect={commitCanvas} />}
 
             {isLauncherOpen && <WeaveLauncherOverlay
                 historyControl={<CanvasHistory canvases={history} onSelect={commitCanvas} orientation="horizontal" />}

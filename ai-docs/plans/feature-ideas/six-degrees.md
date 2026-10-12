@@ -1,183 +1,134 @@
 # Six Degrees: connect two people through personal contacts
 
-Pick two people and ChronoWeave finds a chain of real, documented **personal contacts** between them, a "handshake chain" such as Leonardo da Vinci → Verrocchio → … → Isaac Newton. People the chain needs that are missing from the canvas are woven in, the camera flies along the chain while a glowing thread draws, and the sidebar lists the chain with the verified evidence for every link. Every link is checked by a contact-only variant of the existing relationship verification; unverified links never appear as connections.
+Implemented refactor, 2026-10-12. The [settled refactor specification](../six-degrees-refactor.md) records the user decisions; [validation/evaluation records](../../evaluation/six-degrees/progress.md) record actual outcomes and remaining evidence.
 
-"Six Degrees" is the name of the idea, not a promise of exactly six: the result reports the real path length.
+Pick two people and ChronoWeave searches for a chain of **personal contacts** between them. People the accepted chain needs that are missing from the canvas are woven in, the camera flies along the chain while an amber thread draws, and the sidebar lists the chain with evidence for every link. Each link needs an independent AI assessment; unaccepted links never appear as successful connections. Production assessments use model knowledge and do not retrieve historical sources.
+
+“Six Degrees” is the name of the idea, not a promise of exactly six: the result reports the real path length.
 
 ## Scope and principles
 
 - **People only.** A, B, and every intermediate are people. Events are never endpoints or nodes.
-- **Contact only.** Each link needs overlapping lifespans and a documented personal interaction: met, taught, corresponded, worked with, family, served under, fought. Influence through a work ("Einstein read Newton") does not count. This is what makes it degrees of *separation* rather than intellectual lineage.
-- **Honest limits.** A contact link moves about one adult lifetime through history, so distant pairs are refused upfront instead of failing after many requests.
-- **No request counts** are shown anywhere.
-
-## Limits (code-only constants in `src/constants.ts`)
-
-| Constant | Default | Meaning |
-| --- | --- | --- |
-| `MAX_PATH_INTERMEDIATES` | `10` | Most people between A and B (at most 11 links). |
-| `YEARS_PER_DEGREE` | `40` | Conservative years bridged per intermediate, used by the feasibility check. |
-| `MAX_PATH_REPAIRS` | `3` | Total repair calls per search. |
-| `MAX_RECENT_CONNECTIONS` | `20` | Saved paths listed per canvas. |
-| `PATH_CATALOG_LIMIT` | `150` | Most canvas people sent as catalog. |
-
-With these defaults, pairs up to about 400 years apart are reachable (Leonardo → Newton about 120 years, Dante → Galileo about 240 years). Cleopatra → Einstein is refused.
+- **Contact only.** Every adjacent pair needs overlapping defensible lifespans and a supported personal interaction: meeting, teaching, correspondence, collaboration, family interaction, or direct service. Family ties alone and influence through a work (“Einstein read Newton”) do not count. The refactor also permits direct opposition between those exact people in a named battle/campaign; common institutions/eras and broad opposing-war membership do not qualify.
+- **Any historical gap is eligible.** There is no upfront distance refusal. Searches are bounded to 20 intermediates and a finite budget; an unsuccessful exploration does not prove historical impossibility.
+- **Honest uncertainty.** A model's inability to establish contact remains unresolved, not a permanent negative fact. Proposed names and discovery claims are not established contacts.
+- **No request counts** or invented completion percentages are shown.
 
 ## Behavior
 
 ### Entry and picking B
 
-- A **"Connect to…"** action in the figure actions (`useFigureActions.tsx`), shown for people only, sets that figure as **A** and enters **picking mode**.
-- A banner at the top reads: *"Connecting from Leonardo da Vinci: pick a person on the canvas or type a name. Esc to cancel."*
-- **Click a bar** to pick B. Events, A itself, and people beyond the feasibility limit are dimmed and cannot be picked.
-- **Type a name** in the banner field. Canvas people are suggested first. A name that is not on the canvas is resolved with `resolveFigure(name)`. If it resolves to `null`, an event, or A, the picker shows an inline error ("Couldn't identify that person"). A resolved B goes through the same feasibility check and is woven in with the intermediates.
-- Esc, or starting any other action, leaves picking mode.
-- **Feasibility check (no AI call).** The gap is `max(0, later.birthYear − earlier.deathYear)`, where living people use the current year as their death year. If `gap > MAX_PATH_INTERMEDIATES × YEARS_PER_DEGREE`, B is refused with an honest message: *"Cleopatra and Einstein lived about 1,900 years apart. A chain of personal contacts would need about 48 people, more than the limit of 10."*
-- Connect is allowed on Follow a Figure canvases too (unlike Expand Timeline): the user asked for this connection explicitly, and woven-in people are marked as newly discovered.
-- A "Six Degrees" suggestion card in the launcher's Surprise Me area is a stretch goal, not part of v1.
+- A **“Connect to…”** action in the figure actions (`useFigureActions.tsx`), shown for people only, sets that figure as **A** and enters **picking mode**. It is available through the existing canvas and sidebar figure actions.
+- A banner at the top reads: *“Connecting from Leonardo da Vinci: pick a person on the canvas or type a name. Esc to cancel.”*
+- **Pick a person already on the canvas.** Click their timeline bar or gallery card to choose **B**. Events, A itself, and invalid/conflicting identities cannot be picked; an attempted invalid selection shows its reason in the picker. A distant person remains eligible regardless of the gap between their lifespan and A's.
+- **Type the name of a canvas person.** The banner suggests canvas people first. Select a suggestion, or use the arrow keys and Enter. A unique exact normalized name already on the canvas is matched synchronously and treated like a picked person, including validation and saved-path replay; identifying that person needs no AI call.
+- **Type the name of someone off-canvas.** Submit the banner field with Enter or **Connect**. `resolveFigure(name)` identifies the typed person. Unknown, ambiguous, event, self, or otherwise invalid results return an inline error and retain the typed text. The resolved canonical identity is matched against compatible canvas people before treating B as new; dates are never silently changed to force a match.
+- A valid off-canvas B is searched just like an on-canvas endpoint. It is added together with any missing intermediates **only when a complete accepted chain succeeds**. Stopping or failing to establish a chain leaves canvas membership unchanged.
+- Esc, **Cancel**, or starting another figure action leaves picking mode.
+- Connect is allowed on **Follow a Figure** canvases too: the user requested this connection explicitly. Woven-in people are marked as newly discovered and remain permanent members, even if they are not generally related to the Follow focus.
+- The launcher Surprise Me “Six Degrees” suggestion card remains an unbuilt stretch goal.
 
 ### Search
 
-1. **Saved path.** If this canvas already has a saved path for the pair (in either direction), replay the reveal immediately with no AI calls. A reversed request shows the chain reversed.
-2. **Direct link.** Check A → B with the cached assessment, or one `assessRelationships(A, [B])` call. If the link is positive, the result is "1 degree apart". If it is negative, add the pair to `avoidPairs`.
-3. **Propose.** `fetchConnectionPath(A, B, …)` returns a full path or `null`. A pure validator rejects the proposal, with one corrective retry through `generateValidatedJson`, when any of these hold:
-   - the endpoints are not A and B;
-   - a node is an event;
-   - there are more than `MAX_PATH_INTERMEDIATES` intermediates;
-   - consecutive lifespans do not overlap;
-   - a person appears twice;
-   - an `id` is not in the catalog;
-   - a new node fails the `parseWeaveFigures` people rules.
+1. Resolve exact identities, replay a valid versioned canvas path, or offer an existing checkpoint explicitly.
+2. Look for an accepted route in shared knowledge, bounded to 21 links/20 intermediates.
+3. Assess contemporaneous endpoints directly; an unresolved verdict does not veto indirect routes.
+4. Use one whole-chain proposal as unverified seed candidates, then explore from both endpoints and their accepted contacts. Null or unusable seeds fall through to discovery.
+5. Discover diverse batches with temporal progress as a soft preference; retain chronological detours. Exclude repeated pairs, not known people or the opposite frontier. Additional discovery rounds can return new contacts.
+6. Assess pairs independently in compact batches and give promising uncertainty one focused reassessment per context/segment. Only accepted edges compose a route. After each accepted batch, return the shortest route in the graph discovered so far; do not claim a globally shortest historical chain.
 
-   New nodes whose canonical name matches a canvas person are mapped to that person. `null` means "no path found", not an error.
-4. **Verify every link** one at a time with `assessRelationships` in contact-only mode. Cached `chrono_contact_` entries cost nothing. Verification does not stop at the first failure.
-5. **Repair locally.** For each failed link X → Y, call `fetchConnectionPath(X, Y, …)` with all known-bad pairs in `avoidPairs` and `maxIntermediates` set to the remaining budget. Verified links are kept. Verify the new bridge and repair again if needed, up to `MAX_PATH_REPAIRS` repair calls in total.
-6. **Result.**
-   - **Success:** weave in, save, reveal.
-   - **Failure:** the canvas is unchanged and nothing is saved. The sidebar shows the verified pieces with marked gaps ("Couldn't find a verified link between Vasari and Rubens") and **Try again**. Try again starts a fresh search that keeps the known-bad pairs and reuses cached assessments.
+Operational defaults: 180 seconds including queueing/retries, 32 model tasks, 160 new people, 320 attempted pairs, up to four discovery sources/six contacts per source and eight assessments per batch. Defaults are tunable; selected contact rules and explicit continuation are fixed. Identity normalization handles accents/punctuation/spacing; partial names and conflicting dates never silently merge people. Promising aliases require compatible canonical resolutions within the same budget.
 
-### Progress
+### Exploration and interruption
 
-- A dedicated **`ConnectionProgress`** card has the same glass style and position as `ProgressOverlay`, plus a **Cancel** button.
-- It shows the current phase: "Identifying Henry VIII…", "Checking for a direct link…", "Proposing a path…", "Repairing Vasari → Rubens…".
-- Below the phase is a live list titled *"Checking proposed links…"*. Each link appears with a spinner and turns into a green ✓ or a red ✗. Long lists scroll inside the card.
-- Proposed names are never presented as facts.
+A large separate overlay shows proposed/checking, AI-supported, unresolved and structurally blocked contacts. Pan, zoom, fit, select nodes/edges, or use the readable list. Inspection reads stored evidence and does not trigger extra AI work. The underlying timeline's people, layout and camera are untouched during exploration.
+
+Stop leaves a paused network. Closing/Escape, another relationship action, canvas/launcher changes or provider/model changes stop work and checkpoint it. Reload restores paused-search availability without automatically calling the model. Resume/Continue is explicit; Continue supplies a fresh budget with queues, rounds, identities and accepted exploration retained. Reverse endpoints orient the same unordered checkpoint correctly. Transport errors preserve useful exploration and allow corrected Settings or later resume. Empty explored frontiers mean this exploration did not establish a chain, not historical impossibility.
 
 ### Busy and abort rules
 
-- The search runs through `beginRelationshipAction()`: starting it aborts any running map or expand action, and the reverse also holds.
-- A new `isConnecting` flag joins `isBusy`. Pan and zoom stay free during the search.
-- Cancel, Esc, a canvas switch, or opening the launcher aborts the search. The canvas is unchanged and nothing is saved, but completed assessments stay cached.
+- Search participates in the existing relationship-action operation guards: starting it aborts running Map/Expand work, and a replacement action stops the search.
+- `isConnecting` joins `isBusy`. During exploration, pan and zoom operate on the separate network overlay; the underlying canvas layout and camera stay unchanged.
+- Stop, Esc, overlay close, canvas/launcher changes, and provider/model changes abort active work. Completed contacts and useful search state can be checkpointed, but no incomplete path is saved as a successful connection and no exploratory person is woven in.
+- Late responses cannot change a stale canvas, restart a stopped search, or settle an incomplete chain.
 
 ### Weaving in (success only)
 
-- New people are added to `figures` and to `newlyDiscoveredIds`, the same way Expand Timeline adds them. They are permanent canvas members; closing the connection does not remove them. There is no special undo in v1.
-- **Timeline layout:** each consecutive run of new people becomes one `addDiscoveryCluster` anchored on the existing chain node just before the run.
-- **Gallery layout:** new people are appended without clusters, matching discovery.
-- The canvas range (`config.start` / `config.end`) is extended with small padding when new people fall outside it. Category filters for their categories are enabled.
-- A toast confirms the result: *"Wove in 3 people to connect Leonardo and Newton: …"*.
+Guarded settlement validates the current request, exact identities, chronology, accepted contacts and chain bound immediately before mutation. It maps shared identities to current canvas IDs, weaves missing people with full lifespans/occupations/categories/descriptions, and saves a new path. The existing amber thread, camera flight, gallery/timeline drawing, skip and reduced-motion behavior remain. The 21-link reveal stays within the existing eight-second cap.
+
+- New people are added to `figures` and `newlyDiscoveredIds`, as with Expand Timeline. They are permanent canvas members: closing the connection does not remove them, and there is no special undo for weaving.
+- **Timeline layout:** each consecutive run of new people becomes an `addDiscoveryCluster` anchored on the existing chain node just before the run.
+- **Gallery layout:** new people are appended without discovery clusters.
+- The canvas range (`config.start` / `config.end`) extends with small padding when new people fall outside it. Active category filters widen to show the added categories; a themed canvas also widens `activeCategories` for categories it gains.
+- A toast confirms the result, for example: *“Wove in 3 people to connect Leonardo and Newton: …”* If no new people were needed, it reports the degree count.
+- Woven IDs remain protected independently of the Recent connections cap, so a person once rejected against a Follow a Figure focus survives reload and path eviction.
 
 ### Reveal
 
 - **Camera:** frame the whole chain first, then fly node to node with the shared animated camera while each thread segment draws, and finally settle on the whole chain.
-  - The total time is capped at about 8 seconds, so each segment gets less time on long chains.
-  - Clicking or pressing Esc skips to the finished state.
-  - With `prefers-reduced-motion`, the camera jumps and the thread appears without animation.
-- **Thread:**
-  - **Timeline:** a new SVG layer beside the connector layer (`TimelineCanvas.tsx`, "Connector Lines"), drawn with an animated `stroke-dashoffset`.
-  - **Gallery:** its own SVG layer between card placements.
-- **Sidebar: CONNECTION tab.** The existing sidebar gets a third tab next to FIGURES / EVENTS. The tab appears while a connection is active or the canvas has saved paths, and opens the sidebar if it is collapsed.
-  - **Header:** *"Leonardo da Vinci and Isaac Newton are 4 degrees apart."*
-  - **Chain:** cards from A to B, using the existing sidebar card style with portrait, description, and `SidebarCardActions`.
-  - **Between cards:** a slim connector with a vertical thread line, the verified `RelationshipExplanation.evidence`, and a **Why?** button that opens the existing relationship explanation dialog.
-  - **Camera sync:** the card for the current node is highlighted during the flight, and clicking a card flies the camera to that person.
-  - **✕** hides the active thread but keeps the tab while saved paths exist.
-  - **Recent connections:** listed below the chain, newest first, at most `MAX_RECENT_CONNECTIONS`. Clicking an entry replays its reveal.
+  - The total time is capped at about eight seconds, with shorter segments on long chains, including the new 21-link maximum.
+  - Clicking or pressing Esc during the reveal skips to the finished state.
+  - User pan, zoom, or wheel interrupts the camera flight. With `prefers-reduced-motion`, the camera jumps and the thread appears without animation.
+- **Thread:** both timeline bars and gallery cards have their own SVG connection layer. The amber dashed thread draws above the people through a mask, so its dashes stay still while a link is revealed. Both layouts retain their shared Manhattan routing with rounded corners.
+- **Focus view:** people off the chain are ghosted at 7% opacity and greyscale. Chain members fade in as the thread reaches them, receive numbered badges and amber outlines, and are all visible once the reveal finishes. Category filters do not dim active chain members during reveal or replay; existing people's saved filter selections are unchanged.
+- **Leaving the view:** Esc after the reveal, the Connection tab's close button, or clicking a ghosted person hides the active connection. The ghosted-person click then acts as a normal canvas click. Woven members and saved connections remain.
+
+### Sidebar: CONNECTION tab
+
+- The existing sidebar has a **Connection** tab next to **Figures / Events**. It appears while a connection is active, the canvas has valid saved paths, or paused explorations are available. Showing a successful connection opens the sidebar if collapsed.
+- **Header:** for example, *“Leonardo da Vinci and Isaac Newton are 4 degrees apart.”*
+- **Chain:** cards from A to B use the existing sidebar card style, portraits/descriptions and figure actions.
+- **Between cards:** a slim vertical thread connector shows compact accepted-contact evidence and a **Why?** button opening the existing explanation dialog.
+- **Why:** its dedicated Six Degrees task expands the accepted contact record. It bypasses general negative/narrative caches, writes no general negatives and never prunes figures. If expansion cannot reliably support the record, the dialog shows stored compact evidence.
+- **Camera sync:** the current person's card is highlighted during the flight and scrolled into view. Clicking a chain card flies the camera to that person. Reduced motion disables smooth scrolling.
+- **Close:** hides the active thread while saved connections and paused explorations remain accessible.
+- **Recent connections:** newest first, at most `MAX_RECENT_CONNECTIONS` per canvas. Clicking an entry replays its reveal without model calls. A request in the reverse direction displays the saved chain reversed.
+- **Paused explorations:** opening an entry reads stored state without running a model. Resume/Continue or a fresh search requires an explicit choice.
 
 ### Persistence
 
-- Only successful paths are saved, under `chrono_path_<idA>_<idB>` with sorted ids. Each entry stores the node ids in A → B order, the verified evidence for each link, and a timestamp.
-- `chrono_path_` is added to `isCanvasCacheKey`, so paths are saved, restored, and evicted with their canvas. So are `chrono_contact_` (contact-only verdicts) and `chrono_woven_` (the people woven in, see the implementation notes).
-- When more than `MAX_RECENT_CONNECTIONS` paths exist, the oldest are dropped. Paths referencing ids no longer on the canvas are hidden silently.
+- Only complete accepted chains enter **Recent connections**. New `chrono_sd2_path_` records use unordered endpoint keys and retain ordered node IDs, identities, compact contact proofs and a timestamp.
+- Successful paths remain canvas-bound: they save, restore and evict with that canvas's history. The recent cap and hiding paths whose members no longer exist on the canvas are retained.
+- Permanent membership remains in `chrono_woven_ids`, independently of saved-path eviction.
+- Shared contact knowledge and resumable sessions now live separately in versioned IndexedDB; their retention cannot make a retained self-contained successful path unreplayable.
+- Legacy paths/contact verdicts are not imported as shared knowledge or displayed as new Recent connections. Membership-safe migration is described below.
 
 ## AI tasks
 
-Both tasks follow the shared-foundation pattern:
+All supported providers retain their existing credential, settings, queueing and retry behavior. Prompt builders remain in `prompts.ts`, with provider-neutral parsing and validation.
 
-- prompt builders in `prompts.ts`;
-- a provider-neutral parser and orchestration in a new service;
-- `JsonTask` gains `'path' | 'resolve'`, with Gemini response schemas; OpenRouter and Ollama use plain JSON;
-- implementations in `geminiService.ts`, `openRouterService.ts`, and `ollamaService.ts`, plus all test doubles.
+- **`fetchConnectionPath(from, to, options, signal)`** accepts `{ catalog, maxIntermediates }` and returns `{ nodes, links } | null`. Canvas catalog entries use short references mapped back to real IDs. New people carry names, full lifespans, occupations, categories and descriptions. It supplies unverified seed candidates; the refactor no longer uses it for local repairs or treats its claims as proof. Canvas people are available without being preferred over better off-canvas bridges.
+- **`resolveFigure(name, signal)`** returns one canonical person or `null` for unknown, ambiguous or non-person names. The result passes the existing people validation, then compatible canvas matching and endpoint checks. The resolver's general prompt is unchanged.
+- **`discoverPersonalContacts` / `assessPersonalContacts` / `explainPersonalContact`** are the dedicated Six Degrees discovery, independent compact assessment and accepted-contact narrative operations. Gemini has corresponding JSON schemas; OpenRouter and Ollama use the same provider-neutral contracts.
+- Map Relationships, Expand Timeline, Follow a Figure, biographies and general relationship explanations continue using their original prompts, semantics and caches. Six Degrees does not use their verdicts as contact vetoes.
 
-### `fetchConnectionPath(from, to, options, signal)`
+## Modules and storage
 
-- **Options:** `{ catalog, avoidPairs, maxIntermediates }`.
-- **Returns:** `{ nodes: Array<{ id: string } | NewPerson>, links: Array<{ claim: string }> } | null`. `NewPerson` has `name, birthYear, deathYear, occupation, category, description`.
-- **Used for both purposes:** the first proposal (A → B) and each repair (X → Y with a smaller budget).
-- **Catalog:** canvas people only, as `{id, name, birthYear, deathYear}`. It includes those whose lives fall between the endpoints with about 50 years of padding, capped at `PATH_CATALOG_LIMIT`, preferring those closest to the timeline between the endpoints.
-- **Prompt:**
-  - `RELATIONSHIP_RULES` without the work-engagement exception;
-  - every consecutive pair needs overlapping lifespans and documented personal contact;
-  - prefer the shortest path through well-documented people;
-  - never use the pairs in `avoidPairs`;
-  - return `null` when no confident path is known.
-- `claim` is used for the model's reasoning and the progress labels only. The UI shows evidence from verification, never `claim`.
+- `connectionGraph.ts`: shared person identity, structural validation, bounded shortest paths, frontier ranking and serializable sessions.
+- `pathService.ts`: existing seed/typed-resolution task wiring, short-reference mapping and proposal/person validation.
+- `connectionAI.ts`: dedicated discover/assess/explain contracts, short references, parsing and provenance; adapters for Gemini, OpenRouter and Ollama preserve existing transport/settings mechanisms.
+- `connectionPath.ts`: graph-first bidirectional engine and segment limits; no production local-repair loop or legacy/general negative veto.
+- `connectionKnowledge.ts`: `chronoweave-six-degrees-v2` IndexedDB, injectable memory fallback, bounded retention, safe recovery and checkpoints. Knowledge is shared across canvases/models and carries provider/model/version/timestamp provenance; no credentials are stored.
+- `connectionFlow.ts` / `useConnection.ts`: start/replay/explicit-resume decisions, lifecycle and guarded canvas settlement.
+- `ConnectionExplorer.tsx`: scoped responsive SVG network; `ConnectionPanel` and existing thread/reveal components show success.
+- `connectionPaths.ts` / `canvasHistory.ts`: `chrono_sd2_path_` records carry their own identity/contact evidence so shared-knowledge eviction cannot invalidate a retained route. Permanent woven IDs remain in their existing namespace.
+- `weaveConnection.ts`: unchanged pure canvas weaving, discovery-cluster runs, range/category extension and permanent additions.
+- `useConnectionReveal.ts` / `canvasCamera.ts` / `connectionThread.ts` / `ConnectionThread.tsx`: existing shared reveal, animated camera and masked thread geometry for both layouts.
 
-### `resolveFigure(name, signal)`
+Legacy paths/contact verdicts are not imported or displayed as new Recent connections. Per-canvas `chrono_sd2_members_` migration preserves the legacy path/woven membership union before Follow a Figure pruning. Logical retirement leaves old metadata in place, so failed writes keep protection. Current and historical canvases migrate lazily on activation. Other prompts, caches, settings/history and UI behavior retain their original semantics.
 
-- **Returns:** one person (`NewPerson` shape) or `null`.
-- Returns `null` for unknown, ambiguous, or non-person names.
-- The result goes through the same people parsing rules, and its canonical name is matched against the canvas first.
+## Retained implementation details
 
-## Implementation
+- **Direct link only between contemporaries.** The compact direct check is skipped without a model call when A and B's lifespans never overlapped. This blocks only their direct edge, not an indirect search.
+- **References, not canvas IDs.** Seed proposals still use `A`, `B` and short catalog references; new discovery and assessment tasks also use short references, which validators map back to exact identities.
+- **Typed-name errors stay in the picker.** Resolution failures retain the draft and show an inline message. Events and self-selections receive their own refusal; distant pairs no longer do. Unknown off-canvas proposals never acquire biographies or actions merely because they were drawn during exploration.
+- **Amber outlines and badges.** The successful-chain focus view retains crisp outlines rather than glow: timeline people have 2px outlines (3px for the current person), gallery cards 3px (4px current), and numbered badges. `--color-connection` supplies deeper amber in light theme and lighter amber in dark; `--color-connection-contrast` colours badge numbers. Event connectors are ghosted with their labels. Gallery cards remain exempt from the reduced-motion opacity rule that would cancel ghosting/category dimming.
+- **Manhattan routes.** Both layouts share `manhattanThread` in `src/utils/connectionThread.ts`. A link leaves and enters the sides horizontally, with a rounded vertical run between. Overlapping bars/cards route past both on the same side, with 28px clearance and a preference for route continuity. Where arrival and departure share an edge, `separateSharedSide` offsets the lines 6px around its centre and staggers their turns to avoid crossing next to the person. The thread may cross ghosted people.
+- **Camera and toolbar.** Resetting zoom interrupts a reveal. Toggling layout first interrupts it, so the other canvas shows the finished thread rather than replaying. The Connection tab scrolls the current card with `block: 'nearest'`. `revealLinkMs` distributes time within `CONNECTION_REVEAL_MAX_MS`.
+- **Camera contract.** Canvases receive `connection: { nodeIds, playId, animate }`. `animate` becomes false when reveal ends, so remounting or changing layout retains the finished thread.
+- **Retained constants.** `MAX_RECENT_CONNECTIONS = 20`, `PATH_CATALOG_LIMIT = 150`, and `CONNECTION_REVEAL_MAX_MS = 8000` retain their roles. `MAX_PATH_INTERMEDIATES` is now 20; the old distance/repair constants were replaced by the bounded engine's tunable `SEARCH_LIMITS`.
+- **Not built.** The launcher Surprise Me suggestion card and any special undo for woven-in people remain outside scope.
 
-0. **Shared animated camera** (README foundation 1), built here because Time-Lapse and Story Tour do not exist yet:
-   - a pure `flyCamera(from, to, durationMs, onFrame, signal)` with ease-in-out and a zoom-out-then-in arc for long distances;
-   - a pure figure-bounds-to-camera helper extracted from the auto-zoom effect, for both layouts;
-   - reduced-motion jumps, and any user pan, zoom, or wheel cancels the flight;
-   - update the README to note that it now exists.
-1. Constants, types, prompts, parsers, `JsonTask: 'path' | 'resolve'`, and the three provider implementations.
-2. `src/services/connectionPath.ts`: a pure, testable orchestrator (fake service and storage) covering the direct check, propose, validate, verify all, local repair, and result/partial result, with progress callbacks and an `AbortSignal`. It also contains the feasibility helper and the catalog builder.
-3. App:
-   - picking mode, with the banner, name field, and dimming;
-   - the `ConnectionProgress` card;
-   - `isConnecting` in `isBusy`;
-   - merging figures and clusters, sharing code with the relationship action merge;
-   - range and filter extension.
-4. Sidebar CONNECTION tab (chain, evidence connectors, Recent connections) and the thread layers in both canvases.
-5. Persistence: `chrono_path_` cache entries, the `isCanvasCacheKey` addition, the recent list, and replay.
-6. Tests (`bun test`):
-   - **Verification gate:** a rejected link never appears as connected.
-   - **Proposal validation:** wrong endpoints, events, duplicates, non-overlapping lifespans, unknown ids, and too many intermediates.
-   - **Repair:** keeps verified links, honours `avoidPairs` and the remaining budget, and stops after `MAX_PATH_REPAIRS`.
-   - **Failure:** partial result with gaps, and the canvas is unchanged.
-   - **Direct link:** a short-circuit to 1 degree.
-   - **Feasibility:** the threshold, including living people.
-   - **Catalog:** trimming and the cap.
-   - **De-duplication:** new nodes are matched against canvas names by canonical name.
-   - **Clusters and range:** anchoring per run of new people, and range extension.
-   - **Cache:** sorted-id keys, reversed replay, the recent cap, and stale entries hidden.
-   - **Abort:** cancelling leaves the canvas and the path cache untouched.
-   - **Camera:** `flyCamera` easing, cancellation, and reduced motion.
+## Verification
 
-Run `bun test`, `npm run typecheck`, and `npm run build`, and update the README's Key Features section.
-
-## Implementation notes (v1)
-
-Decisions made while building, where the plan left room:
-
-- **Modules.** `src/services/pathService.ts` holds the provider-neutral AI task layer (prompt wiring, reference mapping, the pure proposal validator, `requestConnectionPath`, `requestResolveFigure`). `src/services/connectionPath.ts` holds the orchestrator (`findConnection`), the feasibility check, the catalog builder, and `resolveConnectionTarget` for typed names. `src/services/connectionFlow.ts` holds the rules around a request, without React: `decideConnectionStart` (refuse, replay a saved path, or search), `runConnectionSearch`, `settleConnection` (what a finished search does: a stale one nothing, a failed one only shows what was found, a verified one weaves, then saves), and `retryRequest`. `src/utils/connectionPaths.ts` is the `chrono_path_` and `chrono_woven_` caches, `src/utils/weaveConnection.ts` is the pure weave-in (clusters per run, range, filters), and `src/hooks/useConnection.ts` is a thin wrapper that keeps the React state and the abort controllers.
-- **References, not canvas ids.** The model sees `A`, `B`, and short catalog ids `c1…cN`; they are mapped back to real ids before validation. Models copy them reliably, and prompts are shorter.
-- **Direct link only between contemporaries.** The "Checking for a direct link" step is skipped, with no AI call and no progress row, when the two lifespans never overlapped. Such a pair cannot have met.
-- **Repairs exclude the rest of the chain.** `fetchConnectionPath` options carry an optional `exclude` list (everyone else already in the chain), so a bridge cannot reuse them. A bridge needs at least one new person, since the direct link just failed.
-- **Verification is both-direction.** Assessments are cached per direction, so `readPairAssessment` treats a pair as one relationship, and a cached rejection in either direction wins. "Why?" uses it too.
-- **Contact-only verification.** Paths are proposed with the contact rules, so they are verified with them too. `fetchRelationshipExplanation` takes an optional trailing `{ contactOnly: true }`, which swaps `RELATIONSHIP_RULES` for the contact rules in its prompt (and drops the wording about specific documented influence), in all three providers. `assessRelationships`, `readRelationshipAssessment`, and `readPairAssessment` take the same option. Contact verdicts are cached per direction under `chrono_contact_` with the same scope and narrative-version rules, and persist with the canvas. A cached general rejection answers a contact check (contact is stricter), but a general confirmation never counts as contact. `findConnection` (the direct link and every chain link) uses contact mode, and so does the Connection tab's **Why?**, which opens the explanation of the contact verdict. Map Relationships, Expand, Follow a Figure, and `countVerifiedConnections` keep the general mode, so Darwin → Malthus on the strength of "Darwin read Malthus's Essay" no longer passes as a link.
-- **Unassessable links.** When the model cannot produce a usable verdict for a link, the link is a gap in this search (not asked again, still repairable) but not a known-bad pair: it is not put in `avoidPairs`, so the path prompt never claims it "was checked and has no qualifying link" and "Try again" looks at it again.
-- **Typed names.** A name that is already on the canvas is matched synchronously and treated exactly like a picked person (classification, saved-path replay) before any search starts, so nothing running is aborted for it. For a name that is not, the resolve validator answers `null` for an event (no corrective retry), and any failure while resolving, except cancellation, goes back to the picker as an inline error that keeps the typed text; only the search itself reports errors as toasts. Clicking a dimmed person on the canvas is forwarded too, so the refusal ("…lived about 1,900 years apart…", "Connections link people, not events.") appears in the picker banner.
-- **Woven-in people stay.** The ids of everyone a connection wove in are stored on their own, under `chrono_woven_ids` in the canvas cache, written on a successful weave and not touched when paths are evicted past `MAX_RECENT_CONNECTIONS`. `discardRejectedFollowFigureCandidates` keeps anyone on a saved path or in that list, so a typed B once rejected against the Follow a Figure focus survives a reload. A themed canvas also widens `activeCategories` for the categories it gains.
-- **Failure view.** A failed search lists the verified pieces with marked gaps. People it proposed who are not on the canvas appear only as a compact row with their name, marked "Proposed, not verified"; no description, dates, portrait, or actions are shown, and no details are fetched for them.
-- **Category filters.** While a connection is shown (not while picking), people on the chain are not dimmed by category filters on either canvas, for the reveal and for replays. The saved filter selection is unchanged for existing people.
-- **Look: ghosting, amber thread, Manhattan routes.** A shown connection is a focus view. Everyone off the chain is ghosted (7% opacity, greyscale); each chain member fades in as the thread reaches it (`isRevealedAt`, just before its link ends), and a finished or replayed reveal lights all of them. There is no glow anywhere: members get a crisp 2px outline (3px for the person the camera is on) and a numbered badge for their place in the chain, all in the `--color-connection` theme token (a deeper amber on light, a lighter one on dark; `--color-connection-contrast` colours the number). The thread is a dashed line revealed through an SVG mask, so the dashes stay still while a link draws in, and is drawn above the bars and above the gallery cards. Both layouts share `manhattanThread` in `src/utils/connectionThread.ts`: a link leaves the near side of one person and enters the near side of the next, horizontally, with a vertical run between and rounded corners. When two bars or cards overlap horizontally (as linked lifespans nearly always do, and as stacked gallery cards always do) it leaves and re-enters on the same side, 28px past both, choosing the shorter side and, when it is no longer, the side the previous link arrived on. Where a thread arrives at a person and leaves on the same side, the two lines sit 6px either side of the middle of the edge and turn at different distances (`separateSharedSide`), ordered so they do not cross next to the bar. The route may cross ghosted people, and the connector lines of short events are ghosted with their labels. Gallery cards get a 3px amber outline over their own border (4px for the current person), and their category corner follows the rounded corner. Escape after the reveal, the Connection tab's ✕, or a click on a ghosted person leaves the view (that click then acts as a normal click). Gallery cards are exempt from the reduced-motion `opacity: 1 !important` rule, which would otherwise cancel ghosting and the existing category dimming.
-- **Camera and toolbar.** The toolbar sits outside the canvas, so resetting the zoom interrupts a running reveal itself, and toggling the layout first interrupts it so that the other canvas shows the finished thread (`animate: false`) instead of replaying. During the reveal and on card focus, the Connection tab scrolls the highlighted card into view (`block: 'nearest'`, no smooth scrolling under reduced motion). The time per link is `revealLinkMs`, and the whole reveal stays within `CONNECTION_REVEAL_MAX_MS` for every chain length a search can return.
-- **Camera contract.** A canvas receives `connection: { nodeIds, playId, animate }`. `animate` turns false once the reveal has ended, so a canvas that remounts (for example on a layout toggle) shows the finished thread instead of replaying it.
-- **Not built.** The launcher Surprise Me card (stretch goal) and any undo for woven-in people.
+Run bun test, npm run typecheck and npm run build. The [comparison harness](../../evaluation/six-degrees/README.md) preserves old-engine commit 88ccd35 and records real model outcomes separately from synthetic mechanics. Review returned contacts independently under the personal-interaction/named-opposition rubric. The five priority cases are mandatory reports, not assumed historical positives. No discovery-improvement claim is justified while provider availability/quota blocks comparable runs.

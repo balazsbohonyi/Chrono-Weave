@@ -65,8 +65,6 @@ export function validateConnectionProposal(value: unknown, from: HistoricalFigur
   const known = new Map<string, { name: string; birthYear: number; deathYear: number }>([
     ...options.catalog.map(entry => [entry.id, entry] as const), ...[from, to].map(person => [person.id, person] as const),
   ]);
-  const excludedIds = new Set(options.exclude?.map(person => person.id));
-  const excludedNames = new Set(options.exclude?.map(person => canonicalName(person.name)));
   const entries: Entry[] = [];
   const parsedNodes = nodes.map((raw, index): ConnectionPathNode => {
     const node = object(raw, `Node ${index + 1} must be a JSON object.`);
@@ -88,19 +86,10 @@ export function validateConnectionProposal(value: unknown, from: HistoricalFigur
     if (seen.has(entry.key)) throw new Error(`${entry.name} appears more than once. Every person may appear only once in the chain.`);
     seen.add(entry.key);
   }
-  for (const entry of entries.slice(1, -1)) {
-    if ((entry.id && excludedIds.has(entry.id)) || excludedNames.has(entry.key)) {
-      throw new Error(`${entry.name} is already part of the chain. Choose different people.`);
-    }
-  }
-  const avoided = new Set(options.avoidPairs.map(([a, b]) => pairKey(canonicalName(a.name), canonicalName(b.name))));
   for (let index = 0; index < entries.length - 1; index++) {
     const a = entries[index], b = entries[index + 1];
     if (!overlaps(a, b)) {
       throw new Error(`${a.name} (${a.birthYear} to ${a.deathYear}) and ${b.name} (${b.birthYear} to ${b.deathYear}) did not live at the same time, so they cannot have met.`);
-    }
-    if (avoided.has(pairKey(a.key, b.key))) {
-      throw new Error(`${a.name} and ${b.name} were already checked and have no qualifying link. Do not place them next to each other.`);
     }
   }
 

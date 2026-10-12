@@ -1,8 +1,11 @@
+import { canvasPerson, figurePerson, identifyPerson, sessionKey, samePerson, validAccepted, validPerson, type ConnectionSession } from './connectionGraph';
+import type { ConnectionRepository } from '../utils/connectionKnowledge';
 import type {
-  CanvasConfig, ClusterPlacement, DiscoveryClusterState, FigureCategory, HistoricalFigure, IAIService, PathPersonRef,
+  CanvasConfig, ClusterPlacement, DiscoveryClusterState, FigureCategory, HistoricalFigure, IAIService,
 } from '../types';
 import { readConnectionPath, saveConnectionPath, saveWovenFigureIds, type ConnectionPathEntry } from '../utils/connectionPaths';
 import { getUserErrorMessage } from '../utils/userErrors';
+import { canonicalName } from '../utils/names';
 import { weaveConnectionIntoCanvas, type WovenCanvas } from '../utils/weaveConnection';
 import {
   classifyConnectionTarget, findCanvasPerson, findConnection, resolveConnectionTarget,
@@ -15,14 +18,8 @@ import {
 // can be tested with fake services and storage.
 
 export interface ConnectionView {
-  status: 'connected' | 'failed';
-  reason?: 'no-path' | 'unverified';
-  // The chain from the requested start to the requested end. A failed search lists what was proposed.
   chain: HistoricalFigure[];
   links: ConnectionLinkResult[];
-  request: { from: HistoricalFigure; to: HistoricalFigure };
-  // Pairs a failed search found unverifiable, so "Try again" starts from them.
-  avoidPairs?: Array<[PathPersonRef, PathPersonRef]>;
 }
 
 export type ConnectionTarget = { figure: HistoricalFigure } | { name: string };
@@ -44,18 +41,12 @@ export function decideConnectionStart(from: HistoricalFigure, target: Connection
   return saved ? { kind: 'replay', saved } : { kind: 'search', target: { figure } };
 }
 
-export function savedConnectionView(saved: Pick<ConnectionPathEntry, 'figures' | 'evidence'>): ConnectionView {
+export function savedConnectionView(saved: Pick<ConnectionPathEntry, 'figures' | 'evidence' | 'contacts'>): ConnectionView {
   const chain = saved.figures;
   return {
-    status: 'connected', chain, request: { from: chain[0], to: chain[chain.length - 1] },
-    links: chain.slice(1).map((person, index) => ({ from: chain[index], to: person, status: 'verified' as const, evidence: saved.evidence[index] })),
+    chain,
+    links: chain.slice(1).map((person, index) => ({ from: chain[index], to: person, evidence: saved.evidence[index], contact: saved.contacts?.[index] })),
   };
-}
-
-// "Try again" is a fresh search for the same pair that starts from the pairs already found unverifiable.
-export function retryRequest(view: ConnectionView | null): { from: HistoricalFigure; target: ConnectionTarget; avoidPairs: Array<[PathPersonRef, PathPersonRef]> } | null {
-  if (!view || view.status !== 'failed') return null;
-  return { from: view.request.from, target: { figure: view.request.to }, avoidPairs: view.avoidPairs ?? [] };
 }
 
 export interface CanvasState {
@@ -70,6 +61,7 @@ export interface ConnectionFlowEffects {
   // False once the search was cancelled or replaced; a stale search changes nothing.
   isCurrent: () => boolean;
   progress: (progress: ConnectionProgress) => void;
+  exploration?: (session: ConnectionSession) => void;
   // The canvas as it is when the result arrives, not when the search started.
   canvas: () => CanvasState;
   applyWoven: (woven: WovenCanvas) => void;
@@ -83,42 +75,60 @@ export interface ConnectionFlowEffects {
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 export const degreeLabel = (count: number) => plural(count, 'degree', 'degrees');
 
-// What a finished search does. A stale search does nothing; a failed one only shows what was found;
-// a verified one weaves its new people in, then saves the path and the woven-in people.
+// What a finished search does. A stale or incomplete search changes no canvas data; a verified
+// chain weaves its new people in, then saves the path and the woven-in people.
 export function settleConnection({ result, request, storage, effects }: {
-  result: ConnectionResult; request: ConnectionView['request']; storage: Storage; effects: ConnectionFlowEffects;
+  result: ConnectionResult; request: { from: HistoricalFigure; to: HistoricalFigure }; storage: Storage; effects: ConnectionFlowEffects;
 }): void {
   if (!effects.isCurrent()) return;
   const { from, to } = request;
-  if (result.status === 'failed') {
-    effects.show({ status: 'failed', reason: result.reason, chain: result.chain, links: result.links, request, avoidPairs: result.avoidPairs });
-    effects.notify(`We couldn't verify a chain of personal contacts between ${from.name} and ${to.name}.`, 'info');
+  if (result.status !== 'connected') {
+    effects.exploration?.(result.session);
+    if (result.status === 'error') effects.notify(result.error || 'Search interrupted.', 'error');
     return;
   }
-  const woven = weaveConnectionIntoCanvas({ ...effects.canvas(), chain: result.chain, newFigures: result.newFigures });
+  // Revalidate against the current canvas immediately before mutation. Every edge must still
+  // connect the exact accepted identities, with no duplicate people or chronology contradictions.
+  const people = new Map(result.session?.people.map(p => [p.id, p]) ?? []);
+  if (result.chain.length < 2 || result.chain.length > 22 || result.links.length !== result.chain.length - 1
+    || !result.chain.every(validPerson) || new Set(result.chain.map(p => canonicalName(p.name))).size !== result.chain.length
+    || !result.links.every((link, i) => link.contact && validAccepted(link.contact, people)
+      && ((samePerson(people.get(link.contact.pair[0])!, figurePerson(result.chain[i])) && samePerson(people.get(link.contact.pair[1])!, figurePerson(result.chain[i + 1])))
+        || (samePerson(people.get(link.contact.pair[1])!, figurePerson(result.chain[i])) && samePerson(people.get(link.contact.pair[0])!, figurePerson(result.chain[i + 1])))))) {
+    effects.notify('The accepted chain no longer matches these identities. Start a new search.', 'error'); return;
+  }
+  const current = effects.canvas();
+  const chain = result.chain.map(p => {
+    const shared = [...people.values()].find(shared => samePerson(shared, figurePerson(p)))!;
+    return canvasPerson(shared, current.figures);
+  });
+  if (new Set(chain.map(p => p.id)).size !== chain.length || !effects.isCurrent()) return;
+  const newFigures = chain.filter(p => !current.figures.some(f => f.id === p.id));
+  const links = result.links.map((link, i) => ({ ...link, from: chain[i], to: chain[i + 1] }));
+  const woven = weaveConnectionIntoCanvas({ ...current, chain, newFigures });
   effects.applyWoven(woven);
-  saveConnectionPath(storage, result.chain, result.links.map(link => link.evidence ?? ''));
+  saveConnectionPath(storage, chain, links.map(link => link.evidence), Date.now(), links.map(link => link.contact!), [...people.values()]);
   saveWovenFigureIds(storage, woven.newIds);
   effects.pathsChanged();
-  effects.show({ status: 'connected', chain: result.chain, links: result.links, request });
+  effects.show({ chain, links });
   effects.notify(woven.newIds.length
-    ? `Wove in ${plural(woven.newIds.length, 'person', 'people')} to connect ${from.name} and ${to.name}: ${result.newFigures.map(person => person.name).join(', ')}`
+    ? `Wove in ${plural(woven.newIds.length, 'person', 'people')} to connect ${from.name} and ${to.name}: ${newFigures.map(person => person.name).join(', ')}`
     : `${from.name} and ${to.name} are ${degreeLabel(result.degrees)} apart.`, 'success');
 }
 
 // The whole search after the request was accepted: identify a typed name, look for a saved path, search,
 // settle. Nothing here throws; a failure to identify the name goes back to the picker, any other to a toast.
-export async function runConnectionSearch({ service, storage, figures, from, target, avoidPairs, signal, effects }: {
+export async function runConnectionSearch({ service, storage, figures, from, target, signal, effects, repository, canvasId, session, provenance, mode }: {
   service: IAIService; storage: Storage; figures: HistoricalFigure[]; from: HistoricalFigure; target: ConnectionTarget;
-  avoidPairs?: Array<[PathPersonRef, PathPersonRef]>; signal: AbortSignal; effects: ConnectionFlowEffects;
+  signal: AbortSignal; effects: ConnectionFlowEffects; repository?: ConnectionRepository; canvasId?: string; session?: ConnectionSession; provenance?: { provider: string; model: string }; mode?: 'auto' | 'resume' | 'fresh';
 }): Promise<void> {
   try {
     let to: HistoricalFigure;
     if ('figure' in target) {
       to = target.figure;
-      effects.progress({ label: 'Checking for a direct link…', links: [] });
+      effects.progress({ label: 'Checking for a direct link…' });
     } else {
-      effects.progress({ label: `Identifying ${target.name}…`, links: [] });
+      effects.progress({ label: `Identifying ${target.name}…` });
       const resolved = await resolveConnectionTarget(service, target.name, from, figures, signal);
       if (!effects.isCurrent()) return;
       if ('message' in resolved) { effects.failPicking(resolved.message); return; }
@@ -126,8 +136,17 @@ export async function runConnectionSearch({ service, storage, figures, from, tar
       const saved = readConnectionPath(storage, figures, from.id, to.id);
       if (saved) { effects.show(savedConnectionView(saved)); return; }
     }
+    if (repository && mode !== 'fresh' && !session) {
+      const knowledge = await repository.loadKnowledge();
+      const first = identifyPerson(knowledge.people, figurePerson(from));
+      const second = identifyPerson(knowledge.people, figurePerson(to));
+      const existing = await repository.loadSession(sessionKey(canvasId ?? 'canvas', first.id, second.id));
+      if (!effects.isCurrent()) return;
+      if (existing && existing.status !== 'connected') { effects.exploration?.({ ...existing, endpoints: [first.id, second.id], status: 'paused', phase: 'Saved exploration: choose Resume or Start a new search' }); return; }
+    }
     const result = await findConnection({
-      service, from, to, figures, storage, signal, avoidPairs,
+      service, from, to, figures, storage, signal, repository, canvasId, session, provenance,
+      onSnapshot: next => effects.exploration?.(next),
       onProgress: next => { if (effects.isCurrent()) effects.progress(next); },
     });
     settleConnection({ result, request: { from, to }, storage, effects });

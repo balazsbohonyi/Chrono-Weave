@@ -1,9 +1,10 @@
+import { saveTestConnectionPath as saveConnectionPath } from './connectionFixtures';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { MAX_RECENT_CONNECTIONS } from '../src/constants';
 import { CanvasCache } from '../src/utils/canvasHistory';
 import {
-  connectionPathKey, listConnectionPaths, readConnectionPath, saveConnectionPath, savedPathFigureIds, saveWovenFigureIds, wovenFigureIds,
+  connectionPathKey, listConnectionPaths, readConnectionPath,  savedPathFigureIds, saveWovenFigureIds, wovenFigureIds,
 } from '../src/utils/connectionPaths';
 import { discardRejectedFollowFigureCandidates } from '../src/services/followFigureConnections';
 import { saveRelationshipMap } from '../src/utils/relationshipCache';
@@ -17,7 +18,7 @@ const canvas = [a, m, b];
 
 test('paths are keyed by the sorted endpoint ids, whichever way they were found', () => {
   assert.equal(connectionPathKey('b', 'a'), connectionPathKey('a', 'b'));
-  assert.equal(connectionPathKey('w-p-x y-1-2', 'a'), 'chrono_path_a_w-p-x%20y-1-2');
+  assert.equal(connectionPathKey('w-p-x y-1-2', 'a'), 'chrono_sd2_path_a_w-p-x%20y-1-2');
   assert.notEqual(connectionPathKey('a', 'b'), connectionPathKey('a', 'c'));
 });
 
@@ -54,16 +55,16 @@ test('recent connections are newest first and capped, dropping the oldest', () =
   assert.equal(entries.at(-1)?.figures[1].id, 's05');
   assert.equal(readConnectionPath(storage, [hub, ...spokes], 'hub', 's00'), null);
   let stored = 0;
-  for (let index = 0; index < storage.length; index++) if (storage.key(index)?.startsWith('chrono_path_')) stored++;
+  for (let index = 0; index < storage.length; index++) if (storage.key(index)?.startsWith('chrono_sd2_path_')) stored++;
   assert.equal(stored, MAX_RECENT_CONNECTIONS);
 });
 
 test('damaged or mismatched entries are ignored and never replace a good path', () => {
   const storage = new MemoryStorage();
   saveConnectionPath(storage, [a, m, b], ['x', 'y'], 1);
-  storage.setItem('chrono_path_broken', '{nope');
-  storage.setItem('chrono_path_wrongshape', JSON.stringify({ version: 1, ids: ['a', 'b'], evidence: [], createdAt: 5 }));
-  storage.setItem(connectionPathKey('a', 'm'), JSON.stringify({ version: 1, ids: ['a', 'b'], evidence: ['mismatched endpoints'], createdAt: 6 }));
+  storage.setItem('chrono_sd2_path_broken', '{nope');
+  storage.setItem('chrono_sd2_path_wrongshape', JSON.stringify({ version: 2, ids: ['a', 'b'], evidence: [], createdAt: 5 }));
+  storage.setItem(connectionPathKey('a', 'm'), JSON.stringify({ version: 2, ids: ['a', 'b'], evidence: ['mismatched endpoints'], createdAt: 6 }));
   assert.deepEqual(listConnectionPaths(storage, canvas).map(entry => entry.createdAt), [1]);
   assert.equal(readConnectionPath(storage, canvas, 'a', 'm'), null);
   // The evidence count must match the number of links, and an incomplete save is refused.
@@ -132,4 +133,12 @@ test('woven-in ids accumulate without duplicates, ignore damage, and travel with
   assert.deepEqual([...wovenFigureIds(storage)], []);
   storage.setItem(storage.key(0)!, JSON.stringify(['a', 3, null]));
   assert.deepEqual([...wovenFigureIds(storage)], ['a']);
+});
+
+test('a replay remains self-contained after shared knowledge eviction and refuses tampered identity/evidence', () => {
+  const storage = new MemoryStorage(); saveConnectionPath(storage, [a, m, b], ['First encounter.', 'Second encounter.']);
+  assert.ok(readConnectionPath(storage, canvas, 'a', 'b'));
+  const key = connectionPathKey('a', 'b'), raw = JSON.parse(storage.getItem(key)!);
+  raw.contacts[0].verdict = 'unresolved'; storage.setItem(key, JSON.stringify(raw));
+  assert.equal(readConnectionPath(storage, canvas, 'a', 'b'), null);
 });

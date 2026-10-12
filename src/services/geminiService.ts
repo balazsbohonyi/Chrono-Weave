@@ -1,3 +1,5 @@
+import { requestContactDiscovery, requestContactAssessment, requestContactExplanation, type ContactDiscoveryRequest, type ContactPair } from './connectionAI';
+import type { ContactPerson, ContactAssessment } from './connectionGraph';
 import { generateRelationshipAssessment } from './relationshipAssessment';
 
 import { GenerateContentResponse, GoogleGenAI, Type, type Schema } from "@google/genai";
@@ -108,6 +110,19 @@ export class GeminiService implements IAIService {
             },
             required: ['nodes', 'links'],
         };
+        if (task === 'contacts-assess') return { type: Type.ARRAY, items: { type: Type.OBJECT, properties: {
+            ref: { type: Type.STRING }, verdict: { type: Type.STRING }, interactionType: { type: Type.STRING },
+            evidence: { type: Type.STRING }, episode: { type: Type.STRING }, year: { type: Type.INTEGER, nullable: true }, uncertainty: { type: Type.STRING },
+        }, required: ['ref', 'verdict', 'evidence'] } };
+        if (task === 'contacts-discover') return { type: Type.ARRAY, items: { type: Type.OBJECT, properties: {
+            source: { type: Type.STRING }, reference: { type: Type.STRING }, claim: { type: Type.STRING },
+            person: { type: Type.OBJECT, properties: { ...person, aliases: { type: Type.ARRAY, items: { type: Type.STRING } } }, required: Object.keys(person) },
+        }, required: ['source', 'claim'] } };
+        if (task === 'contacts-explain') return { type: Type.OBJECT, properties: {
+            supported: { type: Type.BOOLEAN }, summary: { type: Type.STRING }, sections: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: {
+                title: { type: Type.STRING }, content: { type: Type.STRING },
+            }, required: ['title', 'content'] } },
+        }, required: ['supported', 'summary', 'sections'] };
         const events = task === 'events';
         return { type: Type.ARRAY, items: {
             type: Type.OBJECT,
@@ -161,6 +176,16 @@ export class GeminiService implements IAIService {
 
     fetchHistoricalFigures(start: number, end: number, signal?: AbortSignal, context?: WeaveGenerationContext): Promise<HistoricalFigure[]> {
         return generateWeaveTimeline(this.generate.bind(this), start, end, signal, context);
+    }
+
+    discoverPersonalContacts(request: ContactDiscoveryRequest, signal?: AbortSignal) {
+        return requestContactDiscovery(this.generate.bind(this), request, signal);
+    }
+    assessPersonalContacts(pairs: ContactPair[], signal?: AbortSignal) {
+        return requestContactAssessment(this.generate.bind(this), pairs, signal);
+    }
+    explainPersonalContact(first: ContactPerson, second: ContactPerson, contact: ContactAssessment, signal?: AbortSignal) {
+        return requestContactExplanation(this.generate.bind(this), first, second, contact, signal);
     }
 
     fetchConnectionPath(from: HistoricalFigure, to: HistoricalFigure, options: ConnectionPathOptions, signal?: AbortSignal): Promise<ConnectionPathProposal | null> {

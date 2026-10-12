@@ -12,7 +12,7 @@ const from = person('leonardo', 'Leonardo da Vinci', 1452, 1519);
 const to = person('galileo', 'Galileo Galilei', 1564, 1642);
 const options: ConnectionPathOptions = {
   catalog: [{ id: 'vasari', name: 'Giorgio Vasari', birthYear: 1511, deathYear: 1574 }],
-  avoidPairs: [], maxIntermediates: 10,
+  maxIntermediates: 10,
 };
 const resolved = { name: 'Henry VIII', birthYear: 1491, deathYear: 1547, occupation: 'King', description: 'King of England.', category: 'LEADERS & BADDIES' };
 
@@ -63,8 +63,8 @@ test('every provider runs the same contact-only path and resolve prompts and map
     for (const name of ['openrouter', 'ollama']) {
       assert.deepEqual(requests[name].map(request => request.prompt), shared.map(request => request.prompt));
     }
-    assert.match(shared[0].prompt, /personally interacted/);
-    assert.match(shared[0].prompt, /Influence through a work or ideas alone does not count/);
+    assert.match(shared[0].prompt, /personal interaction/);
+    assert.match(shared[0].prompt, /Influence through works\/ideas/);
     assert.match(shared[0].prompt, /"id":"c1"/);
     assert.match(shared[2].prompt, /Identify the one real historical person/);
     // The contact option reaches the prompt of every provider; the default stays the general standard.

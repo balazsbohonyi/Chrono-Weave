@@ -8,7 +8,7 @@ ChronoWeave is an interactive historical timeline visualization platform powered
 - **Build Tool**: Vite 6
 - **Styling**: Tailwind CSS
 - **Graphics/Visualization**: HTML5 `<canvas>` with a custom layout and rendering algorithm
-- **AI Integration**: Google Gemini and OpenRouter APIs
+- **AI Integration**: Google Gemini, OpenRouter and Ollama APIs
 - **External Data**: Wikipedia API
 
 ## Core Architecture & Components
@@ -61,7 +61,9 @@ Located in `src/components/`, the UI is composed of several interactive elements
 Located in `src/services/`, this layer handles all external API communications.
 - **`geminiService.ts`**: Integrates with the Google Gemini API.
 - **`openRouterService.ts`**: Integrates with OpenRouter to support alternative LLMs (e.g., Claude, Llama).
-- Both implement the `IAIService` interface (defined in `src/types.ts`) which standardizes operations like `fetchHistoricalFigures`, `fetchRelatedFigures`, `discoverRelatedFigures`, `fetchRelationshipExplanation`, and `fetchFigureDeepDive`. Six Degrees adds `fetchConnectionPath` and `resolveFigure`; their prompts, parsing, and validation are shared in `pathService.ts`, and the search that verifies (contact-only) and repairs a proposed chain is `connectionPath.ts`, with the rules around a request and a finished search in `connectionFlow.ts`.
+- All three providers implement `IAIService`. General canvas, relationship, expansion and biography contracts remain unchanged. Six Degrees adds dedicated discover/assess/explain tasks with provider-neutral parsing in `connectionAI.ts`; `pathService.ts` supplies one bounded seed proposal and person resolution.
+- `connectionPath.ts` is the bounded bidirectional engine; `connectionGraph.ts` owns canonical identities, accepted/unresolved records, frontier ranking and shortest paths in the discovered graph. `connectionFlow.ts` offers checkpoints explicitly and revalidates every accepted edge against the current canvas before weaving.
+- `connectionKnowledge.ts` stores shared people/contacts and canvas-scoped resumable checkpoints in versioned IndexedDB, with memory fallback, record recovery, bounded retention and stale-write protection. New canvas paths in `connectionPaths.ts` keep their own identity/evidence snapshots. Legacy records are logically retired while member protections remain intact.
 - **`wikiService.ts`**: Connects to the Wikipedia API to retrieve rich biographical information, summaries, and images for the historical figures.
 
 ### 3. State Management & Hooks
@@ -141,3 +143,11 @@ sequenceDiagram
    - **Deep Dive**: When a user clicks to view more details, `wikiService` fetches Wikipedia summaries and images, while the `IAIService` fetches AI-generated deep dives.
    - **Discover & Map**: User actions trigger `discoverRelatedFigures` or `fetchRelationshipExplanation`, dynamically adding new figures to the state and instructing the canvas to draw relationship paths.
 4. **Interactive Canvas**: The canvas constantly repaints based on changes to `ViewState` (panning/zooming) or when new figures/relationships are added to the global state.
+
+## Six Degrees lifecycle and presentation
+
+`useConnection.ts` joins existing action precedence and cancellation guards. A segment has a shared deadline across queues, transport and corrective retries. Closing the overlay, Stop, switching canvases/providers or another action cancels work and preserves completed exploration. Reload restores checkpoint availability without issuing AI requests. Resume/Continue grants a fresh budget; accepted contacts are reused across providers/models, while unresolved pairs can be reconsidered when relevant context changes.
+
+`ConnectionExplorer.tsx` renders immutable session snapshots as an SVG network, with stable positions, anchored endpoints, independent pan/zoom, evidence inspection, keyboard selection and a readable list. Inspecting during search makes no extra model/biography requests. Only a fully accepted route changes the canvas. `ConnectionPanel` and the existing timeline/gallery thread/camera reveal show the resulting chain. Why uses the dedicated accepted-record narrative and falls back to its compact evidence; it neither consults nor alters general relationship rejections.
+
+Production search is AI-only. Reference sources and old/new evaluation artifacts are confined to `ai-docs/evaluation/six-degrees/`; mocked unit/browser scenarios do not establish historical discovery success.

@@ -168,20 +168,11 @@ export interface PathCatalogEntry {
   deathYear: number;
 }
 
-export interface PathPersonRef {
-  id: string;
-  name: string;
-}
-
 export interface ConnectionPathOptions {
   // Canvas people the model may reference by id.
   catalog: PathCatalogEntry[];
-  // Pairs that already failed verification; a proposal must never use them as consecutive people.
-  avoidPairs: Array<[PathPersonRef, PathPersonRef]>;
   // Most people allowed strictly between the two endpoints.
   maxIntermediates: number;
-  // People already in the chain being repaired; a bridge must not reuse them.
-  exclude?: PathPersonRef[];
 }
 
 export type ConnectionPathNode = { id: string } | NewPerson;
@@ -198,6 +189,9 @@ export interface RelationshipExplanationOptions {
 }
 
 export interface IAIService {
+  discoverPersonalContacts(request: import('./services/connectionAI').ContactDiscoveryRequest, signal?: AbortSignal): Promise<import('./services/connectionAI').ContactProposal[]>;
+  assessPersonalContacts(pairs: import('./services/connectionAI').ContactPair[], signal?: AbortSignal): Promise<import('./services/connectionAI').ContactAssessmentResult[]>;
+  explainPersonalContact(first: import('./services/connectionGraph').ContactPerson, second: import('./services/connectionGraph').ContactPerson, contact: import('./services/connectionGraph').ContactAssessment, signal?: AbortSignal): Promise<RelationshipExplanation>;
   validateWeaveQuery(request: WeaveRequest, signal?: AbortSignal): Promise<WeaveValidationResult>;
   suggestWeaveTopic(excludedTopics?: string[], signal?: AbortSignal, broadenTopic?: string): Promise<WeaveValidationResult>;
   fetchHistoricalFigures(start: number, end: number, signal?: AbortSignal, context?: WeaveGenerationContext): Promise<HistoricalFigure[]>;

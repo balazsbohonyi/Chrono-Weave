@@ -1,3 +1,5 @@
+import { requestContactDiscovery, requestContactAssessment, requestContactExplanation, type ContactDiscoveryRequest, type ContactPair } from './connectionAI';
+import type { ContactPerson, ContactAssessment } from './connectionGraph';
 import { generateRelationshipAssessment } from './relationshipAssessment';
 
 import { ConnectionPathOptions, ConnectionPathProposal, DeepDiveData, FigureCategory, HistoricalFigure, IAIService, NewPerson, RelationshipExplanation, RelationshipExplanationOptions, WeaveGenerationContext, WeaveRequest, WeaveValidationResult } from "../types";
@@ -129,6 +131,16 @@ export class OpenRouterService implements IAIService {
 
     fetchHistoricalFigures(start: number, end: number, signal?: AbortSignal, context?: WeaveGenerationContext): Promise<HistoricalFigure[]> {
         return generateWeaveTimeline(this.generate.bind(this), start, end, signal, context);
+    }
+
+    discoverPersonalContacts(request: ContactDiscoveryRequest, signal?: AbortSignal) {
+        return requestContactDiscovery(this.generate.bind(this), request, signal);
+    }
+    assessPersonalContacts(pairs: ContactPair[], signal?: AbortSignal) {
+        return requestContactAssessment(this.generate.bind(this), pairs, signal);
+    }
+    explainPersonalContact(first: ContactPerson, second: ContactPerson, contact: ContactAssessment, signal?: AbortSignal) {
+        return requestContactExplanation(this.generate.bind(this), first, second, contact, signal);
     }
 
     fetchConnectionPath(from: HistoricalFigure, to: HistoricalFigure, options: ConnectionPathOptions, signal?: AbortSignal): Promise<ConnectionPathProposal | null> {

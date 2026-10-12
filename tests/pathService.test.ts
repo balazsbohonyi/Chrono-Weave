@@ -14,7 +14,7 @@ const michelangelo = person('michelangelo', 'Michelangelo', 1475, 1564);
 const vasari = person('vasari', 'Giorgio Vasari', 1511, 1574);
 const options = (overrides: Partial<ConnectionPathOptions> = {}): ConnectionPathOptions => ({
   catalog: [verrocchio, michelangelo, vasari].map(({ id, name, birthYear, deathYear }) => ({ id, name, birthYear, deathYear })),
-  avoidPairs: [], maxIntermediates: 10, ...overrides,
+  maxIntermediates: 10, ...overrides,
 });
 const newPerson = (name: string, birthYear: number, deathYear: number, extra: Record<string, unknown> = {}) =>
   ({ name, birthYear, deathYear, occupation: 'Scholar', description: 'A scholar.', category: 'THINKERS', ...extra });
@@ -77,18 +77,6 @@ test('new people must satisfy the shared people rules', () => {
     { name: 'Lowercase Category', birthYear: 1500, deathYear: 1600, occupation: 'Scholar', category: 'THINKERS', description: 'A scholar.' });
 });
 
-test('pairs known to be rejected can never be neighbours, and excluded people cannot be reused', () => {
-  assert.throws(() => validate({ nodes: ends(newPerson('Zeno', 1500, 1700)), links: [] }, {
-    avoidPairs: [[{ id: 'x', name: 'zeno' }, { id: 'y', name: 'GALILEO GALILEI' }]],
-  }), /no qualifying link/);
-  assert.throws(() => validate({ nodes: ends(newPerson('Giorgio Vasari', 1511, 1574)), links: [] }, {
-    exclude: [{ id: 'other', name: 'giorgio vasari' }],
-  }), /already part of the chain/);
-  assert.throws(() => validate({ nodes: ends({ id: 'vasari' }), links: [] }, {
-    exclude: [{ id: 'vasari', name: 'Someone Else' }],
-  }), /already part of the chain/);
-});
-
 test('link claims are optional labels and are padded to one per link', () => {
   assert.deepEqual(validate({ nodes: ends(newPerson('Zeno', 1500, 1700)) })?.links, [{ claim: '' }, { claim: '' }]);
 });
@@ -105,7 +93,7 @@ test('the prompt shows short references and the result maps them back to canvas 
   assert.match(prompts[0], /"id":"c3"/);
   assert.doesNotMatch(prompts[0], /"id":"vasari"/);
   assert.match(prompts[0], /Never include events/);
-  assert.match(prompts[0], /Influence through a work or ideas alone does not count/);
+  assert.match(prompts[0], /Influence through works\/ideas/);
 });
 
 test('an invalid proposal gets exactly one corrective retry', async () => {
@@ -122,17 +110,6 @@ test('an invalid proposal gets exactly one corrective retry', async () => {
     { nodes: [{ id: 'A' }, { id: 'c9' }, { id: 'B' }], links: [] },
     { nodes: [{ id: 'A' }, { id: 'c9' }, { id: 'B' }], links: [] },
   ]), leonardo, galileo, options()), /unusable data after a retry/);
-});
-
-test('avoided pairs and excluded people are passed to the model by name', async () => {
-  const prompts: string[] = [];
-  await requestConnectionPath(generatorFor([null], prompts), leonardo, galileo, options({
-    avoidPairs: [[{ id: '1', name: 'Giorgio Vasari' }, { id: '2', name: 'Peter Paul Rubens' }]],
-    exclude: [{ id: '3', name: 'Michelangelo' }], maxIntermediates: 4,
-  }));
-  assert.match(prompts[0], /\[\["Giorgio Vasari","Peter Paul Rubens"\]\]/);
-  assert.match(prompts[0], /Do not include them: \["Michelangelo"\]/);
-  assert.match(prompts[0], /at most 4 people between A and B/);
 });
 
 test('a null answer is a result, and events are refused before any request', async () => {

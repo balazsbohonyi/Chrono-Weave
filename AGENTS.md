@@ -55,10 +55,11 @@ Documentation and plans live under `ai-docs/plans/`.
      - `fetchHistoricalFigures()`: Generate figures for a time range
      - `fetchRelatedFigures()`: Find relationships between figures
      - `discoverRelatedFigures()`: Expand timeline with new related figures
-     - `fetchRelationshipExplanation()`: Explain connection between two figures; an optional `{ contactOnly: true }` is Six Degrees' stricter check, where only a documented personal interaction qualifies and its verdicts are cached under `chrono_contact_`
+     - `fetchRelationshipExplanation()`: General relationship explanation and its existing caches. The legacy `{ contactOnly: true }` contract remains available; the new Six Degrees engine and Why action do not use it
      - `fetchFigureDeepDive()`: Generate detailed biography/quotes
-     - `fetchConnectionPath()`: Propose a chain of personal contacts between two people (Six Degrees); the app verifies every link
+     - `fetchConnectionPath()`: One bounded Six Degrees seed proposal; failure falls through to graph exploration
      - `resolveFigure()`: Identify one typed name as a person, or `null`
+     - `discoverPersonalContacts()`, `assessPersonalContacts()`, `explainPersonalContact()`: Dedicated Six Degrees operations in Gemini, OpenRouter and Ollama, with provider-neutral prompts/parsers in `connectionAI.ts`. Only independently accepted contacts enter a chain; exact opponents in a named battle/campaign qualify.
      - `testConnection()`: Validate API credentials and model availability
 
 3. **Data Fetching** (`src/services/wikiService.ts`)
@@ -144,7 +145,7 @@ See `src/constants.ts` for:
 
 ### Adding a New AI Service
 1. Create new class implementing `IAIService` interface in `src/services/`
-2. Implement all 5 required methods
+2. Implement all required IAIService methods
 3. Add provider selection logic in `src/components/SettingsDialog.tsx` and `initializeService()` in `src/App.tsx`
 
 ### Modifying Timeline Rendering
@@ -172,3 +173,11 @@ See `src/constants.ts` for:
 - **Settings Priority**: localStorage (Settings dialog) > environment variables (both dev and production)
 - Settings dialog is available in both development and production modes
 - Environment variables serve as fallback defaults when localStorage is not configured
+
+## Six Degrees persistence and isolation
+
+- Shared database: `chronoweave-six-degrees-v2`, outside canvas localStorage cleanup. Accepted contacts retain provider/model/version/timestamp provenance and remain reusable across models.
+- New successful paths: `chrono_sd2_path_`, retaining their own identities and compact accepted evidence for replay even after knowledge eviction.
+- Legacy `chrono_path_` / `chrono_contact_` records are not imported or shown as new connections. Migration logically retires them without deletion and preserves the legacy path/woven membership union under `chrono_sd2_members_`; failed writes leave original protection intact. Run migration before Follow a Figure pruning on activation.
+- Preserve general Map, Expand, Follow a Figure, biography and relationship prompts, semantics and caches. Six Degrees Why bypasses their negative caches and falls back to compact accepted evidence if narrative expansion fails.
+- Defaults in `SEARCH_LIMITS` are tunable; keep the selected 21-link bound, AI-only assessment, cross-model reuse and explicit continuation rules intact. Full tests, typecheck/build and T3 preview workflows are documented in the refactor plan. Live benchmark harness/artifacts live under `ai-docs/evaluation/six-degrees/` and are separate from mocked tests.
