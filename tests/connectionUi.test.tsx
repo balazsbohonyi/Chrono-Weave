@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import ConnectionPanel, { type ConnectionPanelProps } from '../src/components/ConnectionPanel';
+import ConnectionPanel, { isProposedPerson, type ConnectionPanelProps } from '../src/components/ConnectionPanel';
 import ConnectionPicker from '../src/components/ConnectionPicker';
 import ConnectionProgress from '../src/components/ConnectionProgress';
 import { classifyConnectionTarget } from '../src/services/connectionPath';
@@ -65,6 +65,15 @@ test('a failed search lists the pieces, marks the gap, and offers Try again with
   assert.equal(markup.match(/>Why\?</g)?.length, 1);
   assert.equal(markup.match(/data-actions="/g)?.length, 2);
   assert.doesNotMatch(markup, /Fly to Bruno Beta/);
+  // Bruno was only proposed: a compact marked row, with no description, dates, portrait, or actions.
+  assert.equal(markup.match(/connection-proposed"/g)?.length, 1);
+  assert.match(words, /Bruno Beta Proposed, not verified/);
+  assert.doesNotMatch(markup, /1580|1650/);
+  assert.equal(markup.match(/Painter/g)?.length, 2, 'only the two people on the canvas show their occupation');
+  assert.equal(isProposedPerson(failed, new Set(['a', 'm']), b), true);
+  assert.equal(isProposedPerson(failed, new Set(['a', 'm']), m), false);
+  assert.equal(isProposedPerson(connected, new Set(), b), false, 'a verified chain is shown in full');
+  assert.doesNotMatch(panel({ connection: connected }), /Proposed, not verified/);
   assert.match(text(panel({ connection: { ...failed, reason: 'no-path', links: [{ from: a, to: b, status: 'unverified' }], chain: [a, b] } })), /No chain of documented personal contacts was found/);
   assert.match(panel({ connection: failed, isBusy: true }), /connection-retry"[^>]*disabled/);
 });

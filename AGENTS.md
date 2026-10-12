@@ -55,7 +55,7 @@ Documentation and plans live under `ai-docs/plans/`.
      - `fetchHistoricalFigures()`: Generate figures for a time range
      - `fetchRelatedFigures()`: Find relationships between figures
      - `discoverRelatedFigures()`: Expand timeline with new related figures
-     - `fetchRelationshipExplanation()`: Explain connection between two figures
+     - `fetchRelationshipExplanation()`: Explain connection between two figures; an optional `{ contactOnly: true }` is Six Degrees' stricter check, where only a documented personal interaction qualifies and its verdicts are cached under `chrono_contact_`
      - `fetchFigureDeepDive()`: Generate detailed biography/quotes
      - `fetchConnectionPath()`: Propose a chain of personal contacts between two people (Six Degrees); the app verifies every link
      - `resolveFigure()`: Identify one typed name as a person, or `null`
@@ -130,7 +130,7 @@ All components are in `src/components/`:
 - **Toast**: Notification system
 - **ActionBar**: Hover toolbar with Discover/Trace/Inspect buttons
 - **FloatingToolbar**: Secondary interaction toolbar
-- **ConnectionPicker / ConnectionProgress / ConnectionPanel / ConnectionThread**: Six Degrees — choosing the other end, the live search card, the sidebar Connection tab, and the SVG thread (state and flow live in `src/hooks/useConnection.ts`, the search in `src/services/connectionPath.ts`)
+- **ConnectionPicker / ConnectionProgress / ConnectionPanel / ConnectionThread**: Six Degrees — choosing the other end, the live search card, the sidebar Connection tab, and the SVG thread (React state lives in `src/hooks/useConnection.ts`, the rules around a request and a finished search in `src/services/connectionFlow.ts`, the search itself in `src/services/connectionPath.ts`)
 
 ## Configuration Constants
 

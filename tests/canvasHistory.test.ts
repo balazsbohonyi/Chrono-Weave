@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { activateCanvas, CanvasCache, CANVAS_HISTORY_KEY, canvasHistoryDetails, createCanvasSnapshot,
+import { activateCanvas, CanvasCache, CANVAS_HISTORY_KEY, canvasHistoryDetails, createCanvasSnapshot, isCanvasCacheKey,
   LEGACY_CONFIG_KEY, LEGACY_DATA_KEY, loadCanvasHistory, saveCanvasHistory } from '../src/utils/canvasHistory';
 import { CANVAS_LAYOUT_VERSION } from '../src/utils/canvasLayout';
 import { CLUSTER_STORAGE_KEY, serializeClusters } from '../src/utils/discoveryClusters';
@@ -161,4 +161,16 @@ test('history summaries count all saved figures and events independently of acti
   assert.equal(canvasHistoryDetails(saved).figures, 1);
   assert.equal(canvasHistoryDetails(saved).events, 1);
   assert.equal(canvasHistoryDetails(saved).verifiedConnections, 0);
+});
+
+test('Six Degrees data persists with its canvas: paths, contact verdicts, and woven-in people', () => {
+  for (const key of ['chrono_path_a_b', 'chrono_contact_a_b', 'chrono_woven_ids', 'chrono_assessment_a_b']) assert.ok(isCanvasCacheKey(key), key);
+  assert.ok(!isCanvasCacheKey('chrono_provider'));
+  const cache = new CanvasCache({ chrono_contact_a_b: '{}', chrono_woven_ids: '["x"]', chrono_provider: 'gemini' });
+  assert.deepEqual(Object.keys(cache.snapshot()), ['chrono_contact_a_b', 'chrono_woven_ids']);
+  const storage = new MemoryStorage();
+  storage.setItem('chrono_contact_a_b', '{}');
+  storage.setItem('chrono_woven_ids', '["x"]');
+  saveCanvasHistory(storage, { version: 1, current: canvas(1), history: [] });
+  assert.equal(storage.getItem('chrono_contact_a_b'), null, 'loose cache keys are cleaned once the canvas record is saved');
 });

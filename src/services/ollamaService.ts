@@ -9,7 +9,7 @@ import {
   CONNECTION_TEST_PROMPT,
   buildCorrectionPrompt,
 } from './prompts';
-import type { ConnectionPathOptions, ConnectionPathProposal, DeepDiveData, FigureCategory, HistoricalFigure, IAIService, NewPerson, RelationshipExplanation, WeaveGenerationContext, WeaveRequest, WeaveValidationResult } from '../types';
+import type { ConnectionPathOptions, ConnectionPathProposal, DeepDiveData, FigureCategory, HistoricalFigure, IAIService, NewPerson, RelationshipExplanation, RelationshipExplanationOptions, WeaveGenerationContext, WeaveRequest, WeaveValidationResult } from '../types';
 import { requestConnectionPath, requestResolveFigure } from './pathService';
 import { validateLocalUrl, type AppConfig } from '../utils/providerConfig';
 import { generateWeaveTimeline, getWeaveGenerationRange, parseWeaveFigures, suggestWeaveTopic, validateWeaveQuery } from './weaveService';
@@ -277,8 +277,8 @@ export class OllamaService implements IAIService {
     }, signal);
   }
 
-  fetchRelationshipExplanation(source: HistoricalFigure, target: HistoricalFigure, signal?: AbortSignal): Promise<RelationshipExplanation> {
-    return this.generate(buildRelationshipExplanationPrompt(source, target), parseRelationshipAssessment, signal);
+  fetchRelationshipExplanation(source: HistoricalFigure, target: HistoricalFigure, signal?: AbortSignal, options?: RelationshipExplanationOptions): Promise<RelationshipExplanation> {
+    return this.generate(buildRelationshipExplanationPrompt(source, target, options), parseRelationshipAssessment, signal);
   }
 
   fetchFigureDeepDive(figure: HistoricalFigure, signal?: AbortSignal): Promise<DeepDiveData> {

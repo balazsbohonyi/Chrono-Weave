@@ -322,7 +322,7 @@ input[type=number] {
   .relationship-top { gap: 48px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .relationship-card { animation: none !important; opacity: 1 !important; }
+  .relationship-card:not(.gallery-card) { animation: none !important; opacity: 1 !important; }
 }
 
 /* =========================================================================
@@ -1453,15 +1453,21 @@ input[type=number] {
 /* =========================================================================
    Six Degrees: connecting two people through personal contacts
    ========================================================================= */
-.connection-thread-line, .connection-thread-glow { fill: none; stroke-linecap: round; stroke-linejoin: round; }
-.connection-thread-line { stroke: rgb(var(--color-accent-solid)); }
-.connection-thread-glow { stroke: rgb(var(--color-accent-focus) / 45%); filter: blur(3px); }
+.connection-thread-line { fill: none; stroke: rgb(var(--color-connection)); stroke-linecap: round; stroke-linejoin: round; }
 
-.connection-node { box-shadow: 0 0 0 3px rgb(var(--color-accent-solid) / 85%), 0 0 14px 2px rgb(var(--color-accent-focus) / 55%); }
-.connection-node-current { box-shadow: 0 0 0 4px rgb(var(--color-accent-solid)), 0 0 24px 6px rgb(var(--color-accent-focus) / 70%); animation: connection-pulse 1.4s ease-in-out infinite; }
-.gallery-connected:not(.gallery-focused):not(.relationship-source) { box-shadow: 0 0 0 3px rgb(var(--color-accent-solid) / 85%), 0 0 14px 2px rgb(var(--color-accent-focus) / 55%), 0 8px 28px rgb(var(--color-shadow) / 0.2); }
-.gallery-current:not(.gallery-focused):not(.relationship-source) { box-shadow: 0 0 0 4px rgb(var(--color-accent-solid)), 0 0 24px 6px rgb(var(--color-accent-focus) / 70%), 0 8px 28px rgb(var(--color-shadow) / 0.2); animation: connection-pulse 1.4s ease-in-out infinite; }
-@keyframes connection-pulse { 50% { filter: brightness(1.12); } }
+/* Connected people are marked by a crisp outline and a number, never a glow. Everyone else is ghosted. */
+.connection-node { outline: 2px solid rgb(var(--color-connection)); outline-offset: 1px; }
+.connection-node-current { outline-width: 3px; outline-offset: 2px; }
+.gallery-card { transition: box-shadow 150ms, opacity 500ms ease, filter 500ms ease; }
+@media (prefers-reduced-motion: reduce) { .gallery-card { transition: none; } }
+.gallery-connected { overflow: visible; }
+/* The outline sits on the card's own 1px border, and the category corner follows the rounded corner now that the card no longer clips. */
+.gallery-connected:not(.gallery-focused):not(.relationship-source) { outline: 3px solid rgb(var(--color-connection)); outline-offset: -1px; }
+.gallery-current:not(.gallery-focused):not(.relationship-source) { outline-width: 4px; }
+.gallery-connected .figure-card-corner { border-top-right-radius: 11px; }
+.connection-badge { display: inline-grid; place-items: center; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 999px; background: rgb(var(--color-connection)); color: rgb(var(--color-connection-contrast)); font: 800 13px/1 system-ui, sans-serif; letter-spacing: 0; pointer-events: none; }
+.connection-badge-inline { margin-right: 8px; flex-shrink: 0; }
+.connection-badge-corner { position: absolute; top: -13px; left: -13px; z-index: 2; box-shadow: 0 1px 3px rgb(var(--color-shadow) / 0.35); }
 
 .connection-picker {
     position: fixed; left: 50%; z-index: 55; width: min(720px, calc(100vw - 48px)); transform: translateX(-50%);
@@ -1514,6 +1520,9 @@ input[type=number] {
 .connection-retry:hover:not(:disabled) { background: rgb(var(--color-surface-muted)); }
 .connection-retry:disabled { opacity: 0.5; cursor: default; }
 .connection-chain { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.connection-proposed { display: flex; flex-direction: column; gap: 2px; padding: 10px 14px; border-radius: 10px; border: 1px dashed rgb(var(--color-border-strong)); background: rgb(var(--color-surface-muted) / 50%); }
+.connection-proposed-name { font-size: 15px; font-weight: 600; color: rgb(var(--color-content-body)); }
+.connection-proposed-tag { font-size: 12px; font-weight: 600; color: rgb(var(--color-content-muted)); }
 .connection-link { display: flex; gap: 14px; align-items: stretch; padding: 0 0 0 28px; min-height: 56px; }
 .connection-link-thread { width: 3px; flex-shrink: 0; border-radius: 9999px; background: rgb(var(--color-accent-solid)); box-shadow: 0 0 8px rgb(var(--color-accent-focus) / 60%); }
 .connection-link.is-gap .connection-link-thread { background: repeating-linear-gradient(to bottom, rgb(var(--color-danger-marker)) 0 6px, transparent 6px 12px); box-shadow: none; }

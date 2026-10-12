@@ -18,7 +18,7 @@ import Toast from './components/Toast';
 import ProgressOverlay from './components/ProgressOverlay';
 import SettingsDialog from './components/SettingsDialog';
 import Legend from './components/Legend';
-import { HistoricalFigure, DeepDiveData, IAIService, RelationshipExplanation, FigureCategory, DiscoveryClusterState, ClusterPlacement, LayoutData, WeaveRequest, WeaveGenerationContext, CanvasLayoutMode, CanvasConfig, CanvasSnapshot, CanvasHistoryRecord, CanvasViewSnapshot, SidebarViewState } from './types';
+import { HistoricalFigure, DeepDiveData, IAIService, RelationshipExplanation, RelationshipExplanationOptions, FigureCategory, DiscoveryClusterState, ClusterPlacement, LayoutData, WeaveRequest, WeaveGenerationContext, CanvasLayoutMode, CanvasConfig, CanvasSnapshot, CanvasHistoryRecord, CanvasViewSnapshot, SidebarViewState } from './types';
 import { calculateWeaveBounds, normalizeWeaveCategories } from './utils/weave';
 import { getUserErrorMessage, getWeaveValidationMessage, UserFacingError, EmptyCanvasError } from './utils/userErrors';
 import { createAIService } from './services/aiService';
@@ -528,7 +528,8 @@ const App: React.FC = () => {
     const handleTraceRelationships = (figure: HistoricalFigure) => runRelationshipAction(figure, 'map');
     const handleDiscover = (figure: HistoricalFigure) => runRelationshipAction(figure, 'expand');
 
-    const openFigureRelationship = async (sourceFigure: HistoricalFigure, targetFigure: HistoricalFigure) => {
+    // `contactOnly` is the Connection tab's "Why?": it explains the contact verdict that admitted the link.
+    const openFigureRelationship = async (sourceFigure: HistoricalFigure, targetFigure: HistoricalFigure, options: RelationshipExplanationOptions = {}) => {
         const storage = canvasStorage.current;
         if (!relationshipState && !popoverState.isOpen) {
             overlayInvoker.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -541,7 +542,11 @@ const App: React.FC = () => {
 
         const rejectRelationship = () => {
             setPopoverState(previous => ({ ...previous, isOpen: false, loading: false }));
-            setToast({ message: `No verified historical connection between ${sourceFigure.name} and ${targetFigure.name}.`, type: 'info' });
+            setToast({ message: options.contactOnly
+                ? `No documented personal contact between ${sourceFigure.name} and ${targetFigure.name}.`
+                : `No verified historical connection between ${sourceFigure.name} and ${targetFigure.name}.`, type: 'info' });
+            // A contact verdict is stricter than the general one; it must not prune the canvas.
+            if (options.contactOnly) return;
             if (getCanvasFocusFigure(figures, config.weaveContext, config.seedFigureId)?.id === sourceFigure.id) {
                 setFigures(previous => discardRejectedFollowFigureCandidates(previous, config.weaveContext, storage, config.seedFigureId));
                 setSelectedFigures(previous => previous.filter(figure => figure.id !== targetFigure.id));
@@ -552,7 +557,7 @@ const App: React.FC = () => {
                 ? { ...previous, relatedIds: previous.relatedIds.filter(id => id !== targetFigure.id) } : previous);
         };
         // Assessments are cached per direction, but the relationship is one pair.
-        const assessment = readPairAssessment(sourceFigure, targetFigure, storage);
+        const assessment = readPairAssessment(sourceFigure, targetFigure, storage, options);
         if (assessment?.isRelevant === false) {
             rejectRelationship();
             return;
@@ -594,7 +599,7 @@ const App: React.FC = () => {
         try {
             const [assessed, detailsMap] = await Promise.all([
                 assessment ? Promise.resolve(new Map([[targetFigure.id, assessment]]))
-                    : assessRelationships(aiService, sourceFigure, [targetFigure], storage, signal),
+                    : assessRelationships(aiService, sourceFigure, [targetFigure], storage, signal, options),
                 fetchBatchFigureDetails([sourceFigure, targetFigure])
             ]);
 
@@ -890,6 +895,7 @@ const App: React.FC = () => {
                     connectionFocus={connection.focusRequest}
                     onConnectionStep={connection.setCurrentIndex}
                     onConnectionRevealEnd={connection.endReveal}
+                    onConnectionExit={connection.close}
                     modalActive={isLauncherOpen || !!relationshipState || popoverState.isOpen || isSettingsOpen}
                     relationshipSourceId={relationshipState?.sourceFigure.id}
                     highlightedFigureIds={highlightedFigureIds}
@@ -945,7 +951,7 @@ const App: React.FC = () => {
                     isVisible: connection.isTabVisible, tabRequest: connection.tabRequest,
                     connection: connection.active, currentIndex: connection.currentIndex, recent: connection.recent,
                     canvasIds, isBusy, onClose: connection.close, onRetry: connection.retry, onReplay: connection.replay,
-                    onFocusPerson: connection.focusPerson, onExplain: openFigureRelationship,
+                    onFocusPerson: connection.focusPerson, onExplain: (from, to) => openFigureRelationship(from, to, { contactOnly: true }),
                 }}
                 activeTracingFigureId={relationshipState?.sourceFigure.id}
                 focusFigureId={focusFigure?.id}

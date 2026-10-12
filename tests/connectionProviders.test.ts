@@ -4,7 +4,7 @@ import { GeminiService } from '../src/services/geminiService';
 import { OpenRouterService } from '../src/services/openRouterService';
 import { OllamaService } from '../src/services/ollamaService';
 import type { ConnectionPathOptions, HistoricalFigure, IAIService } from '../src/types';
-import { chatResponse, localConfig } from './helpers';
+import { chatResponse, localConfig, relationship } from './helpers';
 
 const person = (id: string, name: string, birthYear: number, deathYear: number): HistoricalFigure =>
   ({ id, name, birthYear, deathYear, occupation: 'Painter', category: 'ARTISTS' });
@@ -48,12 +48,16 @@ test('every provider runs the same contact-only path and resolve prompts and map
         null,
         resolved,
         null,
+        relationship,
+        relationship,
       ];
       const path = await service.fetchConnectionPath(from, to, options);
       assert.deepEqual(path?.nodes, [{ id: 'leonardo' }, { id: 'vasari' }, { id: 'galileo' }]);
       assert.equal(await service.fetchConnectionPath(from, to, options), null);
       assert.equal((await service.resolveFigure('Henry VIII'))?.name, 'Henry VIII');
       assert.equal(await service.resolveFigure('Zzyzx'), null);
+      assert.equal((await service.fetchRelationshipExplanation(from, to, undefined, { contactOnly: true }))?.isRelevant, true);
+      assert.equal((await service.fetchRelationshipExplanation(from, to))?.isRelevant, true);
     }
     const shared = requests.gemini;
     for (const name of ['openrouter', 'ollama']) {
@@ -63,6 +67,10 @@ test('every provider runs the same contact-only path and resolve prompts and map
     assert.match(shared[0].prompt, /Influence through a work or ideas alone does not count/);
     assert.match(shared[0].prompt, /"id":"c1"/);
     assert.match(shared[2].prompt, /Identify the one real historical person/);
+    // The contact option reaches the prompt of every provider; the default stays the general standard.
+    assert.match(shared[4].prompt, /Only documented personal contact qualifies/);
+    assert.doesNotMatch(shared[4].prompt, /specifically engaged with the other person's work/);
+    assert.match(shared[5].prompt, /specifically engaged with the other person's work/);
     // Gemini constrains both answers with a schema that allows null; the others rely on the prompt alone.
     assert.ok(shared.every(request => request.body.generationConfig.responseSchema));
     assert.ok(requests.openrouter.every(request => request.body.response_format === undefined));

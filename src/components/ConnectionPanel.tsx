@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { HistoricalFigure } from '../types';
 import type { ActiveConnection } from '../hooks/useConnection';
 import { connectionHeadline } from '../hooks/useConnection';
 import type { ConnectionLinkResult } from '../services/connectionPath';
 import type { ConnectionPathEntry } from '../utils/connectionPaths';
 import { fetchBatchFigureDetails } from '../services/wikiService';
+import { prefersReducedMotion } from '../utils/canvasCamera';
 import SidebarFigureCard, { type FigureDetail } from './SidebarFigureCard';
 
 export interface ConnectionPanelProps {
@@ -21,6 +22,11 @@ export interface ConnectionPanelProps {
   // The same hover actions as every other card in the sidebar.
   renderActions: (figure: HistoricalFigure) => React.ReactNode;
 }
+
+// A failed search lists proposals: people who are not on the canvas are only ever names, so nothing is
+// fetched or shown as fact about them.
+export const isProposedPerson = (connection: ActiveConnection | null, canvasIds: ReadonlySet<string>, person: HistoricalFigure) =>
+  connection?.status === 'failed' && !canvasIds.has(person.id);
 
 const degrees = (count: number) => `${count} ${count === 1 ? 'degree' : 'degrees'}`;
 
@@ -44,21 +50,39 @@ const LinkConnector: React.FC<{ link: ConnectionLinkResult; onExplain: Connectio
   );
 };
 
+// A person a failed search proposed who is not on the canvas. Only the name is shown, as a proposal: no
+// description, dates, portrait, or actions, because nothing about them has been checked.
+const ProposedPerson: React.FC<{ name: string }> = ({ name }) => (
+  <div className="connection-proposed">
+    <span className="connection-proposed-name">{name}</span>
+    <span className="connection-proposed-tag">Proposed, not verified</span>
+  </div>
+);
+
 // The Connection tab: the chain from one person to the other with the verified evidence for every
 // link, and the connections already made on this canvas.
 const ConnectionPanel: React.FC<ConnectionPanelProps> = ({ connection, currentIndex, recent, canvasIds, isBusy, onClose, onRetry,
   onReplay, onFocusPerson, onExplain, renderActions }) => {
   const [details, setDetails] = useState<Map<string, FigureDetail>>(new Map());
-  const chainKey = connection?.chain.map(person => person.id).join('|') ?? '';
+  const chainRef = useRef<HTMLOListElement>(null);
+  const isProposed = (person: HistoricalFigure) => isProposedPerson(connection, canvasIds, person);
+  const known = connection?.chain.filter(person => !isProposed(person)) ?? [];
+  const chainKey = known.map(person => person.id).join('|');
 
   useEffect(() => {
-    if (!connection) return;
+    if (!known.length) return;
     let current = true;
-    fetchBatchFigureDetails(connection.chain).then(result => {
+    fetchBatchFigureDetails(known).then(result => {
       if (current) setDetails(previous => new Map([...previous, ...result]));
     }).catch(error => console.warn('Could not load connection portraits', error));
     return () => { current = false; };
   }, [chainKey]);
+
+  // Long chains outgrow the sidebar: keep the card the camera is on in view.
+  useEffect(() => {
+    if (currentIndex === null) return;
+    chainRef.current?.children[currentIndex]?.scrollIntoView({ block: 'nearest', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+  }, [currentIndex]);
 
   const activeEnds = connection ? [connection.chain[0].id, connection.chain[connection.chain.length - 1].id].sort().join('|') : '';
   return (
@@ -81,17 +105,19 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({ connection, currentIn
               <button type="button" className="connection-retry" onClick={onRetry} disabled={isBusy}>Try again</button>
             </div>
           )}
-          <ol className="connection-chain" aria-label="Chain of personal contacts">
+          <ol ref={chainRef} className="connection-chain" aria-label="Chain of personal contacts">
             {connection.chain.map((person, index) => {
               const onCanvas = canvasIds.has(person.id);
               const link = connection.links[index];
               return (
                 <li key={person.id} className="connection-chain-item">
-                  <SidebarFigureCard figure={person} detail={details.get(person.id)} isActive={currentIndex === index}
-                    onSelect={onCanvas ? () => onFocusPerson(person) : undefined}
-                    selectLabel={`Fly to ${person.name} on the canvas`}>
-                    {onCanvas && renderActions(person)}
-                  </SidebarFigureCard>
+                  {isProposed(person) ? <ProposedPerson name={person.name} /> : (
+                    <SidebarFigureCard figure={person} detail={details.get(person.id)} isActive={currentIndex === index}
+                      onSelect={onCanvas ? () => onFocusPerson(person) : undefined}
+                      selectLabel={`Fly to ${person.name} on the canvas`}>
+                      {onCanvas && renderActions(person)}
+                    </SidebarFigureCard>
+                  )}
                   {link && <LinkConnector link={link} onExplain={onExplain} />}
                 </li>
               );

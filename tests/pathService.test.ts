@@ -150,8 +150,16 @@ test('resolving a name returns one person, or null for unknown, ambiguous, and n
   assert.equal(await requestResolveFigure(generatorFor([null]), 'Zzyzx'), null);
   assert.equal(await requestResolveFigure(generatorFor([]), '   '), null);
   await assert.rejects(requestResolveFigure(generatorFor([
-    newPerson('French Revolution', 1789, 1799, { category: 'EVENTS' }), newPerson('French Revolution', 1789, 1799, { category: 'EVENTS' }),
-  ]), 'French Revolution'), /event/i);
+    newPerson('Broken', 1789, 1700), newPerson('Broken', 1789, 1700),
+  ]), 'Broken'), /unusable data/i);
+});
+
+test('an event answer to a typed name is null at once, without a corrective retry', async () => {
+  const prompts: string[] = [];
+  const event = newPerson('French Revolution', 1789, 1799, { category: 'EVENTS' });
+  assert.equal(await requestResolveFigure(generatorFor([event, event], prompts), 'French Revolution'), null);
+  assert.equal(prompts.length, 1);
+  assert.equal(await requestResolveFigure(generatorFor([{ ...event, category: ' events ' }]), 'French Revolution'), null);
 });
 
 test('cancelling stops path and resolve requests before the model answers', async () => {

@@ -192,13 +192,18 @@ export interface ConnectionPathProposal {
   links: Array<{ claim: string }>;
 }
 
+// `contactOnly` is Six Degrees' verification: only a documented personal interaction qualifies.
+export interface RelationshipExplanationOptions {
+  contactOnly?: boolean;
+}
+
 export interface IAIService {
   validateWeaveQuery(request: WeaveRequest, signal?: AbortSignal): Promise<WeaveValidationResult>;
   suggestWeaveTopic(excludedTopics?: string[], signal?: AbortSignal, broadenTopic?: string): Promise<WeaveValidationResult>;
   fetchHistoricalFigures(start: number, end: number, signal?: AbortSignal, context?: WeaveGenerationContext): Promise<HistoricalFigure[]>;
   fetchRelatedFigures(target: HistoricalFigure, allFigures: HistoricalFigure[], signal?: AbortSignal): Promise<string[]>;
   discoverRelatedFigures(target: HistoricalFigure, existingNames: string[], start: number, end: number, signal?: AbortSignal, context?: WeaveGenerationContext): Promise<HistoricalFigure[]>;
-  fetchRelationshipExplanation(source: HistoricalFigure, target: HistoricalFigure, signal?: AbortSignal): Promise<RelationshipExplanation | null>;
+  fetchRelationshipExplanation(source: HistoricalFigure, target: HistoricalFigure, signal?: AbortSignal, options?: RelationshipExplanationOptions): Promise<RelationshipExplanation | null>;
   fetchFigureDeepDive(figure: HistoricalFigure, signal?: AbortSignal): Promise<DeepDiveData | null>;
   fetchConnectionPath(from: HistoricalFigure, to: HistoricalFigure, options: ConnectionPathOptions, signal?: AbortSignal): Promise<ConnectionPathProposal | null>;
   resolveFigure(name: string, signal?: AbortSignal): Promise<NewPerson | null>;

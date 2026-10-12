@@ -7,9 +7,11 @@ type Props = React.ComponentPropsWithRef<'button'> & {
   figure: HistoricalFigure;
   imageUrl?: string;
   isSource?: boolean;
+  // Six Degrees: the person's place in the chain, drawn on the card corner.
+  badge?: { number: number; scale: number };
 };
 
-const FigureCard: React.FC<Props> = ({ figure, imageUrl = figure.imageUrl, isSource = false,
+const FigureCard: React.FC<Props> = ({ figure, imageUrl = figure.imageUrl, isSource = false, badge,
   className = '', style, ...buttonProps }) => (
   <button
     type="button"
@@ -17,6 +19,8 @@ const FigureCard: React.FC<Props> = ({ figure, imageUrl = figure.imageUrl, isSou
     className={`relationship-card ${isSource ? 'relationship-source' : ''} ${className}`}
     style={style}
   >
+    {badge && <span className="connection-badge connection-badge-corner" aria-label={`Number ${badge.number} in the chain`}
+      style={{ transform: `scale(${badge.scale})` }}>{badge.number}</span>}
     <span className="figure-card-corner" aria-hidden="true"
       style={{ backgroundColor: CATEGORY_COLORS[figure.category] }} />
     <div className="relationship-card-text">

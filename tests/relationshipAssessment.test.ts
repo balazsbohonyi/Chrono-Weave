@@ -204,3 +204,55 @@ test('a pair is one relationship whichever direction was assessed, and a rejecti
   assert.equal(readPairAssessment(figure, babbage, storage)?.isRelevant, false);
   assert.equal(readPairAssessment(babbage, figure, storage)?.isRelevant, false);
 });
+
+test('contact-only assessments are asked with the option and cached apart from the general ones', async () => {
+  const target = { ...figure, id: 'babbage', name: 'Charles Babbage' };
+  const storage = new MemoryStorage();
+  const seen: unknown[] = [];
+  const service = { fetchRelationshipExplanation: async (_source: typeof figure, _target: typeof figure, _signal?: AbortSignal, options?: unknown) => { seen.push(options); return relationship; } };
+  const accepted = await assessRelationships(service, figure, [target], storage, undefined, { contactOnly: true });
+  assert.equal(accepted.size, 1);
+  assert.deepEqual(seen, [{ contactOnly: true }]);
+  assert.deepEqual(Array.from({ length: storage.length }, (_, index) => storage.key(index)), ['chrono_contact_ada_babbage']);
+  assert.equal(readRelationshipAssessment(figure, target, storage), null);
+  assert.deepEqual(readRelationshipAssessment(figure, target, storage, { contactOnly: true }), relationship);
+  assert.deepEqual(readPairAssessment(target, figure, storage, { contactOnly: true }), relationship);
+  assert.equal(readPairAssessment(target, figure, storage), null);
+  assert.equal(countVerifiedConnections([figure, target], storage), 0, 'contact verdicts are not general connections');
+  await assessRelationships({ fetchRelationshipExplanation: async () => { throw new Error('Should reuse the contact verdict'); } },
+    figure, [target], storage, undefined, { contactOnly: true });
+});
+
+test('a general confirmation never counts as contact, while a general rejection answers a contact check', async () => {
+  const target = { ...figure, id: 'babbage', name: 'Charles Babbage' };
+  const storage = new MemoryStorage();
+  await assessRelationships({ fetchRelationshipExplanation: async () => relationship }, figure, [target], storage);
+  assert.equal(readRelationshipAssessment(figure, target, storage, { contactOnly: true }), null);
+  let asked = 0;
+  const contact = await assessRelationships({ fetchRelationshipExplanation: async () => { asked++; return { ...relationship, isRelevant: false, evidence: '' }; } },
+    figure, [target], storage, undefined, { contactOnly: true });
+  assert.equal(asked, 1);
+  assert.equal(contact.size, 0);
+  // A contact rejection wins over the general confirmation for the same pair, in either direction.
+  assert.equal(readPairAssessment(target, figure, storage, { contactOnly: true })?.isRelevant, false);
+  assert.equal(readPairAssessment(target, figure, storage)?.isRelevant, true);
+
+  const rejected = new MemoryStorage();
+  await assessRelationships({ fetchRelationshipExplanation: async () => ({ ...relationship, isRelevant: false, evidence: '' }) }, figure, [target], rejected);
+  const result = await assessRelationships({ fetchRelationshipExplanation: async () => { throw new Error('A general rejection settles the contact question'); } },
+    figure, [target], rejected, undefined, { contactOnly: true });
+  assert.equal(result.size, 0);
+  assert.equal(readRelationshipAssessment(figure, target, rejected, { contactOnly: true })?.isRelevant, false);
+});
+
+test('contact verdicts follow the same narrative-version rule as general ones', async () => {
+  const target = { ...figure, id: 'babbage', name: 'Charles Babbage' };
+  const storage = new MemoryStorage();
+  await assessRelationships({ fetchRelationshipExplanation: async () => relationship }, figure, [target], storage, undefined, { contactOnly: true });
+  const key = 'chrono_contact_ada_babbage';
+  const saved = JSON.parse(storage.getItem(key)!);
+  storage.setItem(key, JSON.stringify({ ...saved, narrativeVersion: RELATIONSHIP_NARRATIVE_VERSION - 1 }));
+  assert.equal(readRelationshipAssessment(figure, target, storage, { contactOnly: true }), null);
+  storage.setItem(key, JSON.stringify({ ...saved, scope: JSON.stringify([]) }));
+  assert.equal(readRelationshipAssessment(figure, target, storage, { contactOnly: true }), null);
+});

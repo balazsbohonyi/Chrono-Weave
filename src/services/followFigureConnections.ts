@@ -1,6 +1,6 @@
 import type { HistoricalFigure, IAIService, WeaveGenerationContext } from '../types';
 import { getCanvasFocusFigure } from '../utils/canvasLayout';
-import { savedPathFigureIds } from '../utils/connectionPaths';
+import { connectionFigureIds } from '../utils/connectionPaths';
 import { assessRelationships, readRelationshipAssessment } from './relationshipAssessment';
 
 // Generated entries are candidates, just as they are for Map Relationships.
@@ -31,8 +31,9 @@ export function discardRejectedFollowFigureCandidates(
 ): HistoricalFigure[] {
   const focus = getCanvasFocusFigure(figures, context, savedSeedId);
   if (!focus) return figures;
-  // People woven into a verified Six Degrees chain stay, even if they were once rejected against the focus.
-  const connected = savedPathFigureIds(storage);
+  // People woven into a verified Six Degrees chain stay, even if they were once rejected against the focus
+  // and even after their path was evicted from the recent list.
+  const connected = connectionFigureIds(storage);
   return figures.filter(figure => figure.id === focus.id || connected.has(figure.id)
     || readRelationshipAssessment(focus, figure, storage)?.isRelevant !== false);
 }

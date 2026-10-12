@@ -1,6 +1,6 @@
 import { generateRelationshipAssessment } from './relationshipAssessment';
 
-import { ConnectionPathOptions, ConnectionPathProposal, DeepDiveData, FigureCategory, HistoricalFigure, IAIService, NewPerson, RelationshipExplanation, WeaveGenerationContext, WeaveRequest, WeaveValidationResult } from "../types";
+import { ConnectionPathOptions, ConnectionPathProposal, DeepDiveData, FigureCategory, HistoricalFigure, IAIService, NewPerson, RelationshipExplanation, RelationshipExplanationOptions, WeaveGenerationContext, WeaveRequest, WeaveValidationResult } from "../types";
 import { requestConnectionPath, requestResolveFigure } from './pathService';
 import {
   buildDiscoveryPrompt,
@@ -171,8 +171,8 @@ export class OpenRouterService implements IAIService {
         }, signal);
     }
 
-    async fetchRelationshipExplanation(source: HistoricalFigure, target: HistoricalFigure): Promise<RelationshipExplanation | null> {
-        const prompt = buildRelationshipExplanationPrompt(source, target);
+    async fetchRelationshipExplanation(source: HistoricalFigure, target: HistoricalFigure, _signal?: AbortSignal, options?: RelationshipExplanationOptions): Promise<RelationshipExplanation | null> {
+        const prompt = buildRelationshipExplanationPrompt(source, target, options);
         try {
             return await generateRelationshipAssessment(correction =>
                 enqueueTaskWithRetry(() => this.callOpenRouter(correction ? `${prompt}\n${correction}` : prompt)));

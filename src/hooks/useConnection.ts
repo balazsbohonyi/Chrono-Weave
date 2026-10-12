@@ -1,26 +1,18 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import type {
-  CanvasConfig, ClusterPlacement, DiscoveryClusterState, FigureCategory, HistoricalFigure, IAIService, PathPersonRef,
+  CanvasConfig, ClusterPlacement, DiscoveryClusterState, FigureCategory, HistoricalFigure, IAIService,
 } from '../types';
+import { classifyConnectionTarget, type ConnectionProgress, type ConnectionTargetStatus } from '../services/connectionPath';
 import {
-  classifyConnectionTarget, findConnection, resolveConnectionTarget,
-  type ConnectionLinkResult, type ConnectionProgress, type ConnectionTargetStatus,
-} from '../services/connectionPath';
-import { listConnectionPaths, readConnectionPath, saveConnectionPath, type ConnectionPathEntry } from '../utils/connectionPaths';
-import { weaveConnectionIntoCanvas, type WovenCanvas } from '../utils/weaveConnection';
-import { getUserErrorMessage } from '../utils/userErrors';
+  decideConnectionStart, degreeLabel, retryRequest, runConnectionSearch, savedConnectionView,
+  type ConnectionTarget, type ConnectionView,
+} from '../services/connectionFlow';
+import { listConnectionPaths, type ConnectionPathEntry } from '../utils/connectionPaths';
+import type { WovenCanvas } from '../utils/weaveConnection';
 import type { ConnectionFocusRequest, ConnectionReveal } from './useConnectionReveal';
 
-export interface ActiveConnection {
+export interface ActiveConnection extends ConnectionView {
   id: number;
-  status: 'connected' | 'failed';
-  reason?: 'no-path' | 'unverified';
-  // The chain from the requested start to the requested end. A failed search lists what was proposed.
-  chain: HistoricalFigure[];
-  links: ConnectionLinkResult[];
-  request: { from: HistoricalFigure; to: HistoricalFigure };
-  // Pairs a failed search found unverifiable, so "Try again" starts from them.
-  avoidPairs?: Array<[PathPersonRef, PathPersonRef]>;
 }
 
 export interface PickingState {
@@ -48,11 +40,6 @@ interface Dependencies {
   onSearchStart: () => void;
 }
 
-type Target = { figure: HistoricalFigure } | { name: string };
-
-const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
-const degreeLabel = (count: number) => plural(count, 'degree', 'degrees');
-
 export const connectionHeadline = (connection: ActiveConnection) => {
   const first = connection.chain[0].name, last = connection.chain[connection.chain.length - 1].name;
   return connection.status === 'connected'
@@ -60,8 +47,8 @@ export const connectionHeadline = (connection: ActiveConnection) => {
     : `No verified chain of personal contacts connects ${first} and ${last} yet.`;
 };
 
-// All of Six Degrees' state and flow, apart from drawing it: choosing the other end, searching,
-// weaving a verified chain into the canvas, and replaying saved ones.
+// Six Degrees' React state, apart from drawing it. The rules (what a request does, what a finished
+// search does to the canvas and the cache) live in services/connectionFlow and are tested there.
 export function useConnection(dependencies: Dependencies) {
   const latest = useRef(dependencies);
   latest.current = dependencies;
@@ -100,7 +87,7 @@ export function useConnection(dependencies: Dependencies) {
     setFocusRequest(null);
   }, [cancelSearch]);
 
-  const show = useCallback((connection: Omit<ActiveConnection, 'id'>) => {
+  const show = useCallback((connection: ConnectionView) => {
     setActive({ ...connection, id: ++nextId.current });
     setReveal(previous => ({ playId: previous.playId + 1, animate: connection.status === 'connected' }));
     setCurrentIndex(null);
@@ -109,24 +96,16 @@ export function useConnection(dependencies: Dependencies) {
     latest.current.openSidebar();
   }, []);
 
-  const showSaved = useCallback((chain: HistoricalFigure[], evidence: string[]) => {
-    show({
-      status: 'connected', chain, request: { from: chain[0], to: chain[chain.length - 1] },
-      links: chain.slice(1).map((person, index) => ({ from: chain[index], to: person, status: 'verified' as const, evidence: evidence[index] })),
-    });
-  }, [show]);
-
-  const start = useCallback(async (from: HistoricalFigure, target: Target, avoidPairs?: ActiveConnection['avoidPairs']) => {
+  const start = useCallback(async (from: HistoricalFigure, requested: ConnectionTarget, avoidPairs?: ActiveConnection['avoidPairs']) => {
     const { storage: canvasStorage, service, figures: canvasFigures } = latest.current;
-    const typedName = 'name' in target ? target.name : '';
+    const typedName = 'name' in requested ? requested.name : '';
     const failPicking = (message: string) => setPicking({ from, error: message, draft: typedName });
 
-    if ('figure' in target) {
-      const status = classifyConnectionTarget(from, target.figure);
-      if ('reason' in status) { failPicking(status.message); return; }
-      const saved = readConnectionPath(canvasStorage, canvasFigures, from.id, target.figure.id);
-      if (saved) { setPicking(null); showSaved(saved.figures, saved.evidence); return; }
-    }
+    // Refusals and saved paths need no search, so they must not stop anything else that is running.
+    const decision = decideConnectionStart(from, requested, canvasFigures, canvasStorage);
+    if (decision.kind === 'refuse') { failPicking(decision.message); return; }
+    if (decision.kind === 'replay') { setPicking(null); show(savedConnectionView(decision.saved)); return; }
+    const target = decision.target;
 
     latest.current.onSearchStart();
     const action = latest.current.begin();
@@ -137,44 +116,24 @@ export function useConnection(dependencies: Dependencies) {
     const isCurrent = () => action.isCurrent() && !own.signal.aborted;
     setPicking(null);
     setIsConnecting(true);
-    setProgress({ label: typedName ? `Identifying ${typedName}…` : 'Checking for a direct link…', links: [] });
+    setProgress({ label: 'name' in target ? `Identifying ${target.name}…` : 'Checking for a direct link…', links: [] });
     try {
-      let to: HistoricalFigure;
-      if ('figure' in target) to = target.figure;
-      else {
-        const resolved = await resolveConnectionTarget(service, typedName, from, canvasFigures, signal);
-        if (!isCurrent()) return;
-        if ('message' in resolved) { failPicking(resolved.message); return; }
-        to = resolved.figure;
-        const saved = readConnectionPath(canvasStorage, canvasFigures, from.id, to.id);
-        if (saved) { showSaved(saved.figures, saved.evidence); return; }
-      }
-      const result = await findConnection({
-        service, from, to, figures: canvasFigures, storage: canvasStorage, signal, avoidPairs,
-        onProgress: next => { if (isCurrent()) setProgress(next); },
+      await runConnectionSearch({
+        service, storage: canvasStorage, figures: canvasFigures, from, target, avoidPairs, signal,
+        effects: {
+          isCurrent,
+          progress: setProgress,
+          canvas: () => {
+            const { figures, config, clusters, selectedCategories, getPlacements } = latest.current;
+            return { figures, config, clusters, selectedCategories, placements: getPlacements() };
+          },
+          applyWoven: woven => latest.current.applyWoven(woven),
+          pathsChanged: () => setPathRevision(previous => previous + 1),
+          show,
+          failPicking,
+          notify: (message, type) => latest.current.notify(message, type),
+        },
       });
-      if (!isCurrent()) return;
-      const request = { from, to };
-      if (result.status === 'failed') {
-        show({ status: 'failed', reason: result.reason, chain: result.chain, links: result.links, request, avoidPairs: result.avoidPairs });
-        latest.current.notify(`We couldn't verify a chain of personal contacts between ${from.name} and ${to.name}.`, 'info');
-        return;
-      }
-      const now = latest.current;
-      const woven = weaveConnectionIntoCanvas({
-        figures: now.figures, config: now.config, clusters: now.clusters, placements: now.getPlacements(),
-        selectedCategories: now.selectedCategories, chain: result.chain, newFigures: result.newFigures,
-      });
-      saveConnectionPath(canvasStorage, result.chain, result.links.map(link => link.evidence ?? ''));
-      setPathRevision(previous => previous + 1);
-      now.applyWoven(woven);
-      show({ status: 'connected', chain: result.chain, links: result.links, request });
-      now.notify(woven.newIds.length
-        ? `Wove in ${plural(woven.newIds.length, 'person', 'people')} to connect ${from.name} and ${to.name}: ${result.newFigures.map(person => person.name).join(', ')}`
-        : `${from.name} and ${to.name} are ${degreeLabel(result.degrees)} apart.`, 'success');
-    } catch (error) {
-      if (!isCurrent()) return;
-      latest.current.notify(getUserErrorMessage(error, 'We could not connect these two people this time. Please try again.'), 'error');
     } finally {
       if (isCurrent()) {
         search.current = null;
@@ -182,7 +141,7 @@ export function useConnection(dependencies: Dependencies) {
         setProgress(null);
       }
     }
-  }, [show, showSaved]);
+  }, [show]);
 
   const beginPicking = useCallback((from: HistoricalFigure) => {
     cancelSearch();
@@ -197,11 +156,11 @@ export function useConnection(dependencies: Dependencies) {
   }, [start]);
 
   const retry = useCallback(() => {
-    if (!active || active.status !== 'failed') return;
-    void start(active.request.from, { figure: active.request.to }, active.avoidPairs);
+    const request = retryRequest(active);
+    if (request) void start(request.from, request.target, request.avoidPairs);
   }, [active, start]);
 
-  const replay = useCallback((entry: ConnectionPathEntry) => showSaved(entry.figures, entry.evidence), [showSaved]);
+  const replay = useCallback((entry: ConnectionPathEntry) => show(savedConnectionView(entry)), [show]);
 
   // The ✕ in the Connection tab hides the thread; saved connections stay listed.
   const close = useCallback(() => {

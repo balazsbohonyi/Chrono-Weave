@@ -1,7 +1,7 @@
 import { generateRelationshipAssessment } from './relationshipAssessment';
 
 import { GenerateContentResponse, GoogleGenAI, Type, type Schema } from "@google/genai";
-import { ConnectionPathOptions, ConnectionPathProposal, DeepDiveData, HistoricalFigure, IAIService, NewPerson, RelationshipExplanation, WeaveGenerationContext, WeaveRequest, WeaveValidationResult } from "../types";
+import { ConnectionPathOptions, ConnectionPathProposal, DeepDiveData, HistoricalFigure, IAIService, NewPerson, RelationshipExplanation, RelationshipExplanationOptions, WeaveGenerationContext, WeaveRequest, WeaveValidationResult } from "../types";
 import { requestConnectionPath, requestResolveFigure } from './pathService';
 import {
   buildDiscoveryPrompt,
@@ -225,9 +225,9 @@ export class GeminiService implements IAIService {
         }, signal);
     }
 
-    async fetchRelationshipExplanation(source: HistoricalFigure, target: HistoricalFigure): Promise<RelationshipExplanation | null> {
+    async fetchRelationshipExplanation(source: HistoricalFigure, target: HistoricalFigure, _signal?: AbortSignal, options?: RelationshipExplanationOptions): Promise<RelationshipExplanation | null> {
         try {
-            const prompt = buildRelationshipExplanationPrompt(source, target);
+            const prompt = buildRelationshipExplanationPrompt(source, target, options);
 
             const ai = this.ensureAI();
             return await generateRelationshipAssessment(async correction => {

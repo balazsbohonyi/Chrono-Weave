@@ -5,8 +5,9 @@ import type {
   ConnectionPathProposal, HistoricalFigure, IAIService, NewPerson, PathCatalogEntry, PathPersonRef, RelationshipExplanation,
 } from '../types';
 import { canonicalName } from '../utils/names';
+import { getUserErrorMessage } from '../utils/userErrors';
 import { assessRelationships, readPairAssessment, RelationshipAssessmentError } from './relationshipAssessment';
-import { isNewPerson } from './pathService';
+import { isNewPerson, overlaps, pairKey as namePairKey } from './pathService';
 
 // Orchestration for Six Degrees. Everything here is pure over a fake service and storage, so the
 // search can be tested without a browser: direct check, proposal, verification, local repair.
@@ -19,10 +20,10 @@ export interface ConnectionFeasibility {
 }
 
 const MAX_GAP_YEARS = MAX_PATH_INTERMEDIATES * YEARS_PER_DEGREE;
-const pairKey = (first: Pick<HistoricalFigure, 'id'>, second: Pick<HistoricalFigure, 'id'>) => [first.id, second.id].sort().join('\u0000');
+const pairKey = (first: Pick<HistoricalFigure, 'id'>, second: Pick<HistoricalFigure, 'id'>) => namePairKey(first.id, second.id);
 const personRef = ({ id, name }: Pick<HistoricalFigure, 'id' | 'name'>): PathPersonRef => ({ id, name });
-const overlaps = (first: Pick<HistoricalFigure, 'birthYear' | 'deathYear'>, second: Pick<HistoricalFigure, 'birthYear' | 'deathYear'>) =>
-  first.birthYear <= second.deathYear && second.birthYear <= first.deathYear;
+// Every link is verified as a personal contact, never as influence through a work.
+const CONTACT = { contactOnly: true } as const;
 
 // Living people use the current year as their death year, so they never stretch the gap.
 export function checkConnectionFeasibility(first: HistoricalFigure, second: HistoricalFigure,
@@ -129,6 +130,8 @@ export async function findConnection(options: ConnectionSearchOptions): Promise<
 
   const avoid = new Map<string, [PathPersonRef, PathPersonRef]>();
   const rejected = new Set<string>();
+  // Links the model could not give a verdict on: not asked again in this search, but no proof of absence.
+  const unassessable = new Set<string>();
   for (const [first, second] of options.avoidPairs ?? []) {
     const key = pairKey(first, second);
     avoid.set(key, [first, second]);
@@ -141,16 +144,16 @@ export async function findConnection(options: ConnectionSearchOptions): Promise<
   const emit = () => options.onProgress?.({ label, links: progressLinks.map(link => ({ ...link })) });
   const setLabel = (text: string) => { label = text; emit(); };
 
-  const verifyLink = async (first: HistoricalFigure, second: HistoricalFigure): Promise<RelationshipExplanation | null> => {
+  const verifyLink = async (first: HistoricalFigure, second: HistoricalFigure): Promise<RelationshipExplanation | 'unassessable' | null> => {
     if (!overlaps(first, second)) return null;
-    const cached = readPairAssessment(first, second, storage);
+    const cached = readPairAssessment(first, second, storage, CONTACT);
     if (cached) return cached.isRelevant ? cached : null;
     try {
-      return (await assessRelationships(service, first, [second], storage, signal)).get(second.id) ?? null;
+      return (await assessRelationships(service, first, [second], storage, signal, CONTACT)).get(second.id) ?? null;
     } catch (error) {
       signal.throwIfAborted();
-      // A model that cannot produce a usable verdict has not verified the link.
-      if (error instanceof RelationshipAssessmentError) return null;
+      // A model that cannot produce a usable verdict has not verified the link, but has not refuted it either.
+      if (error instanceof RelationshipAssessmentError) return 'unassessable';
       throw error;
     }
   };
@@ -159,19 +162,23 @@ export async function findConnection(options: ConnectionSearchOptions): Promise<
     signal.throwIfAborted();
     const key = pairKey(first, second);
     if (evidence.has(key)) return true;
-    if (rejected.has(key)) return false;
+    if (rejected.has(key) || unassessable.has(key)) return false;
     const entry: ProgressLink = { id: key, from: first.name, to: second.name, status: 'checking' };
     progressLinks.push(entry);
     emit();
     const explanation = await verifyLink(first, second);
     signal.throwIfAborted();
-    if (explanation?.evidence) {
+    if (explanation && explanation !== 'unassessable' && explanation.evidence) {
       evidence.set(key, explanation.evidence);
       entry.status = 'verified';
     } else {
-      rejected.add(key);
-      avoid.set(key, [personRef(first), personRef(second)]);
       entry.status = 'rejected';
+      if (explanation === 'unassessable') unassessable.add(key);
+      else {
+        // Only a real "no" is a known-bad pair; it is carried into repairs and "Try again".
+        rejected.add(key);
+        avoid.set(key, [personRef(first), personRef(second)]);
+      }
     }
     emit();
     return entry.status === 'verified';
@@ -260,22 +267,32 @@ export async function findConnection(options: ConnectionSearchOptions): Promise<
 
 export type ConnectionTargetResolution = { figure: HistoricalFigure } | { message: string };
 
+// A typed name that is already on the canvas, events included so they get their own refusal.
+export const findCanvasPerson = (figures: HistoricalFigure[], name: string): HistoricalFigure | undefined =>
+  figures.find(figure => canonicalName(figure.name) === canonicalName(name));
+
 // Turns a typed name into the other end of a chain. People already on the canvas need no request;
 // anyone else is identified by the model, then checked exactly like a person picked on the canvas.
+// Every failure except cancellation comes back as a message for the picker.
 export async function resolveConnectionTarget(
   service: Pick<IAIService, 'resolveFigure'>, name: string, from: HistoricalFigure, figures: HistoricalFigure[], signal: AbortSignal,
 ): Promise<ConnectionTargetResolution> {
   signal.throwIfAborted();
-  const onCanvas = (candidate: string) => figures.find(figure => canonicalName(figure.name) === canonicalName(candidate));
   const check = (figure: HistoricalFigure): ConnectionTargetResolution => {
     const status = classifyConnectionTarget(from, figure);
     return 'reason' in status ? { message: status.message } : { figure };
   };
-  const typed = onCanvas(name);
+  const typed = findCanvasPerson(figures, name);
   if (typed) return check(typed);
-  const person = await service.resolveFigure(name, signal);
+  let person: NewPerson | null;
+  try {
+    person = await service.resolveFigure(name, signal);
+  } catch (error) {
+    signal.throwIfAborted();
+    return { message: getUserErrorMessage(error, "Couldn't identify that person. Try their full name.") };
+  }
   signal.throwIfAborted();
   if (!person) return { message: "Couldn't identify that person. Try their full name." };
   // The model may answer with the canonical form of what was typed, which can already be on the canvas.
-  return check(onCanvas(person.name) ?? newPersonToFigure(person));
+  return check(findCanvasPerson(figures, person.name) ?? newPersonToFigure(person));
 }

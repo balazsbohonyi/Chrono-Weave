@@ -29,10 +29,24 @@ interface Options {
   onStep?: (index: number | null) => void;
   // The reveal finished, was skipped, or was interrupted.
   onEnd?: () => void;
+  // Leaves the connection (Escape once the reveal is over). Only while `canExit`, so dialogs and picking keep their own Escape.
+  onExit?: () => void;
+  canExit?: boolean;
 }
 
 const INTRO_MS = 600, HOLD_MS = 250, APPROACH_MS = 600, SETTLE_MS = 800, FOCUS_MS = 700;
 const MIN_LINK_MS = 250, MAX_LINK_MS = 1400;
+
+// Time for each link of the thread: what is left of the whole reveal's budget once the fixed phases
+// (frame the chain, approach the first person, settle) are paid for, shared between the links.
+export const revealLinkMs = (links: number) =>
+  Math.min(MAX_LINK_MS, Math.max(MIN_LINK_MS, (CONNECTION_REVEAL_MAX_MS - INTRO_MS - HOLD_MS - APPROACH_MS - SETTLE_MS) / Math.max(1, links)));
+// The whole reveal, from the first frame to the last.
+export const revealTotalMs = (links: number) => INTRO_MS + HOLD_MS + APPROACH_MS + links * revealLinkMs(links) + SETTLE_MS;
+
+// People fade in as the thread reaches them: the first at once, each next one just before its link ends.
+const FADE_LEAD = 0.3;
+export const isRevealedAt = (progress: number, index: number) => index <= 0 || progress >= index - FADE_LEAD;
 
 function wait(ms: number, signal: AbortSignal): Promise<'finished' | 'cancelled'> {
   return new Promise(resolve => {
@@ -141,8 +155,7 @@ export function useConnectionReveal(options: Options) {
       if (prefersReducedMotion()) { apply(overview); finish(); return; }
 
       const fly = (to: CanvasCamera, ms: number) => flyCamera(startCamera(), to, ms, apply, signal, { pivot: pivot() });
-      const linkMs = Math.min(MAX_LINK_MS, Math.max(MIN_LINK_MS,
-        (CONNECTION_REVEAL_MAX_MS - INTRO_MS - HOLD_MS - APPROACH_MS - SETTLE_MS) / links));
+      const linkMs = revealLinkMs(links);
       const ids = latest.current.connection!.nodeIds;
 
       if (await fly(overview, INTRO_MS) === 'cancelled' || await wait(HOLD_MS, signal) === 'cancelled') return;
@@ -206,6 +219,20 @@ export function useConnectionReveal(options: Options) {
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
   }, [isRevealing, skip]);
+
+  // After the reveal, Escape leaves the connection. The first Escape of a reveal only skips it
+  // (that handler prevents the default), so it never leaves in the same press.
+  const canExit = !!options.connection && !!options.onExit && !isRevealing && options.canExit !== false;
+  useEffect(() => {
+    if (!canExit) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      event.preventDefault();
+      latest.current.onExit?.();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [canExit]);
 
   useEffect(() => () => {
     revealFlight.current?.abort();

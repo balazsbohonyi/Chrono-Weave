@@ -1,6 +1,4 @@
-import type {
-  ConnectionPathNode, ConnectionPathOptions, ConnectionPathProposal, HistoricalFigure, NewPerson, PathPersonRef,
-} from '../types';
+import type { ConnectionPathNode, ConnectionPathOptions, ConnectionPathProposal, HistoricalFigure, NewPerson } from '../types';
 import { canonicalName } from '../utils/names';
 import { buildConnectionPathPrompt, buildResolveFigurePrompt } from './prompts';
 import { parseWeaveFigures, type JsonGenerator } from './weaveService';
@@ -18,6 +16,11 @@ const object = (value: unknown, message: string): Record<string, unknown> => {
   return value as Record<string, unknown>;
 };
 
+const isEventLike = (value: unknown): boolean => {
+  const category = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>).category : undefined;
+  return typeof category === 'string' && category.trim().toUpperCase() === 'EVENTS';
+};
+
 // Applies the same people rules as discovery and canvas building; events are refused explicitly
 // because the generic category error would not tell the model what to change.
 export function parseNewPerson(value: unknown): NewPerson {
@@ -31,9 +34,11 @@ export function parseNewPerson(value: unknown): NewPerson {
     occupation: parsed.occupation, category: parsed.category, description: parsed.shortDescription ?? '' };
 }
 
-const overlaps = (first: { birthYear: number; deathYear: number }, second: { birthYear: number; deathYear: number }) =>
+// Two people can only have met when their lifespans overlap.
+export const overlaps = (first: Pick<HistoricalFigure, 'birthYear' | 'deathYear'>, second: Pick<HistoricalFigure, 'birthYear' | 'deathYear'>) =>
   first.birthYear <= second.deathYear && second.birthYear <= first.deathYear;
-const pairKey = (first: string, second: string) => [first, second].sort().join('\u0000');
+// One key per unordered pair, for ids or canonical names alike.
+export const pairKey = (first: string, second: string) => [first, second].sort().join('\u0000');
 
 interface Entry { key: string; name: string; birthYear: number; deathYear: number; id?: string }
 
@@ -139,10 +144,9 @@ export async function requestResolveFigure(generate: JsonGenerator, name: string
   if (!query || query.length > 200) return null;
   return generate(buildResolveFigurePrompt(query), value => {
     if (value === null || (Array.isArray(value) && !value.length)) return null;
+    // An event is a final answer ("not a person"), not a mistake to correct: a retry would only
+    // invite the model to substitute a related person.
+    if (isEventLike(value)) return null;
     return parseNewPerson(value);
   }, signal, 'resolve');
-}
-
-export function connectionPersonRef({ id, name }: Pick<HistoricalFigure, 'id' | 'name'>): PathPersonRef {
-  return { id, name };
 }

@@ -47,4 +47,6 @@ export interface CanvasProps {
   connectionFocus?: ConnectionFocusRequest | null;
   onConnectionStep?: (index: number | null) => void;
   onConnectionRevealEnd?: () => void;
+  // Leaves the connection view: Escape after the reveal, or a click on a ghosted person.
+  onConnectionExit?: () => void;
 }

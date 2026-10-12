@@ -61,7 +61,7 @@ Located in `src/components/`, the UI is composed of several interactive elements
 Located in `src/services/`, this layer handles all external API communications.
 - **`geminiService.ts`**: Integrates with the Google Gemini API.
 - **`openRouterService.ts`**: Integrates with OpenRouter to support alternative LLMs (e.g., Claude, Llama).
-- Both implement the `IAIService` interface (defined in `src/types.ts`) which standardizes operations like `fetchHistoricalFigures`, `fetchRelatedFigures`, `discoverRelatedFigures`, `fetchRelationshipExplanation`, and `fetchFigureDeepDive`. Six Degrees adds `fetchConnectionPath` and `resolveFigure`; their prompts, parsing, and validation are shared in `pathService.ts`, and the search that verifies and repairs a proposed chain is `connectionPath.ts`.
+- Both implement the `IAIService` interface (defined in `src/types.ts`) which standardizes operations like `fetchHistoricalFigures`, `fetchRelatedFigures`, `discoverRelatedFigures`, `fetchRelationshipExplanation`, and `fetchFigureDeepDive`. Six Degrees adds `fetchConnectionPath` and `resolveFigure`; their prompts, parsing, and validation are shared in `pathService.ts`, and the search that verifies (contact-only) and repairs a proposed chain is `connectionPath.ts`, with the rules around a request and a finished search in `connectionFlow.ts`.
 - **`wikiService.ts`**: Connects to the Wikipedia API to retrieve rich biographical information, summaries, and images for the historical figures.
 
 ### 3. State Management & Hooks

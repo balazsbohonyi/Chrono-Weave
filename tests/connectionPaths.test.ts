@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { MAX_RECENT_CONNECTIONS } from '../src/constants';
 import { CanvasCache } from '../src/utils/canvasHistory';
 import {
-  connectionPathKey, listConnectionPaths, readConnectionPath, saveConnectionPath, savedPathFigureIds,
+  connectionPathKey, listConnectionPaths, readConnectionPath, saveConnectionPath, savedPathFigureIds, saveWovenFigureIds, wovenFigureIds,
 } from '../src/utils/connectionPaths';
 import { discardRejectedFollowFigureCandidates } from '../src/services/followFigureConnections';
 import { saveRelationshipMap } from '../src/utils/relationshipCache';
@@ -96,4 +96,40 @@ test('woven-in people on a saved path survive the Follow a Figure rejection filt
   saveConnectionPath(storage, [focus, stranger], ['They met.'], 1);
   assert.deepEqual(savedPathFigureIds(storage), new Set(['a', 'stranger']));
   assert.deepEqual(discardRejectedFollowFigureCandidates(figures, context, storage).map(figure => figure.id), ['a', 'stranger']);
+});
+
+test('woven-in people stay protected after their path is evicted from the recent list', () => {
+  const storage = new MemoryStorage();
+  const focus = person('a');
+  const woven = person('woven');
+  const context = { mode: 'figure' as const, query: 'A', inferredStartYear: 1500, inferredEndYear: 1560, themeDescription: 'A', activeCategories: ['ALL' as const] };
+  const figures = [focus, woven];
+  saveRelationshipMap(focus, figures, [], storage);
+  storage.setItem('chrono_assessment_a_woven', JSON.stringify({
+    scope: JSON.stringify([focus, woven].map(({ id, name, birthYear, deathYear, occupation, category }) => [id, name, birthYear, deathYear, occupation, category])),
+    narrativeVersion: 1, explanation: { isRelevant: false, evidence: '', summary: 'None.', sections: [{ title: 'Assessment', content: 'None.' }] },
+  }));
+  // The path that brought the person in, then enough newer ones to push it out of the list.
+  saveConnectionPath(storage, [focus, woven], ['They met.'], 1);
+  saveWovenFigureIds(storage, ['woven']);
+  for (let index = 0; index < MAX_RECENT_CONNECTIONS; index++) saveConnectionPath(storage, [person(`p${index}`), person(`q${index}`)], ['x'], 10 + index);
+  assert.equal(readConnectionPath(storage, figures, 'a', 'woven'), null, 'the path itself was evicted');
+  assert.ok(!savedPathFigureIds(storage).has('woven'));
+  assert.deepEqual(wovenFigureIds(storage), new Set(['woven']));
+  assert.deepEqual(discardRejectedFollowFigureCandidates(figures, context, storage).map(figure => figure.id), ['a', 'woven']);
+});
+
+test('woven-in ids accumulate without duplicates, ignore damage, and travel with the canvas cache', () => {
+  const storage = new MemoryStorage();
+  saveWovenFigureIds(storage, []);
+  assert.equal(storage.length, 0);
+  saveWovenFigureIds(storage, ['x', 'y']);
+  saveWovenFigureIds(storage, ['y', 'z']);
+  assert.deepEqual([...wovenFigureIds(storage)], ['x', 'y', 'z']);
+  const cache = new CanvasCache(Object.fromEntries(Array.from({ length: storage.length }, (_, index) => [storage.key(index)!, storage.getItem(storage.key(index)!)!])));
+  assert.deepEqual([...wovenFigureIds(cache)], ['x', 'y', 'z']);
+  storage.setItem(storage.key(0)!, '{nope');
+  assert.deepEqual([...wovenFigureIds(storage)], []);
+  storage.setItem(storage.key(0)!, JSON.stringify(['a', 3, null]));
+  assert.deepEqual([...wovenFigureIds(storage)], ['a']);
 });

@@ -180,3 +180,21 @@ test('relationship prompts share selection rules and retain provider candidate I
     else Reflect.deleteProperty(globalThis, 'window');
   }
 });
+
+test('the contact-only relationship prompt swaps the influence rules for personal contact and leaves the general prompt alone', () => {
+  const other = { ...figure, id: 'malthus', name: 'Thomas Malthus' };
+  const general = buildRelationshipExplanationPrompt(figure, other);
+  const contact = buildRelationshipExplanationPrompt(figure, other, { contactOnly: true });
+  assert.equal(buildRelationshipExplanationPrompt(figure, other, {}), general);
+  assert.match(general, /specifically engaged with the other person's work/);
+  assert.match(general, /specific documented influence/);
+  assert.doesNotMatch(contact, /specifically engaged with the other person's work/);
+  assert.doesNotMatch(contact, /specific documented influence/);
+  assert.doesNotMatch(contact, /rivalry, conflict/);
+  assert.match(contact, /personally interacted/);
+  assert.match(contact, /Influence through a work or ideas alone does not count/);
+  assert.match(contact, /Only documented personal contact qualifies/);
+  assert.match(contact, /require isRelevant=false and evidence=""/);
+  // The reply format is shared, so every parser keeps working.
+  assert.match(contact, /Return isRelevant \(boolean\) and evidence \(string\)/);
+});

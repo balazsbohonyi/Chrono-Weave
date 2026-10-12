@@ -2,6 +2,10 @@ import { MAX_RECENT_CONNECTIONS } from '../constants';
 import type { HistoricalFigure } from '../types';
 
 export const PATH_CACHE_PREFIX = 'chrono_path_';
+// Everyone a connection wove into the canvas. Kept apart from the saved paths, which are evicted after
+// MAX_RECENT_CONNECTIONS, because woven-in people stay on the canvas for good.
+export const WOVEN_CACHE_PREFIX = 'chrono_woven_';
+const WOVEN_KEY = `${WOVEN_CACHE_PREFIX}ids`;
 
 interface SavedPath {
   version: 1;
@@ -89,7 +93,25 @@ export function listConnectionPaths(storage: Storage, figures: HistoricalFigure[
   }).sort((a, b) => b.createdAt - a.createdAt).slice(0, MAX_RECENT_CONNECTIONS);
 }
 
-// Everyone on a saved chain is a permanent canvas member, even when other rules would prune them.
 export function savedPathFigureIds(storage: Storage): Set<string> {
   return new Set(listKeys(storage).flatMap(key => readSaved(storage, key)?.ids ?? []));
+}
+
+export function wovenFigureIds(storage: Storage): Set<string> {
+  try {
+    const ids = JSON.parse(storage.getItem(WOVEN_KEY) || 'null');
+    return new Set(Array.isArray(ids) ? ids.filter((id: unknown): id is string => typeof id === 'string') : []);
+  } catch { return new Set(); }
+}
+
+export function saveWovenFigureIds(storage: Storage, ids: readonly string[]): void {
+  if (!ids.length) return;
+  try {
+    storage.setItem(WOVEN_KEY, JSON.stringify([...new Set([...wovenFigureIds(storage), ...ids])]));
+  } catch { /* A full or unavailable storage must not fail a successful connection. */ }
+}
+
+// Everyone on a saved chain or woven in by one is a permanent canvas member, even when other rules would prune them.
+export function connectionFigureIds(storage: Storage): Set<string> {
+  return new Set([...savedPathFigureIds(storage), ...wovenFigureIds(storage)]);
 }

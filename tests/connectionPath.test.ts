@@ -1,11 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { MAX_PATH_INTERMEDIATES, MAX_PATH_REPAIRS, PATH_CATALOG_LIMIT } from '../src/constants';
+import { MAX_PATH_INTERMEDIATES, MAX_PATH_REPAIRS, PATH_CATALOG_LIMIT, RELATIONSHIP_NARRATIVE_VERSION } from '../src/constants';
 import {
   buildPathCatalog, checkConnectionFeasibility, classifyConnectionTarget, findConnection, newPersonToFigure, resolveConnectionTarget,
   type ConnectionProgress, type ConnectionSearchOptions,
 } from '../src/services/connectionPath';
 import type { ConnectionPathOptions, ConnectionPathProposal, HistoricalFigure, IAIService, NewPerson } from '../src/types';
+import { RelationshipAssessmentError } from '../src/services/relationshipAssessment';
 import { MemoryStorage } from './helpers';
 
 const person = (id: string, name: string, birthYear: number, deathYear: number, category: HistoricalFigure['category'] = 'ARTISTS'): HistoricalFigure =>
@@ -26,15 +27,16 @@ const pairs = (list: Array<[{ id: string }, { id: string }]>) => list.map(([x, y
 
 // A fake service: `rejected` lists unordered pairs the verification refuses; proposals come from a queue.
 function fakeService(proposals: Array<ConnectionPathProposal | null>, rejected: string[] = []) {
-  const calls = { paths: [] as Array<{ from: string; to: string; options: ConnectionPathOptions }>, assessed: [] as string[] };
+  const calls = { paths: [] as Array<{ from: string; to: string; options: ConnectionPathOptions }>, assessed: [] as string[], modes: [] as Array<boolean | undefined> };
   const refused = new Set(rejected.map(pair => pair.split('|').sort().join('|')));
   const service: Pick<IAIService, 'fetchConnectionPath' | 'fetchRelationshipExplanation'> = {
     fetchConnectionPath: async (from, to, options) => {
       calls.paths.push({ from: from.id, to: to.id, options });
       return proposals.shift() ?? null;
     },
-    fetchRelationshipExplanation: async (first, second) => {
+    fetchRelationshipExplanation: async (first, second, _signal, options) => {
       calls.assessed.push(`${first.id}|${second.id}`);
+      calls.modes.push(options?.contactOnly);
       return refused.has([first.id, second.id].sort().join('|'))
         ? { isRelevant: false, evidence: '', summary: 'No link.', sections: [{ title: 'Assessment', content: 'None.' }] }
         : { isRelevant: true, evidence: `${first.name} and ${second.name} worked together.`, summary: 'They worked together.', sections: [{ title: 'Work', content: 'Details.' }] };
@@ -237,7 +239,7 @@ test('cancelling leaves the canvas untouched, and completed assessments stay cac
   assert.deepEqual(figures, canvas);
   const keys = Array.from({ length: storage.length }, (_, index) => storage.key(index)!);
   assert.equal(keys.length, 1);
-  assert.ok(keys[0].startsWith('chrono_assessment_'));
+  assert.ok(keys[0].startsWith('chrono_contact_'));
   assert.ok(!keys.some(key => key.startsWith('chrono_path_')));
 });
 
@@ -344,4 +346,76 @@ test('cancelling stops name resolution before and after the model answers', asyn
   const slow = { resolveFigure: async () => { controller.abort(new Error('Cancelled')); return fresh('Henry Hidden', 1590, 1660); } };
   await assert.rejects(resolveConnectionTarget(slow, 'Henry', A, canvas, controller.signal), /Cancelled/);
   await assert.rejects(resolveConnectionTarget(slow, 'Henry', A, canvas, controller.signal), /Cancelled/);
+});
+
+test('a failure while identifying a name comes back as an inline message, but cancelling still throws', async () => {
+  const broken = { resolveFigure: async () => { throw new Error('The model returned unusable data after a retry.'); } };
+  const result = await resolve(broken, 'Henry');
+  assert.ok('message' in result && result.message.length > 0);
+  const controller = new AbortController();
+  const aborting = { resolveFigure: async () => { controller.abort(new Error('Cancelled')); throw new Error('Network down'); } };
+  await assert.rejects(resolveConnectionTarget(aborting, 'Henry', A, canvas, controller.signal), /Cancelled/);
+});
+
+test('every link is verified as a personal contact, in its own cache', async () => {
+  const storage = new MemoryStorage();
+  const { service, calls } = fakeService([proposal(A, M, B)]);
+  await search(service, { storage });
+  assert.ok(calls.modes.length > 0 && calls.modes.every(contactOnly => contactOnly === true));
+  const keys = Array.from({ length: storage.length }, (_, index) => storage.key(index)!);
+  assert.ok(keys.length > 0 && keys.every(key => key.startsWith('chrono_contact_')));
+});
+
+test('a general-mode confirmation does not count as contact, but a general rejection does answer it', async () => {
+  const storage = new MemoryStorage();
+  const general = (first: HistoricalFigure, second: HistoricalFigure, isRelevant: boolean) => storage.setItem(
+    `chrono_assessment_${first.id}_${second.id}`, JSON.stringify({
+      scope: JSON.stringify([first, second].map(({ id, name, birthYear, deathYear, occupation, category }) => [id, name, birthYear, deathYear, occupation, category])),
+      narrativeVersion: RELATIONSHIP_NARRATIVE_VERSION,
+      explanation: { isRelevant, evidence: isRelevant ? 'Anna read his book.' : '', summary: 'x', sections: [{ title: 'x', content: 'x' }] },
+    }));
+  general(A, M, true);
+  const { service, calls } = fakeService([]);
+  const confirmed = await search(service, { to: M, storage });
+  assert.deepEqual(calls.assessed, ['a|m'], 'the contact check still asks the model');
+  assert.equal(confirmed.status, 'connected');
+  const rejectedStorage = new MemoryStorage();
+  const rejection = (first: HistoricalFigure, second: HistoricalFigure) => rejectedStorage.setItem(
+    `chrono_assessment_${first.id}_${second.id}`, JSON.stringify({
+      scope: JSON.stringify([first, second].map(({ id, name, birthYear, deathYear, occupation, category }) => [id, name, birthYear, deathYear, occupation, category])),
+      narrativeVersion: 1, explanation: { isRelevant: false, evidence: '', summary: 'None.', sections: [{ title: 'x', content: 'x' }] },
+    }));
+  rejection(A, M);
+  const second = fakeService([proposal(A, N, M)]);
+  const result = await search(second.service, { to: M, storage: rejectedStorage });
+  assert.equal(result.status, 'connected');
+  assert.ok(!second.calls.assessed.includes('a|m'), 'a cached general rejection short-circuits the contact check');
+  assert.deepEqual(pairs(second.calls.paths[0].options.avoidPairs), ['a|m']);
+});
+
+test('a link the model cannot assess stays a gap but is neither avoided nor asked twice', async () => {
+  const { service, calls } = fakeService([proposal(A, M, B), null]);
+  const original = service.fetchRelationshipExplanation;
+  service.fetchRelationshipExplanation = async (first, second, signal, options) => {
+    if ([first.id, second.id].sort().join('|') === 'b|m') {
+      calls.assessed.push(`${first.id}|${second.id}`);
+      throw new RelationshipAssessmentError('Missing relevance verdict.');
+    }
+    return original(first, second, signal, options);
+  };
+  const updates: ConnectionProgress[] = [];
+  const result = await search(service, { onProgress: progress => updates.push(structuredClone(progress)) });
+  assert.equal(result.status, 'failed');
+  if (result.status !== 'failed') return;
+  assert.equal(result.reason, 'unverified');
+  assert.deepEqual(result.links.map(link => link.status), ['verified', 'unverified']);
+  assert.deepEqual(result.avoidPairs, [], 'an unusable verdict is not a known-bad pair');
+  // The gap is still repaired, and the failing link is not asked again within the search.
+  assert.equal(calls.paths.length, 2);
+  assert.equal(calls.assessed.filter(pair => pair.split('|').sort().join('|') === 'b|m').length, 1);
+  assert.equal(updates.at(-1)!.links[1].status, 'rejected');
+  // So "Try again" is free to look at it again.
+  const retry = fakeService([proposal(A, M, B)]);
+  const second = await search(retry.service, { avoidPairs: result.avoidPairs });
+  assert.equal(second.status, 'connected');
 });

@@ -9,7 +9,7 @@ import { centerCameraOnBounds, fitCameraToBounds } from '../utils/canvasCamera';
 import { listenForCanvasWheel } from '../utils/canvasWheel';
 import { BASE_PIXELS_PER_YEAR, ROW_HEIGHT, calculateTextWidth, calculateTimelineLayout, timelineFigureBounds } from '../utils/timelineLayout';
 import { timelineThread } from '../utils/connectionThread';
-import { useConnectionReveal } from '../hooks/useConnectionReveal';
+import { isRevealedAt, useConnectionReveal } from '../hooks/useConnectionReveal';
 import ConnectionThread from './ConnectionThread';
 import type { CanvasProps } from './CanvasProps';
 
@@ -62,7 +62,8 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
   connectionCurrentId,
   connectionFocus,
   onConnectionStep,
-  onConnectionRevealEnd
+  onConnectionRevealEnd,
+  onConnectionExit
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const warnedCategoriesRef = useRef<Set<string>>(new Set());
@@ -152,6 +153,7 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
   const headerHeight = isLegendCollapsed ? 52 : 114;
   const reveal = useConnectionReveal({
     connection, focus: connectionFocus, onStep: onConnectionStep, onEnd: onConnectionRevealEnd,
+    onExit: onConnectionExit, canExit: !modalActive && !pickingSource,
     getBounds: id => {
       const item = layoutData.find(entry => entry.figure.id === id);
       return item ? timelineFigureBounds(item, startYear) : null;
@@ -168,6 +170,7 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
   });
   const revealWasActive = useRef(false);
   const connectionIds = useMemo(() => new Set(connection?.nodeIds ?? []), [connection]);
+  const chainOrder = useMemo(() => new Map((connection?.nodeIds ?? []).map((id, index) => [id, index])), [connection]);
   const threadSegments = useMemo(() => {
     const byId = new Map(layoutData.map(item => [item.figure.id, item]));
     const chain = (connection?.nodeIds ?? []).map(id => byId.get(id));
@@ -444,10 +447,14 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
         // We use elementFromPoint to find what is visually under the cursor.
         const figureId = hitElement?.closest('[data-figure-id]')?.getAttribute('data-figure-id');
 
+        // A click on a ghosted person leaves the connection view, then acts as an ordinary click.
+        if (connection && !pickingSource && figureId && !connectionIds.has(figureId)) onConnectionExit?.();
+
         // Choosing the other end of a Six Degrees chain: a click picks, and never opens actions.
         if (pickingSource) {
             const picked = figureId ? figures.find(f => f.id === figureId) : undefined;
-            if (picked && picked.id !== pickingSource.id && isPickable?.(picked)) onPick?.(picked);
+            // Dimmed people are forwarded too: the search refuses them with the reason, in the banner.
+            if (picked && picked.id !== pickingSource.id) onPick?.(picked);
             return;
         }
 
@@ -591,6 +598,8 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
   const resetZoom = () => {
     const container = containerRef.current;
     if (!container) return;
+    // The toolbar sits outside the canvas, so it must take the camera back from a running reveal itself.
+    reveal.interrupt();
     onCanvasInteraction?.();
     setActionFigureId(null);
     setActionBarCoords(null);
@@ -777,8 +786,12 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
           let shadowClass = "";
           let wrapperClass = "";
 
-          // Filter Logic
-          if (selectedCategories.size > 0 && !selectedCategories.has(figure.category)) {
+          // While a connection is shown, only its people are lit, each one once the thread has reached it.
+          // Chain members ignore category filters; everyone else is ghosted.
+          const chainIndex = pickingSource ? undefined : chainOrder.get(figure.id);
+          if (connection && !pickingSource) {
+              if (chainIndex === undefined || !isRevealedAt(reveal.progress, chainIndex)) containerOpacityClass = "opacity-[0.07] grayscale";
+          } else if (selectedCategories.size > 0 && !selectedCategories.has(figure.category)) {
               containerOpacityClass = "opacity-10 grayscale";
           }
 
@@ -790,7 +803,7 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
                   containerOpacityClass = "opacity-20 grayscale";
               }
           } else if (connectionIds.has(figure.id)) {
-              shadowClass = connectionCurrentId === figure.id ? "connection-node connection-node-current z-50" : "connection-node z-40";
+              shadowClass = connectionCurrentId === figure.id ? "connection-node connection-node-current" : "connection-node";
           }
 
           if (isSearchMode) {
@@ -894,7 +907,8 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
                 backfaceVisibility: 'hidden',
               }}
             >
-              <div className="text-[22px] font-black text-timeline-label leading-tight mb-1 uppercase w-full text-left drop-shadow-sm whitespace-nowrap">
+              <div className={`text-[22px] font-black text-timeline-label leading-tight mb-1 uppercase w-full text-left drop-shadow-sm whitespace-nowrap ${chainIndex !== undefined ? 'flex items-center' : ''}`}>
+                  {chainIndex !== undefined && <span className="connection-badge connection-badge-inline">{chainIndex + 1}</span>}
                   {figure.name}
               </div>
 
@@ -1020,7 +1034,7 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
               const arrowPath = `M ${wingX} ${wingYTop} L ${arrowTipX} ${arrowTipY} L ${wingX} ${wingYBot}`;
 
               return (
-                  <g key={`connector-${figure.id}`}>
+                  <g key={`connector-${figure.id}`} className="transition-opacity duration-500" style={{ opacity: connection && !pickingSource ? 0.07 : undefined }}>
                     <path
                         d={pathD}
                         fill="none"
@@ -1046,7 +1060,7 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
       {/* LAYER 2.6: Six Degrees thread, in world space so it follows the camera */}
       {threadSegments.length > 0 && (
         <div
-          className="absolute top-0 left-0 origin-top-left pointer-events-none z-30"
+          className="absolute top-0 left-0 origin-top-left pointer-events-none z-[45]"
           style={{
             transform: `translate(${viewState.translateX}px, ${viewState.translateY}px) scale(${viewState.scale})`,
             width: contentWidth,
@@ -1054,7 +1068,7 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
           }}
         >
           <svg className="absolute top-0 left-0 overflow-visible" width={contentWidth} height={contentHeight} aria-hidden="true">
-            <ConnectionThread segments={threadSegments} progress={reveal.progress} strokeWidth={4 / viewState.scale} />
+            <ConnectionThread segments={threadSegments} progress={reveal.progress} strokeWidth={3 / viewState.scale} />
           </svg>
         </div>
       )}
@@ -1152,7 +1166,7 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
           />
       )}
     </div>
-    <CanvasToolbar mode="timeline" scale={viewState.scale} onResetZoom={resetZoom} onToggleLayout={onToggleLayout}
+    <CanvasToolbar mode="timeline" scale={viewState.scale} onResetZoom={resetZoom} onToggleLayout={onToggleLayout && (() => { reveal.interrupt(); onToggleLayout(); })}
       disabled={modalActive || isBusy || !figures.length} />
     </>
   );

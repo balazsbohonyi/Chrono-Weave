@@ -63,18 +63,12 @@ History stays ordered by creation date, newest first. Reopening a canvas saves t
 - **Automatic Relationships**: New figures are automatically connected to the source figure with relationship visualization
 
 ### 🕸️ Six Degrees: Connect Two People
-Pick two people and ChronoWeave looks for a chain of real, documented **personal contacts** between them, such as Leonardo da Vinci → Verrocchio → … → Isaac Newton. "Six Degrees" is the name of the idea, not a promise: the result reports the real length, for example "4 degrees apart".
-
-- **Connect to…**: Choose it from a person's actions on the canvas or in the sidebar. Then click another person or type any name; canvas people are suggested first, and other names are identified by the AI. Events can't be chosen, and people too far away are dimmed. Press Escape to leave picking mode. It also works on Follow a Figure canvases
-- **Contact only**: Every link needs overlapping lifespans and a documented personal interaction: met, taught, corresponded, worked together, family, served alongside, or fought. Influence through someone's work doesn't count
-- **Verified, never guessed**: The AI proposes a chain, then every link is checked by the same relationship verification as Map Relationships. A failed link is repaired locally (at most three repairs), and unverified links never appear as connections
-- **Honest limits**: A contact link moves about one adult lifetime through history, so up to 10 people between the two ends (about 400 years apart) are reachable. Further apart, the pair is refused up front with an explanation, before any AI request
-- **Progress you can follow**: A card shows the current step and the proposed links being checked, each turning into a green ✓ or red ✗. Cancel it, press Escape, open the launcher, or switch canvases to stop; the canvas stays unchanged and checks already made stay cached
-- **Woven in**: People the chain needs who aren't on the canvas are added as permanent members and marked as newly discovered. The canvas range and category filters widen only as far as needed
-- **The reveal**: The camera frames the whole chain, flies from person to person while a glowing thread draws between them (about eight seconds at most), then settles on the whole chain. Click or press Escape to skip; panning or zooming takes the camera back. With reduced motion, the camera jumps and the thread appears at once
-- **Connection tab**: A third sidebar tab lists the chain from one end to the other, with the verified evidence between people. **Why?** opens the relationship explanation, clicking a card flies to that person, and **✕** hides the thread
-- **Recent connections**: Successful chains are saved with their canvas (up to 20 per canvas, newest first) and replay instantly without any AI request, in either direction
-- **When no chain is verified**: The tab shows the verified pieces with marked gaps and **Try again**, which keeps what was already ruled out. Nothing is added to the canvas and nothing is saved
+- **Connect to…**: Choose it on a person, then click another person or type any name; the AI finds a chain of documented **personal contacts** between them, such as Leonardo da Vinci → Verrocchio → … → Isaac Newton, and reports its real length ("4 degrees apart")
+- **Contact only**: Every link needs overlapping lifespans and a documented personal interaction (met, taught, corresponded, worked together, family); influence through someone's work doesn't count
+- **Verified, never guessed**: Every proposed link is checked by the AI, failed links are repaired locally, and unverified links never appear. Pairs too far apart (about 400 years) are refused up front
+- **Woven in**: People the chain needs are added to the canvas and marked as newly discovered
+- **The reveal**: Everyone else fades out while the camera follows an amber dashed thread from person to person, numbering each as it appears. Press Escape or click to skip, and again to bring the canvas back
+- **Connection tab**: A sidebar tab lists the chain with the verified evidence for each link and a **Why?** explanation; successful chains are saved per canvas under **Recent connections** and replay instantly
 
 ### 📖 Deep Dive Biographies
 - **Read Biography**: Click to view detailed AI-generated biographical information
