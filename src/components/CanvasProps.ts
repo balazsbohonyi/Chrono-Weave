@@ -1,6 +1,7 @@
 import type { FigureCategory, HistoricalFigure, LayoutData, DiscoveryCluster, ClusterPlacement } from '../types';
 import type { TimelineLayoutResult } from '../utils/timelineLayout';
 import type { CanvasCamera } from '../utils/canvasCamera';
+import type { ConnectionFocusRequest, ConnectionReveal } from '../hooks/useConnectionReveal';
 
 export interface CanvasProps {
   figures: HistoricalFigure[];
@@ -35,4 +36,17 @@ export interface CanvasProps {
   isLegendCollapsed: boolean;
   seedFigureId?: string;
   isSidebarOpen?: boolean;
+  onConnect?: (figure: HistoricalFigure) => void;
+  // Six Degrees: choosing the other end of a chain. Bars that cannot be chosen are dimmed.
+  pickingSource?: HistoricalFigure | null;
+  isPickable?: (figure: HistoricalFigure) => boolean;
+  onPick?: (figure: HistoricalFigure) => void;
+  // Six Degrees: the chain to draw as a thread, the person the camera is on, and a request to fly to someone.
+  connection?: ConnectionReveal | null;
+  connectionCurrentId?: string | null;
+  connectionFocus?: ConnectionFocusRequest | null;
+  onConnectionStep?: (index: number | null) => void;
+  onConnectionRevealEnd?: () => void;
+  // Leaves the connection view: Escape after the reveal, or a click on a ghosted person.
+  onConnectionExit?: () => void;
 }

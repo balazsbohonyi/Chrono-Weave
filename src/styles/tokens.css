@@ -55,6 +55,9 @@
   --color-accent-text-hover: 29 78 216;
   --color-accent-heading: 30 64 175;
   --color-accent-emphasis: 30 58 138;
+  /* Six Degrees thread, outlines and badges: a deeper amber on light surfaces, a lighter one on dark. */
+  --color-connection: 217 119 6;
+  --color-connection-contrast: 255 255 255;
   --color-accent-solid: 37 99 235;
   --color-accent-solid-hover: 29 78 216;
   --color-on-accent: 255 255 255;
@@ -161,6 +164,8 @@
   --color-accent-text-hover: 147 197 253;
   --color-accent-heading: 147 197 253;
   --color-accent-emphasis: 191 219 254;
+  --color-connection: 251 191 36;
+  --color-connection-contrast: 41 28 4;
   --color-accent-solid: 37 99 235;
   --color-accent-solid-hover: 29 78 216;
   --color-on-accent: 255 255 255;

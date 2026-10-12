@@ -5,9 +5,12 @@ import { CATEGORY_COLORS, CATEGORY_BAR_TEXT_COLORS } from '../constants';
 import { formatYear } from '../utils/formatters';
 import ActionBar from './ActionBar';
 import CanvasToolbar from './CanvasToolbar';
-import { centerCameraOnBounds } from '../utils/canvasCamera';
+import { centerCameraOnBounds, fitCameraToBounds } from '../utils/canvasCamera';
 import { listenForCanvasWheel } from '../utils/canvasWheel';
-import { BASE_PIXELS_PER_YEAR, ROW_HEIGHT, calculateTextWidth, calculateTimelineLayout } from '../utils/timelineLayout';
+import { BASE_PIXELS_PER_YEAR, ROW_HEIGHT, calculateTextWidth, calculateTimelineLayout, timelineFigureBounds } from '../utils/timelineLayout';
+import { timelineThread } from '../utils/connectionThread';
+import { isRevealedAt, useConnectionReveal } from '../hooks/useConnectionReveal';
+import ConnectionThread from './ConnectionThread';
 import type { CanvasProps } from './CanvasProps';
 
 // Config
@@ -50,7 +53,17 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
   isBusy = false,
   selectedCategories,
   isLegendCollapsed,
-  isSidebarOpen = false
+  isSidebarOpen = false,
+  onConnect,
+  pickingSource = null,
+  isPickable,
+  onPick,
+  connection,
+  connectionCurrentId,
+  connectionFocus,
+  onConnectionStep,
+  onConnectionRevealEnd,
+  onConnectionExit
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const warnedCategoriesRef = useRef<Set<string>>(new Set());
@@ -128,6 +141,43 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
   }, [relationshipSourceId]);
 
   useEffect(() => {
+    if (pickingSource) {
+      setActionFigureId(null);
+      setActionBarCoords(null);
+    }
+  }, [pickingSource]);
+
+  // Six Degrees: the shared reveal frames the chain, flies person to person, and draws the thread.
+  const cameraRef = useRef({ x: 0, y: 0, scale: 1 });
+  cameraRef.current = { x: viewState.translateX, y: viewState.translateY, scale: viewState.scale };
+  const headerHeight = isLegendCollapsed ? 52 : 114;
+  const reveal = useConnectionReveal({
+    connection, focus: connectionFocus, onStep: onConnectionStep, onEnd: onConnectionRevealEnd,
+    onExit: onConnectionExit, canExit: !modalActive && !pickingSource,
+    getBounds: id => {
+      const item = layoutData.find(entry => entry.figure.id === id);
+      return item ? timelineFigureBounds(item, startYear) : null;
+    },
+    getCamera: () => cameraRef.current,
+    setCamera: camera => setViewState({ scale: camera.scale, translateX: camera.x, translateY: camera.y }),
+    getArea: () => {
+      const container = containerRef.current;
+      if (!container) return null;
+      // Leave room for the header, the sidebar when it is open, and the bottom year axis.
+      return { left: 0, top: headerHeight, width: Math.max(1, container.clientWidth - (isSidebarOpen ? SIDEBAR_WIDTH : 0)),
+        height: Math.max(1, container.clientHeight - headerHeight - 24) };
+    },
+  });
+  const revealWasActive = useRef(false);
+  const connectionIds = useMemo(() => new Set(connection?.nodeIds ?? []), [connection]);
+  const chainOrder = useMemo(() => new Map((connection?.nodeIds ?? []).map((id, index) => [id, index])), [connection]);
+  const threadSegments = useMemo(() => {
+    const byId = new Map(layoutData.map(item => [item.figure.id, item]));
+    const chain = (connection?.nodeIds ?? []).map(id => byId.get(id));
+    return chain.length > 1 && chain.every(Boolean) ? timelineThread(chain as typeof layoutData, startYear) : [];
+  }, [connection, layoutData, startYear]);
+
+  useEffect(() => {
       onPlacementsResolved(layoutData);
   }, [layoutData, onPlacementsResolved]);
 
@@ -138,28 +188,10 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
         
         if (item) {
             const rect = containerRef.current.getBoundingClientRect();
-            const viewportW = rect.width;
-            const viewportH = rect.height;
-
-            const { figure, level } = item;
-            const worldLeft = (figure.birthYear - startYear) * BASE_PIXELS_PER_YEAR;
-            const duration = figure.deathYear - figure.birthYear;
-            const worldWidth = Math.max(duration * BASE_PIXELS_PER_YEAR, 4);
-            const worldCenterX = worldLeft + worldWidth / 2;
-            
-            const worldTop = level * ROW_HEIGHT + 60;
-            const worldCenterY = worldTop + 60; 
-
-            const targetScale = 1.2; 
-
-            const newTranslateX = (viewportW / 2) - (worldCenterX * targetScale);
-            const newTranslateY = (viewportH / 2) - (worldCenterY * targetScale);
-
-            setViewState({
-                scale: targetScale,
-                translateX: newTranslateX,
-                translateY: newTranslateY
-            });
+            // Search results are shown at a fixed zoom, centred in the whole viewport.
+            const camera = fitCameraToBounds(timelineFigureBounds(item, startYear),
+                { left: 0, top: 0, width: rect.width, height: rect.height }, { minScale: 1.2, maxScale: 1.2 });
+            setViewState({ scale: camera.scale, translateX: camera.x, translateY: camera.y });
         }
         return;
     }
@@ -179,6 +211,7 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
       if (modalActive) return;
       // Keep wheel scrolling and browser zoom contained within the timeline.
       e.preventDefault();
+      reveal.interrupt();
 
       if (highlightedFigureIds.length > 0 && onCanvasInteraction) {
         onCanvasInteraction();
@@ -250,7 +283,7 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
     };
 
     return listenForCanvasWheel(el, handleWheel, modalActive);
-  }, [highlightedFigureIds, onCanvasInteraction, contentWidth, modalActive]);
+  }, [highlightedFigureIds, onCanvasInteraction, contentWidth, modalActive, reveal.interrupt]);
 
   // Cleanup trackpad detection timer
   useEffect(() => {
@@ -287,6 +320,9 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
     // Middle-button default is suppressed by the native mousedown listener so
     // the compatibility mouse event remains available in Chrome.
     if (e.button !== 1) e.preventDefault();
+
+    // Touching the canvas takes the camera back from a running reveal; a plain click also skips to its end.
+    revealWasActive.current = reveal.interrupt();
 
     // Track all active pointers for multi-touch
     if (activePointersRef.current.size === 0) pinchedRef.current = false;
@@ -354,6 +390,12 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
             return;
         }
 
+        if (revealWasActive.current) {
+            revealWasActive.current = false;
+            reveal.settle();
+            return;
+        }
+
         if (isBusy) return;
 
         const shouldConsumeForSearch = wasSearchFocusedOnDown.current;
@@ -404,6 +446,17 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
         // Because of pointer capture on container, the e.target will likely be the container.
         // We use elementFromPoint to find what is visually under the cursor.
         const figureId = hitElement?.closest('[data-figure-id]')?.getAttribute('data-figure-id');
+
+        // A click on a ghosted person leaves the connection view, then acts as an ordinary click.
+        if (connection && !pickingSource && figureId && !connectionIds.has(figureId)) onConnectionExit?.();
+
+        // Choosing the other end of a Six Degrees chain: a click picks, and never opens actions.
+        if (pickingSource) {
+            const picked = figureId ? figures.find(f => f.id === figureId) : undefined;
+            // Dimmed people are forwarded too: the search refuses them with the reason, in the banner.
+            if (picked && picked.id !== pickingSource.id) onPick?.(picked);
+            return;
+        }
 
         if (shouldConsumeForSearch && !figureId) return;
         
@@ -545,6 +598,8 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
   const resetZoom = () => {
     const container = containerRef.current;
     if (!container) return;
+    // The toolbar sits outside the canvas, so it must take the camera back from a running reveal itself.
+    reveal.interrupt();
     onCanvasInteraction?.();
     setActionFigureId(null);
     setActionBarCoords(null);
@@ -731,9 +786,24 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
           let shadowClass = "";
           let wrapperClass = "";
 
-          // Filter Logic
-          if (selectedCategories.size > 0 && !selectedCategories.has(figure.category)) {
+          // While a connection is shown, only its people are lit, each one once the thread has reached it.
+          // Chain members ignore category filters; everyone else is ghosted.
+          const chainIndex = pickingSource ? undefined : chainOrder.get(figure.id);
+          if (connection && !pickingSource) {
+              if (chainIndex === undefined || !isRevealedAt(reveal.progress, chainIndex)) containerOpacityClass = "opacity-[0.07] grayscale";
+          } else if (selectedCategories.size > 0 && !selectedCategories.has(figure.category)) {
               containerOpacityClass = "opacity-10 grayscale";
+          }
+
+          if (pickingSource) {
+              // Only people who could be reached from the chosen person stay lit.
+              if (figure.id === pickingSource.id) {
+                  shadowClass = "shadow-xl z-50 ring-4 ring-accent-border";
+              } else if (!isPickable?.(figure)) {
+                  containerOpacityClass = "opacity-20 grayscale";
+              }
+          } else if (connectionIds.has(figure.id)) {
+              shadowClass = connectionCurrentId === figure.id ? "connection-node connection-node-current" : "connection-node";
           }
 
           if (isSearchMode) {
@@ -754,7 +824,7 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
               if (relationshipSourceId === figure.id) {
                   shadowClass = "shadow-xl z-50 ring-4 ring-accent-border";
 
-              } else if (isNew) {
+              } else if (isNew && !(connectionIds.has(figure.id) && !pickingSource)) {
                   shadowClass = "shadow-md z-30";
               }
           }
@@ -837,7 +907,8 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
                 backfaceVisibility: 'hidden',
               }}
             >
-              <div className="text-[22px] font-black text-timeline-label leading-tight mb-1 uppercase w-full text-left drop-shadow-sm whitespace-nowrap">
+              <div className={`text-[22px] font-black text-timeline-label leading-tight mb-1 uppercase w-full text-left drop-shadow-sm whitespace-nowrap ${chainIndex !== undefined ? 'flex items-center' : ''}`}>
+                  {chainIndex !== undefined && <span className="connection-badge connection-badge-inline">{chainIndex + 1}</span>}
                   {figure.name}
               </div>
 
@@ -963,7 +1034,7 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
               const arrowPath = `M ${wingX} ${wingYTop} L ${arrowTipX} ${arrowTipY} L ${wingX} ${wingYBot}`;
 
               return (
-                  <g key={`connector-${figure.id}`}>
+                  <g key={`connector-${figure.id}`} className="transition-opacity duration-500" style={{ opacity: connection && !pickingSource ? 0.07 : undefined }}>
                     <path
                         d={pathD}
                         fill="none"
@@ -985,6 +1056,22 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
               );
           })}
       </svg>
+
+      {/* LAYER 2.6: Six Degrees thread, in world space so it follows the camera */}
+      {threadSegments.length > 0 && (
+        <div
+          className="absolute top-0 left-0 origin-top-left pointer-events-none z-[45]"
+          style={{
+            transform: `translate(${viewState.translateX}px, ${viewState.translateY}px) scale(${viewState.scale})`,
+            width: contentWidth,
+            height: contentHeight
+          }}
+        >
+          <svg className="absolute top-0 left-0 overflow-visible" width={contentWidth} height={contentHeight} aria-hidden="true">
+            <ConnectionThread segments={threadSegments} progress={reveal.progress} strokeWidth={3 / viewState.scale} />
+          </svg>
+        </div>
+      )}
 
       {/* LAYER 3: Labels (Bottom) - Glossy */}
       <div
@@ -1060,12 +1147,13 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
       )}
 
       {/* LAYER 5: Figure Actions */}
-      {actionLayoutItem && actionBarCoords && onDiscover && onTrace && onInspect && !isDiscovering && !isBusy && (
-          <ActionBar 
+      {actionLayoutItem && actionBarCoords && onDiscover && onTrace && onInspect && !isDiscovering && !isBusy && !pickingSource && (
+          <ActionBar
               figure={actionLayoutItem.figure}
               onDiscover={onDiscover}
               onTrace={onTrace}
               onInspect={onInspect}
+              onConnect={onConnect}
               onDismiss={() => {
                   setActionFigureId(null);
                   setActionBarCoords(null);
@@ -1078,7 +1166,7 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
           />
       )}
     </div>
-    <CanvasToolbar mode="timeline" scale={viewState.scale} onResetZoom={resetZoom} onToggleLayout={onToggleLayout}
+    <CanvasToolbar mode="timeline" scale={viewState.scale} onResetZoom={resetZoom} onToggleLayout={onToggleLayout && (() => { reveal.interrupt(); onToggleLayout(); })}
       disabled={modalActive || isBusy || !figures.length} />
     </>
   );

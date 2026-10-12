@@ -1,7 +1,8 @@
 import { generateRelationshipAssessment } from './relationshipAssessment';
 
 import { GenerateContentResponse, GoogleGenAI, Type, type Schema } from "@google/genai";
-import { DeepDiveData, HistoricalFigure, IAIService, RelationshipExplanation, WeaveGenerationContext, WeaveRequest, WeaveValidationResult } from "../types";
+import { ConnectionPathOptions, ConnectionPathProposal, DeepDiveData, HistoricalFigure, IAIService, NewPerson, RelationshipExplanation, RelationshipExplanationOptions, WeaveGenerationContext, WeaveRequest, WeaveValidationResult } from "../types";
+import { requestConnectionPath, requestResolveFigure } from './pathService';
 import {
   buildDiscoveryPrompt,
   buildRelatedFiguresPrompt,
@@ -93,6 +94,20 @@ export class GeminiService implements IAIService {
             required: ['isValid', 'errorMessage', 'inferredStartYear', 'inferredEndYear', 'themeDescription', 'activeCategories',
                 ...(task === 'suggestion' ? ['representativeEntries'] : [])],
         };
+        const person = {
+            name: { type: Type.STRING }, birthYear: { type: Type.INTEGER }, deathYear: { type: Type.INTEGER },
+            occupation: { type: Type.STRING }, description: { type: Type.STRING }, category: { type: Type.STRING },
+        };
+        // Both Six Degrees answers may legitimately be null: no confident chain, or no identifiable person.
+        if (task === 'resolve') return { type: Type.OBJECT, nullable: true, properties: person, required: Object.keys(person) };
+        if (task === 'path') return {
+            type: Type.OBJECT, nullable: true,
+            properties: {
+                nodes: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { id: { type: Type.STRING }, ...person } } },
+                links: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { claim: { type: Type.STRING } }, required: ['claim'] } },
+            },
+            required: ['nodes', 'links'],
+        };
         const events = task === 'events';
         return { type: Type.ARRAY, items: {
             type: Type.OBJECT,
@@ -146,6 +161,14 @@ export class GeminiService implements IAIService {
 
     fetchHistoricalFigures(start: number, end: number, signal?: AbortSignal, context?: WeaveGenerationContext): Promise<HistoricalFigure[]> {
         return generateWeaveTimeline(this.generate.bind(this), start, end, signal, context);
+    }
+
+    fetchConnectionPath(from: HistoricalFigure, to: HistoricalFigure, options: ConnectionPathOptions, signal?: AbortSignal): Promise<ConnectionPathProposal | null> {
+        return requestConnectionPath(this.generate.bind(this), from, to, options, signal);
+    }
+
+    resolveFigure(name: string, signal?: AbortSignal): Promise<NewPerson | null> {
+        return requestResolveFigure(this.generate.bind(this), name, signal);
     }
 
     async fetchRelatedFigures(target: HistoricalFigure, allFigures: HistoricalFigure[]): Promise<string[]> {
@@ -202,9 +225,9 @@ export class GeminiService implements IAIService {
         }, signal);
     }
 
-    async fetchRelationshipExplanation(source: HistoricalFigure, target: HistoricalFigure): Promise<RelationshipExplanation | null> {
+    async fetchRelationshipExplanation(source: HistoricalFigure, target: HistoricalFigure, _signal?: AbortSignal, options?: RelationshipExplanationOptions): Promise<RelationshipExplanation | null> {
         try {
-            const prompt = buildRelationshipExplanationPrompt(source, target);
+            const prompt = buildRelationshipExplanationPrompt(source, target, options);
 
             const ai = this.ensureAI();
             return await generateRelationshipAssessment(async correction => {

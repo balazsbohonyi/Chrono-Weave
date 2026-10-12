@@ -62,6 +62,14 @@ History stays ordered by creation date, newest first. Reopening a canvas saves t
 - **Visual Highlighting**: Newly discovered figures are visually distinguished from existing ones
 - **Automatic Relationships**: New figures are automatically connected to the source figure with relationship visualization
 
+### 🕸️ Six Degrees: Connect Two People
+- **Connect to…**: Choose it on a person, then click another person or type any name; the AI finds a chain of documented **personal contacts** between them, such as Leonardo da Vinci → Verrocchio → … → Isaac Newton, and reports its real length ("4 degrees apart")
+- **Contact only**: Every link needs overlapping lifespans and a documented personal interaction (met, taught, corresponded, worked together, family); influence through someone's work doesn't count
+- **Verified, never guessed**: Every proposed link is checked by the AI, failed links are repaired locally, and unverified links never appear. Pairs too far apart (about 400 years) are refused up front
+- **Woven in**: People the chain needs are added to the canvas and marked as newly discovered
+- **The reveal**: Everyone else fades out while the camera follows an amber dashed thread from person to person, numbering each as it appears. Press Escape or click to skip, and again to bring the canvas back
+- **Connection tab**: A sidebar tab lists the chain with the verified evidence for each link and a **Why?** explanation; successful chains are saved per canvas under **Recent connections** and replay instantly
+
 ### 📖 Deep Dive Biographies
 - **Read Biography**: Click to view detailed AI-generated biographical information
 - **Famous Quotes**: Discover iconic quotes from historical figures

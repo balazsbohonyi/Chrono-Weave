@@ -1,4 +1,4 @@
-import type { HistoricalFigure, IAIService, RelationshipExplanation } from '../types';
+import type { HistoricalFigure, IAIService, RelationshipExplanation, RelationshipExplanationOptions } from '../types';
 import { buildCorrectionPrompt } from './prompts';
 import { RELATIONSHIP_NARRATIVE_VERSION } from '../constants';
 
@@ -46,16 +46,28 @@ export function parseRelationshipAssessment(value: unknown): RelationshipExplana
     sections: sections.length ? sections : [{ title: isRelevant ? 'Evidence' : 'Assessment', content: isRelevant ? evidence : summary }] };
 }
 
-const key = (source: HistoricalFigure, target: HistoricalFigure) =>
-  `chrono_assessment_${encodeURIComponent(source.id)}_${encodeURIComponent(target.id)}`;
+export const ASSESSMENT_CACHE_PREFIX = 'chrono_assessment_';
+// Six Degrees' contact-only verdicts live apart from the general ones: they answer a stricter question.
+export const CONTACT_CACHE_PREFIX = 'chrono_contact_';
+const key = (source: HistoricalFigure, target: HistoricalFigure, contactOnly = false) =>
+  `${contactOnly ? CONTACT_CACHE_PREFIX : ASSESSMENT_CACHE_PREFIX}${encodeURIComponent(source.id)}_${encodeURIComponent(target.id)}`;
 const scope = (source: HistoricalFigure, target: HistoricalFigure) => JSON.stringify(
   [source, target].map(({ id, name, birthYear, deathYear, occupation, category }) =>
     [id, name, birthYear, deathYear, occupation, category]),
 );
 
-export function readRelationshipAssessment(source: HistoricalFigure, target: HistoricalFigure, storage: Storage): RelationshipExplanation | null {
+export function readRelationshipAssessment(source: HistoricalFigure, target: HistoricalFigure, storage: Storage,
+  options: RelationshipExplanationOptions = {}): RelationshipExplanation | null {
+  const own = readStoredAssessment(source, target, storage, !!options.contactOnly);
+  if (own || !options.contactOnly) return own;
+  // Contact is the stricter question: a general rejection answers it, but a general confirmation does not.
+  const general = readStoredAssessment(source, target, storage, false);
+  return general?.isRelevant === false ? general : null;
+}
+
+function readStoredAssessment(source: HistoricalFigure, target: HistoricalFigure, storage: Storage, contactOnly: boolean): RelationshipExplanation | null {
   try {
-    const cached = JSON.parse(storage.getItem(key(source, target)) || 'null');
+    const cached = JSON.parse(storage.getItem(key(source, target, contactOnly)) || 'null');
     if (!cached || cached.scope !== scope(source, target)) return null;
     const explanation = parseRelationshipAssessment(cached.explanation);
     // Old verdicts against a connection remain useful. Positive results also
@@ -65,13 +77,22 @@ export function readRelationshipAssessment(source: HistoricalFigure, target: His
   } catch { return null; }
 }
 
+// Assessments are cached per direction. A pair is one relationship, so either direction answers,
+// and a cached rejection in either direction wins over a cached confirmation.
+export function readPairAssessment(first: HistoricalFigure, second: HistoricalFigure, storage: Storage,
+  options: RelationshipExplanationOptions = {}): RelationshipExplanation | null {
+  const found = [readRelationshipAssessment(first, second, storage, options), readRelationshipAssessment(second, first, storage, options)]
+    .filter((assessment): assessment is RelationshipExplanation => assessment !== null);
+  return found.find(assessment => !assessment.isRelevant) ?? found[0] ?? null;
+}
+
 export function countVerifiedConnections(figures: HistoricalFigure[], storage: Storage): number {
   const byId = new Map(figures.map(figure => [figure.id, figure]));
   const verified = new Set<string>();
   const rejected = new Set<string>();
   for (let index = 0; index < storage.length; index++) {
     const cacheKey = storage.key(index);
-    if (!cacheKey?.startsWith('chrono_assessment_')) continue;
+    if (!cacheKey?.startsWith(ASSESSMENT_CACHE_PREFIX)) continue;
     try {
       const cached = JSON.parse(storage.getItem(cacheKey) || 'null');
       const endpoints = JSON.parse(cached?.scope);
@@ -92,6 +113,7 @@ export function countVerifiedConnections(figures: HistoricalFigure[], storage: S
 // positive assessment admits a connection. Old IDs/descriptions are not proof.
 export async function assessRelationships(
   service: Pick<IAIService, 'fetchRelationshipExplanation'>, source: HistoricalFigure, candidates: HistoricalFigure[], storage: Storage, signal?: AbortSignal,
+  options: RelationshipExplanationOptions = {},
 ): Promise<Map<string, RelationshipExplanation>> {
   const accepted = new Map<string, RelationshipExplanation>();
   const seen = new Set<string>([source.id]);
@@ -100,10 +122,10 @@ export async function assessRelationships(
     signal?.throwIfAborted();
     if (seen.has(candidate.id)) continue;
     seen.add(candidate.id);
-    let explanation = readRelationshipAssessment(source, candidate, storage);
+    let explanation = readRelationshipAssessment(source, candidate, storage, options);
     if (!explanation) {
       try {
-        explanation = parseRelationshipAssessment(await service.fetchRelationshipExplanation(source, candidate, signal));
+        explanation = parseRelationshipAssessment(await service.fetchRelationshipExplanation(source, candidate, signal, options));
       } catch (error) {
         signal?.throwIfAborted();
         if (!(error instanceof RelationshipAssessmentError)) throw error;
@@ -112,7 +134,7 @@ export async function assessRelationships(
       }
       signal?.throwIfAborted();
       try {
-        storage.setItem(key(source, candidate), JSON.stringify({ scope: scope(source, candidate), narrativeVersion: RELATIONSHIP_NARRATIVE_VERSION, explanation }));
+        storage.setItem(key(source, candidate, !!options.contactOnly), JSON.stringify({ scope: scope(source, candidate), narrativeVersion: RELATIONSHIP_NARRATIVE_VERSION, explanation }));
       } catch { /* Storage failure must not bypass or fail the assessment. */ }
     }
     if (explanation.isRelevant) accepted.set(candidate.id, explanation);

@@ -9,7 +9,8 @@ import {
   CONNECTION_TEST_PROMPT,
   buildCorrectionPrompt,
 } from './prompts';
-import type { DeepDiveData, FigureCategory, HistoricalFigure, IAIService, RelationshipExplanation, WeaveGenerationContext, WeaveRequest, WeaveValidationResult } from '../types';
+import type { ConnectionPathOptions, ConnectionPathProposal, DeepDiveData, FigureCategory, HistoricalFigure, IAIService, NewPerson, RelationshipExplanation, RelationshipExplanationOptions, WeaveGenerationContext, WeaveRequest, WeaveValidationResult } from '../types';
+import { requestConnectionPath, requestResolveFigure } from './pathService';
 import { validateLocalUrl, type AppConfig } from '../utils/providerConfig';
 import { generateWeaveTimeline, getWeaveGenerationRange, parseWeaveFigures, suggestWeaveTopic, validateWeaveQuery } from './weaveService';
 import { parseJsonResponse } from './jsonResponse';
@@ -223,6 +224,14 @@ export class OllamaService implements IAIService {
     return generateWeaveTimeline(this.generate.bind(this), start, end, signal, context);
   }
 
+  fetchConnectionPath(from: HistoricalFigure, to: HistoricalFigure, options: ConnectionPathOptions, signal?: AbortSignal): Promise<ConnectionPathProposal | null> {
+    return requestConnectionPath(this.generate.bind(this), from, to, options, signal);
+  }
+
+  resolveFigure(name: string, signal?: AbortSignal): Promise<NewPerson | null> {
+    return requestResolveFigure(this.generate.bind(this), name, signal);
+  }
+
   async fetchRelatedFigures(target: HistoricalFigure, allFigures: HistoricalFigure[], signal?: AbortSignal): Promise<string[]> {
     const candidates = allFigures.filter(figure => figure.id !== target.id);
     if (!candidates.length) return [];
@@ -268,8 +277,8 @@ export class OllamaService implements IAIService {
     }, signal);
   }
 
-  fetchRelationshipExplanation(source: HistoricalFigure, target: HistoricalFigure, signal?: AbortSignal): Promise<RelationshipExplanation> {
-    return this.generate(buildRelationshipExplanationPrompt(source, target), parseRelationshipAssessment, signal);
+  fetchRelationshipExplanation(source: HistoricalFigure, target: HistoricalFigure, signal?: AbortSignal, options?: RelationshipExplanationOptions): Promise<RelationshipExplanation> {
+    return this.generate(buildRelationshipExplanationPrompt(source, target, options), parseRelationshipAssessment, signal);
   }
 
   fetchFigureDeepDive(figure: HistoricalFigure, signal?: AbortSignal): Promise<DeepDiveData> {

@@ -7,6 +7,7 @@ interface SidebarCardActionsProps {
     figure: HistoricalFigure;
     onDiscover: (figure: HistoricalFigure) => void;
     onInspect: (figure: HistoricalFigure) => void;
+    onConnect?: (figure: HistoricalFigure) => void;
     onTrace: (figure: HistoricalFigure) => Promise<void>;
     isTracing: boolean;
     isFollowingFigure?: boolean;
@@ -14,13 +15,14 @@ interface SidebarCardActionsProps {
     onRelationship?: (figure: HistoricalFigure) => void;
 }
 
-const SidebarCardActions: React.FC<SidebarCardActionsProps> = ({ figure, onDiscover, onInspect, onTrace, isTracing,
+const SidebarCardActions: React.FC<SidebarCardActionsProps> = ({ figure, onDiscover, onInspect, onConnect, onTrace, isTracing,
     isFollowingFigure = false, focusFigureId, onRelationship }) => {
     const actions = useFigureActions({
         figure,
         onDiscover,
         onTrace,
         onInspect,
+        onConnect,
         isDiscovering: false,
         isTracing,
         isFollowingFigure,

@@ -18,11 +18,15 @@ import Toast from './components/Toast';
 import ProgressOverlay from './components/ProgressOverlay';
 import SettingsDialog from './components/SettingsDialog';
 import Legend from './components/Legend';
-import { HistoricalFigure, DeepDiveData, IAIService, RelationshipExplanation, FigureCategory, DiscoveryClusterState, ClusterPlacement, LayoutData, WeaveRequest, WeaveGenerationContext, CanvasLayoutMode, CanvasConfig, CanvasSnapshot, CanvasHistoryRecord, CanvasViewSnapshot, SidebarViewState } from './types';
+import { HistoricalFigure, DeepDiveData, IAIService, RelationshipExplanation, RelationshipExplanationOptions, FigureCategory, DiscoveryClusterState, ClusterPlacement, LayoutData, WeaveRequest, WeaveGenerationContext, CanvasLayoutMode, CanvasConfig, CanvasSnapshot, CanvasHistoryRecord, CanvasViewSnapshot, SidebarViewState } from './types';
 import { calculateWeaveBounds, normalizeWeaveCategories } from './utils/weave';
 import { getUserErrorMessage, getWeaveValidationMessage, UserFacingError, EmptyCanvasError } from './utils/userErrors';
 import { createAIService } from './services/aiService';
-import { assessRelationships, readRelationshipAssessment } from './services/relationshipAssessment';
+import { assessRelationships, readPairAssessment } from './services/relationshipAssessment';
+import { useConnection } from './hooks/useConnection';
+import ConnectionPicker from './components/ConnectionPicker';
+import ConnectionProgress from './components/ConnectionProgress';
+import type { WovenCanvas } from './utils/weaveConnection';
 import { isConfigValid, providerNames } from './utils/providerConfig';
 import { filterTimelineFigures } from './utils/timelineFigures';
 import { saveRelationshipMap } from './utils/relationshipCache';
@@ -91,6 +95,8 @@ const App: React.FC = () => {
     const [newlyDiscoveredIds, setNewlyDiscoveredIds] = useState<Set<string>>(new Set());
     const [isDiscovering, setIsDiscovering] = useState(false);
     const [isTracing, setIsTracing] = useState(false);
+    // Six Degrees lives in useConnection; earlier callbacks reach it through this ref.
+    const connectionControl = useRef({ cancelSearch: () => {}, exitPicking: () => {}, reset: () => {} });
 
     // Sidebar State
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
@@ -179,6 +185,7 @@ const App: React.FC = () => {
     const dismissRelationships = useCallback(() => {
         traceVersion.current++;
         traceController.current?.abort();
+        connectionControl.current.cancelSearch();
         popoverVersion.current++;
         relationshipDetailReturn.current = null;
         setIsTracing(false);
@@ -188,6 +195,33 @@ const App: React.FC = () => {
         setNewlyDiscoveredIds(new Set());
         if (!KEEP_DISCOVERY_CLUSTERS) setClusterState(emptyClusters());
     }, []);
+
+    const connection = useConnection({
+        figures, config, clusters: clusterState, selectedCategories, storage: canvasStorage.current, service: aiService,
+        getPlacements: () => currentPlacements.current,
+        begin: beginRelationshipAction,
+        applyWoven: (woven: WovenCanvas) => {
+            setFigures(woven.figures);
+            setConfig(woven.config);
+            setClusterState(woven.clusters);
+            setSelectedCategories(woven.selectedCategories);
+            setNewlyDiscoveredIds(new Set(woven.newIds));
+        },
+        openSidebar: () => setIsSidebarCollapsed(false),
+        notify: (message, type) => setToast({ message, type }),
+        onSearchStart: () => {
+            // The search replaces any mapping or expansion that was running, and its dialogs.
+            relationshipDetailReturn.current = null;
+            popoverVersion.current++;
+            setPopoverState(previous => ({ ...previous, isOpen: false, loading: false }));
+            setRelationshipState(null);
+            setIsTracing(false);
+            setIsDiscovering(false);
+            setIsSearchFocusActive(false);
+            setToast(null);
+        },
+    });
+    connectionControl.current = { cancelSearch: connection.cancelSearch, exitPicking: connection.exitPicking, reset: connection.reset };
 
     const currentSnapshot: CanvasSnapshot | null = activeCanvas && figures.length ? {
         ...activeCanvas, config, figures, clusters: clusterState, cache: {},
@@ -226,6 +260,7 @@ const App: React.FC = () => {
 
     const installCanvas = useCallback((canvas: CanvasSnapshot) => {
         invalidateOperations();
+        connectionControl.current.reset();
         launcherInvoker.current = null;
         overlayInvoker.current = null;
         const storage = new CanvasCache(canvas.cache, () => scheduleSaveRef.current());
@@ -319,6 +354,7 @@ const App: React.FC = () => {
     const openLauncher = useCallback(() => {
         launcherInvoker.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
         dismissRelationships();
+        connectionControl.current.exitPicking();
         setPopoverState(previous => ({ ...previous, isOpen: false, loading: false }));
         setToast(null);
         setIsLauncherOpen(true);
@@ -407,6 +443,7 @@ const App: React.FC = () => {
         serviceRef.current = service;
         setAiService(service);
         dismissRelationships();
+        connectionControl.current.exitPicking();
         setLoading(false);
         setIsDiscovering(false);
         setIsTracing(false);
@@ -434,6 +471,9 @@ const App: React.FC = () => {
         relationshipDetailReturn.current = null;
         popoverVersion.current++;
         setPopoverState(previous => ({ ...previous, isOpen: false }));
+        // Starting any other action ends a connection search and leaves picking mode.
+        connection.cancelSearch();
+        connection.exitPicking();
         const { signal, isCurrent } = beginRelationshipAction();
         const requestId = traceVersion.current;
         setToast(null);
@@ -488,7 +528,8 @@ const App: React.FC = () => {
     const handleTraceRelationships = (figure: HistoricalFigure) => runRelationshipAction(figure, 'map');
     const handleDiscover = (figure: HistoricalFigure) => runRelationshipAction(figure, 'expand');
 
-    const openFigureRelationship = async (sourceFigure: HistoricalFigure, targetFigure: HistoricalFigure) => {
+    // `contactOnly` is the Connection tab's "Why?": it explains the contact verdict that admitted the link.
+    const openFigureRelationship = async (sourceFigure: HistoricalFigure, targetFigure: HistoricalFigure, options: RelationshipExplanationOptions = {}) => {
         const storage = canvasStorage.current;
         if (!relationshipState && !popoverState.isOpen) {
             overlayInvoker.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -501,7 +542,11 @@ const App: React.FC = () => {
 
         const rejectRelationship = () => {
             setPopoverState(previous => ({ ...previous, isOpen: false, loading: false }));
-            setToast({ message: `No verified historical connection between ${sourceFigure.name} and ${targetFigure.name}.`, type: 'info' });
+            setToast({ message: options.contactOnly
+                ? `No documented personal contact between ${sourceFigure.name} and ${targetFigure.name}.`
+                : `No verified historical connection between ${sourceFigure.name} and ${targetFigure.name}.`, type: 'info' });
+            // A contact verdict is stricter than the general one; it must not prune the canvas.
+            if (options.contactOnly) return;
             if (getCanvasFocusFigure(figures, config.weaveContext, config.seedFigureId)?.id === sourceFigure.id) {
                 setFigures(previous => discardRejectedFollowFigureCandidates(previous, config.weaveContext, storage, config.seedFigureId));
                 setSelectedFigures(previous => previous.filter(figure => figure.id !== targetFigure.id));
@@ -511,7 +556,8 @@ const App: React.FC = () => {
             setRelationshipState(previous => previous?.sourceFigure.id === sourceFigure.id
                 ? { ...previous, relatedIds: previous.relatedIds.filter(id => id !== targetFigure.id) } : previous);
         };
-        const assessment = readRelationshipAssessment(sourceFigure, targetFigure, storage);
+        // Assessments are cached per direction, but the relationship is one pair.
+        const assessment = readPairAssessment(sourceFigure, targetFigure, storage, options);
         if (assessment?.isRelevant === false) {
             rejectRelationship();
             return;
@@ -552,7 +598,8 @@ const App: React.FC = () => {
 
         try {
             const [assessed, detailsMap] = await Promise.all([
-                assessRelationships(aiService, sourceFigure, [targetFigure], storage, signal),
+                assessment ? Promise.resolve(new Map([[targetFigure.id, assessment]]))
+                    : assessRelationships(aiService, sourceFigure, [targetFigure], storage, signal, options),
                 fetchBatchFigureDetails([sourceFigure, targetFigure])
             ]);
 
@@ -593,6 +640,7 @@ const App: React.FC = () => {
 
     const handleInspectFigure = async (figure: HistoricalFigure, returnToRelationship = false) => {
         const storage = canvasStorage.current;
+        connection.exitPicking();
         if (!relationshipState && !popoverState.isOpen) {
             overlayInvoker.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
         }
@@ -767,7 +815,10 @@ const App: React.FC = () => {
         ? highlightedFigureIds[currentSearchIndex]
         : null;
 
-    const isBusy = loading || launcherPhase !== 'idle' || isDiscovering || isTracing;
+    const isBusy = loading || launcherPhase !== 'idle' || isDiscovering || isTracing || connection.isConnecting;
+    const canvasIds = useMemo(() => new Set(figures.map(figure => figure.id)), [figures]);
+    const connectionCurrentId = connection.currentIndex === null ? null : connection.active?.chain[connection.currentIndex]?.id ?? null;
+    const isConnectionSidebarOpen = (sortedSidebarFigures.length > 0 || connection.isTabVisible) && !isSidebarCollapsed;
     const toggleCanvasLayout = () => {
         if (isBusy || !figures.length) return;
         setConfig(previous => ({ ...previous,
@@ -834,7 +885,17 @@ const App: React.FC = () => {
                     onCameraChange={config.layoutMode === 'gallery' ? handleGalleryCamera : handleTimelineCamera}
                     onToggleLayout={toggleCanvasLayout}
                     seedFigureId={focusFigure?.id}
-                    isSidebarOpen={sortedSidebarFigures.length > 0 && !isSidebarCollapsed}
+                    isSidebarOpen={isConnectionSidebarOpen}
+                    onConnect={connection.beginPicking}
+                    pickingSource={connection.picking?.from ?? null}
+                    isPickable={connection.isPickable}
+                    onPick={connection.pickFigure}
+                    connection={connection.canvasConnection}
+                    connectionCurrentId={connectionCurrentId}
+                    connectionFocus={connection.focusRequest}
+                    onConnectionStep={connection.setCurrentIndex}
+                    onConnectionRevealEnd={connection.endReveal}
+                    onConnectionExit={connection.close}
                     modalActive={isLauncherOpen || !!relationshipState || popoverState.isOpen || isSettingsOpen}
                     relationshipSourceId={relationshipState?.sourceFigure.id}
                     highlightedFigureIds={highlightedFigureIds}
@@ -858,6 +919,24 @@ const App: React.FC = () => {
                 <ProgressOverlay title="CONSULTING THE ARCHIVES" />
             )}
 
+            {connection.picking && (
+                <ConnectionPicker
+                    source={connection.picking.from}
+                    figures={figures}
+                    error={connection.picking.error}
+                    initialDraft={connection.picking.draft}
+                    topOffset={hasCategoryFilters && isLegendOpen ? 126 : 64}
+                    statusFor={connection.statusFor}
+                    onPick={connection.pickFigure}
+                    onSubmitName={connection.submitName}
+                    onCancel={connection.exitPicking}
+                />
+            )}
+
+            {connection.isConnecting && connection.progress && (
+                <ConnectionProgress progress={connection.progress} onCancel={connection.cancelSearch} />
+            )}
+
             <Sidebar
                 key={`sidebar-${activeCanvas?.id ?? 'empty'}`}
                 initialView={initialSidebarView}
@@ -867,6 +946,13 @@ const App: React.FC = () => {
                 onTraceRelationships={handleTraceRelationships}
                 onDiscover={handleDiscover}
                 onInspect={handleInspectFigure}
+                onConnect={connection.beginPicking}
+                connection={{
+                    isVisible: connection.isTabVisible, tabRequest: connection.tabRequest,
+                    connection: connection.active, currentIndex: connection.currentIndex, recent: connection.recent,
+                    canvasIds, isBusy, onClose: connection.close, onRetry: connection.retry, onReplay: connection.replay,
+                    onFocusPerson: connection.focusPerson, onExplain: (from, to) => openFigureRelationship(from, to, { contactOnly: true }),
+                }}
                 activeTracingFigureId={relationshipState?.sourceFigure.id}
                 focusFigureId={focusFigure?.id}
                 isFollowingFigure={isFollowingFigure}
