@@ -114,6 +114,9 @@ test('folds dead-end leaves above the threshold, with exemptions', () => {
   assert.deepEqual(ids(view), ['a', 'b', 'hub']);
   // Everyone stays in the readable list.
   assert.equal(view.list.people.length, NETWORK_FOLD_THRESHOLD + 3);
+  // ...and so are the contacts of the folded people, and their portraits are asked for.
+  assert.equal(view.list.contacts.accepted.length, NETWORK_FOLD_THRESHOLD + 4);
+  assert.equal(portraitSubjects(view).length, NETWORK_FOLD_THRESHOLD + 5);
   // Selection and pins stay visible.
   assert.ok(ids(buildNetworkView(s, { selection: { person: 'leaf03' } })).includes('leaf03'));
   assert.ok(ids(buildNetworkView(s, { pinned: new Set(['leaf04']) })).includes('leaf04'));

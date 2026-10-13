@@ -1,16 +1,17 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ConnectionSession } from '../services/connectionGraph';
+import type { ConnectionSession, ContactPerson } from '../services/connectionGraph';
 import { useModalFocus } from '../hooks/useModalFocus';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useNetworkPortraits } from '../hooks/useNetworkPortraits';
 import { useNetworkSimulation } from '../hooks/useNetworkSimulation';
 import type { LayoutMode } from '../services/connectionNetworkLayout';
 import {
-  buildNetworkView, NO_FILTERS, portraitSubjects, type NetworkFilters, type NetworkSelection, type UnverifiedFilter,
+  buildNetworkView, NO_FILTERS, portraitSubjects, years, type NetworkFilters, type NetworkSelection, type UnverifiedFilter,
 } from '../services/connectionNetworkView';
 import NetworkGraph, { type RevealRequest } from './connectionNetwork/NetworkGraph';
 import NetworkInspector from './connectionNetwork/NetworkInspector';
 import NetworkLegend from './connectionNetwork/NetworkLegend';
+import NetworkPortrait from './connectionNetwork/NetworkPortrait';
 import { NARROW_QUERY, nodeRadius, REDUCED_MOTION_QUERY } from './connectionNetwork/metrics';
 import '../styles/connectionExplorer.css';
 
@@ -35,6 +36,7 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
   const [size, setSize] = useState({ width: 900, height: 600 });
   const [reveal, setReveal] = useState<RevealRequest | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [query, setQuery] = useState('');
   const [elapsed, setElapsed] = useState(session?.elapsedMs ?? 0);
   const hasSelection = !!selection.person || !!selection.edge;
 
@@ -51,7 +53,7 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
 
   // A different exploration starts clean; the same one keeps its selection, filters and pins across batches.
   const resetKey = session?.key ?? '';
-  useEffect(() => { setSelection(NO_SELECTION); setExpanded(new Set()); setPinned(new Set()); setReveal(null); setSheetOpen(false); }, [resetKey]);
+  useEffect(() => { setSelection(NO_SELECTION); setExpanded(new Set()); setPinned(new Set()); setReveal(null); setSheetOpen(false); setQuery(''); }, [resetKey]);
 
   const view = useMemo(() => session ? buildNetworkView(session, { filters, selection, expanded, pinned, highlightChain: !!success }) : null,
     [session, filters, selection, expanded, pinned, success]);
@@ -62,6 +64,7 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
   const inputs = useMemo(() => view?.nodes.map(node => ({ id: node.id, year: midpoint(node.person), endpoint: node.endpoint, radius: nodeRadius(node.endpoint !== null, narrow) })) ?? [], [view, narrow]);
   const links = useMemo(() => view?.edges.map(edge => ({ a: edge.from, b: edge.to })) ?? [], [view]);
   const { layout, kick } = useNetworkSimulation({ resetKey, inputs, links, bounds, mode, size, reducedMotion });
+  // Everyone the lists show gets a portrait, not only the people currently drawn.
   const portraits = useNetworkPortraits(useMemo(() => view ? portraitSubjects(view) : [], [view]));
 
   const syncPins = useCallback(() => setPinned(new Set(layout.pinned)), [layout]);
@@ -71,13 +74,23 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
   const resize = useCallback((width: number, height: number) => setSize(previous => previous.width === width && previous.height === height ? previous : { width, height }), []);
 
   const dismissSheet = useCallback(() => { setSheetOpen(false); select(NO_SELECTION); }, [select]);
-  // Esc peels back one layer at a time: lit chain -> skip, selection -> clear, otherwise close.
+  // From a person or contact back to the lists. Unlike clearing by tapping the graph, this keeps the sheet open on narrow screens.
+  const backToList = useCallback(() => { setSelection(NO_SELECTION); setExpanded(previous => previous.size ? new Set() : previous); setSheetOpen(narrow); }, [narrow]);
+  // Esc peels back one layer at a time: lit chain -> skip, selection -> clear, a search -> clear, otherwise close.
   const escape = useRef<() => void>(() => {});
   escape.current = () => {
-    if (!success && (hasSelection || sheetOpen)) dismissSheet(); else onClose();
+    if (!success && (hasSelection || sheetOpen)) dismissSheet(); else if (!success && query) setQuery(''); else onClose();
   };
   const onEscape = useCallback(() => escape.current(), []);
   useModalFocus(dialog, true, onEscape);
+
+  // A trackpad pinch arrives as Ctrl+wheel: wherever it lands on the overlay it must not zoom the whole page.
+  useEffect(() => {
+    const element = dialog.current; if (!element) return;
+    const keepPageZoom = (event: WheelEvent) => { if (event.ctrlKey || event.metaKey) event.preventDefault(); };
+    element.addEventListener('wheel', keepPageZoom, { passive: false });
+    return () => element.removeEventListener('wheel', keepPageZoom);
+  }, []);
 
   useEffect(() => {
     setElapsed(session?.elapsedMs ?? 0);
@@ -89,41 +102,63 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
 
   const name = (id: string) => session?.people.find(p => p.id === id)?.name ?? id;
   const endpointNames: [string, string] = [name(session?.endpoints[0] ?? ''), name(session?.endpoints[1] ?? '')];
+  const endpointPerson = (index: 0 | 1) => session?.people.find(p => p.id === session.endpoints[index]);
   const legend = view && <NetworkLegend filters={filters} counts={view.counts} onToggle={toggleFilter} narrow={narrow} />;
   const stable = session?.diagnostics.stopReason === 'work-budget' || session?.diagnostics.stopReason === 'time-budget';
+  const minutes = Math.floor(elapsed / 60000), seconds = Math.floor(elapsed / 1000) % 60;
 
-  return <div className="connection-explorer-backdrop">
-    <div ref={dialog} role="dialog" aria-modal="true" aria-labelledby="connection-explorer-title" className="connection-explorer" tabIndex={-1}
-      onClick={success ? onClose : undefined}>
-      <header className="connection-explorer-header">
-        <div><p className="connection-explorer-kicker">SIX DEGREES · CONTACT EXPLORATION</p><h2 id="connection-explorer-title">{session ? `${endpointNames[0]} → ${endpointNames[1]}` : 'Opening contact exploration'}</h2></div>
-        <button type="button" onClick={onClose} aria-label="Close contact exploration">×</button>
-      </header>
-      <div className="connection-explorer-status" role="status" aria-live="polite">
-        <strong>{busy ? session?.phase ?? phase ?? 'Identifying endpoint' : session?.phase ?? 'Paused'}</strong>
-        <span>{Math.floor(elapsed / 60000)}m {Math.floor(elapsed / 1000) % 60}s explored{!busy && !success && ' · no background search'}</span>
-      </div>
-      <div className="connection-explorer-body">
-        <section className="connection-explorer-network" aria-label="Explored contact network">
-          {view
-            ? <NetworkGraph view={view} endpointNames={endpointNames} nameOf={name} layout={layout} kick={kick} mode={mode} onModeChange={setMode}
-              size={size} onSize={resize} selection={selection} onSelect={select} portraits={portraits} narrow={narrow} reducedMotion={reducedMotion}
-              success={success} reveal={reveal} onPinsChange={syncPins} onToggleFold={toggleFold} legend={legend} />
-            : <div className="net-graph"><p className="net-empty">Preparing the contact network…</p></div>}
-        </section>
-        <NetworkInspector session={session} view={view} selection={selection} portraits={portraits} pinned={pinned} narrow={narrow}
-          open={sheetOpen || hasSelection} onSelect={selectFromPanel} onUnpin={unpin} onDismiss={dismissSheet} />
-      </div>
-      <footer className="connection-explorer-footer">
-        <p>{success ? 'Opening the connection on the canvas…' : 'Only accepted contacts can form a chain. Up to 20 intermediate people.'}</p>
-        <div>
-          {narrow && !success && <button type="button" onClick={() => setSheetOpen(open => !open)} aria-expanded={sheetOpen}>Overview</button>}
-          {success ? null : busy ? <button type="button" className="connection-explorer-primary" onClick={onStop}>Stop search</button>
-            : session && <><button type="button" className="connection-explorer-primary" onClick={onContinue}>{stable ? 'Continue searching' : 'Resume search'}</button><button type="button" onClick={onFresh}>Start a new search</button></>}
-          <button type="button" onClick={onClose}>Back to canvas</button>
+  const endpoint = (index: 0 | 1) => {
+    const person: ContactPerson | undefined = endpointPerson(index);
+    return <div className={`ce-endpoint is-${index === 0 ? 'a' : 'b'}`}>
+      <span className="ce-endpoint-portrait">
+        {person ? <NetworkPortrait person={person} size={56} url={portraits.get(person.id)} /> : <span className="net-portrait ce-endpoint-empty" style={{ width: 56, height: 56 }} />}
+        <b className="net-end-badge" aria-hidden="true">{index === 0 ? 'A' : 'B'}</b>
+      </span>
+      <span className="ce-endpoint-text"><span className="ce-endpoint-name">{endpointNames[index] || '…'}</span>
+        {person && <small>{years(person)} · {person.occupation}</small>}</span>
+    </div>;
+  };
+
+  return <div ref={dialog} role="dialog" aria-modal="true" aria-label={session ? `Contact exploration: ${endpointNames[0]} to ${endpointNames[1]}` : 'Opening contact exploration'}
+    className="connection-explorer" tabIndex={-1} onClick={success ? onClose : undefined}>
+    <button type="button" className="close-button relationship-close" aria-label="Close contact exploration" onClick={onClose}>
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 6l12 12M6 18L18 6" /></svg>
+    </button>
+    <header className="connection-explorer-header">
+      <p className="connection-explorer-kicker">Six Degrees · Contact exploration</p>
+      <div className="ce-heading">
+        <div className="connection-explorer-status" role="status" aria-live="polite">
+          <strong>{busy ? session?.phase ?? phase ?? 'Identifying endpoint' : session?.phase ?? 'Paused'}</strong>
+          {!busy && !success && <span>No background search</span>}
         </div>
-      </footer>
+        {session ? <div className="ce-endpoints">{endpoint(0)}<span className="ce-arrow" aria-hidden="true">→</span>{endpoint(1)}</div>
+          : <p className="ce-opening">Opening contact exploration</p>}
+        <div className={`ce-timer ${busy ? 'is-running' : ''}`} role="timer" aria-label={`${minutes} minutes ${seconds} seconds explored`}>
+          <span className="ce-timer-value" aria-hidden="true">{minutes}:{String(seconds).padStart(2, '0')}</span>
+          <span className="ce-timer-caption" aria-hidden="true">explored</span>
+        </div>
+      </div>
+    </header>
+    <div className="connection-explorer-body">
+      <section className="connection-explorer-network" aria-label="Explored contact network">
+        {view
+          ? <NetworkGraph view={view} endpointNames={endpointNames} nameOf={name} layout={layout} kick={kick} mode={mode} onModeChange={setMode}
+            size={size} onSize={resize} selection={selection} onSelect={select} portraits={portraits} narrow={narrow} reducedMotion={reducedMotion}
+            success={success} reveal={reveal} onPinsChange={syncPins} onToggleFold={toggleFold} legend={legend} />
+          : <div className="net-graph"><p className="net-empty">Preparing the contact network…</p></div>}
+      </section>
+      <NetworkInspector session={session} view={view} selection={selection} portraits={portraits} pinned={pinned} narrow={narrow}
+        open={sheetOpen || hasSelection} onSelect={selectFromPanel} onUnpin={unpin} onDismiss={dismissSheet} onBackToList={backToList} query={query} onQueryChange={setQuery} />
     </div>
+    <footer className="connection-explorer-footer">
+      <p>{success ? 'Opening the connection on the canvas…' : <>{!narrow && 'Drag or two-finger scroll to pan · wheel or pinch to zoom · drag people to pin · '}Only accepted contacts can form a chain. Up to 20 intermediate people.</>}</p>
+      <div>
+        {narrow && !success && <button type="button" onClick={() => setSheetOpen(open => !open)} aria-expanded={sheetOpen}>Overview</button>}
+        {success ? null : busy ? <button type="button" className="connection-explorer-primary" onClick={onStop}>Stop search</button>
+          : session && <><button type="button" className="connection-explorer-primary" onClick={onContinue}>{stable ? 'Continue searching' : 'Resume search'}</button><button type="button" onClick={onFresh}>Start a new search</button></>}
+        <button type="button" onClick={onClose}>Back to canvas</button>
+      </div>
+    </footer>
   </div>;
 };
 export default ConnectionExplorer;

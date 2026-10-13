@@ -25,7 +25,7 @@ test('all three provider adapters run identical dedicated tasks and carry cancel
       provider = name; prompts[name] = []; signals = [];
       responses = [[{ source: 's1', reference: 'r1', claim: 'Candidate correspondence.' }],
         [{ ref: 'p1', verdict: 'accepted', interactionType: 'correspondence', evidence: 'The exact people exchanged letters about their work.', year: null }],
-        { supported: true, summary: 'They exchanged letters.', sections: [{ title: 'Correspondence', content: 'Their work prompted the exchange.' }] }];
+        { supported: true, summary: 'They exchanged letters.', sections: ['Context', 'How their paths crossed', 'What the letters changed'].map(title => ({ title, content: 'Their work prompted the exchange. '.repeat(14) })) }];
       const signal = new AbortController().signal;
       assert.equal((await service.discoverPersonalContacts({ sources: [{ person: a, round: 1, previous: [] }], target: b, references: [b], limit: 6 }, signal))[0].person.name, b.name);
       const assessment = (await service.assessPersonalContacts([{ first: a, second: b }], signal))[0];

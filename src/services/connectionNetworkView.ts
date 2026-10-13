@@ -210,7 +210,11 @@ export function buildNetworkView(session: ConnectionSession, options: NetworkVie
   const count = (filter: UnverifiedFilter) => known.filter(c => filterOf(c.status) === filter).length;
   const byName = (x: ContactPerson, y: ContactPerson) => x.name.localeCompare(y.name);
   const contacts: NetworkView['list']['contacts'] = { accepted: [], unresolved: [], proposed: [], blocked: [] };
-  for (const edge of edges) contacts[filterOf(edge.status) ?? 'accepted'].push(edge);
+  // The readable list is complete: contacts of people folded behind a "+n" badge are still listed.
+  for (const { candidate, contextual } of shown.values()) if (candidate.status === 'accepted') {
+    contacts.accepted.push({ id: edgeId(candidate), from: candidate.from, to: candidate.to, status: candidate.status, candidate, contextual });
+  }
+  for (const edge of edges) if (filterOf(edge.status)) contacts[filterOf(edge.status)!].push(edge);
   return {
     nodes, edges, folds, closest, chain, focus,
     counts: { people: supported.size, contacts: accepted.length, unresolved: count('unresolved'), proposed: count('proposed'), blocked: count('blocked') },
@@ -224,9 +228,14 @@ export function buildNetworkView(session: ConnectionSession, options: NetworkVie
 }
 
 // Who may get a Wikipedia portrait: only AI-supported people. A name shared with someone else could
-// otherwise put the wrong face on an unverified suggestion.
-export const portraitSubjects = (view: Pick<NetworkView, 'nodes'>) =>
-  view.nodes.filter(node => node.supported).map(node => ({ id: node.id, name: node.person.name }));
+// otherwise put the wrong face on an unverified suggestion. Besides the people drawn, this covers the
+// ones only the readable list shows (for instance contacts folded behind a "+n" badge).
+export const portraitSubjects = (view: Pick<NetworkView, 'nodes'> & { list?: Pick<NetworkView['list'], 'endpoints' | 'people'> }) => {
+  const subjects = new Map<string, { id: string; name: string }>();
+  for (const node of view.nodes) if (node.supported) subjects.set(node.id, { id: node.id, name: node.person.name });
+  for (const person of [...(view.list?.endpoints ?? []), ...(view.list?.people ?? [])]) subjects.set(person.id, { id: person.id, name: person.name });
+  return [...subjects.values()];
+};
 
 export interface PersonContact { other: ContactPerson; candidate: CandidateContact }
 // Everything the session knows around one person, regardless of the filters.

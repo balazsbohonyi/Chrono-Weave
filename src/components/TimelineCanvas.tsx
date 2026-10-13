@@ -7,6 +7,7 @@ import ActionBar from './ActionBar';
 import CanvasToolbar from './CanvasToolbar';
 import { centerCameraOnBounds, fitCameraToBounds } from '../utils/canvasCamera';
 import { listenForCanvasWheel } from '../utils/canvasWheel';
+import { createWheelClassifier } from '../utils/wheelGesture';
 import { BASE_PIXELS_PER_YEAR, ROW_HEIGHT, calculateTextWidth, calculateTimelineLayout, timelineFigureBounds } from '../utils/timelineLayout';
 import { timelineThread } from '../utils/connectionThread';
 import { isRevealedAt, useConnectionReveal } from '../hooks/useConnectionReveal';
@@ -16,8 +17,6 @@ import type { CanvasProps } from './CanvasProps';
 // Config
 const AXIS_INTERVAL = 50; 
 const SIDEBAR_WIDTH = 544; // Sidebar's 34rem width at the application's base size.
-const MOUSE_WHEEL_IMPULSE_THRESHOLD_PX = 40;
-const TRACKPAD_STICKY_MS = 300;
 const IS_MAC_PLATFORM = typeof navigator !== 'undefined'
   && /Mac|iPhone|iPad|iPod/i.test(navigator.platform);
 
@@ -86,13 +85,9 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
   const lastPinchDistanceRef = useRef<number | null>(null);
   const pinchedRef = useRef(false);
 
-  // Wheel events do not expose their source device. Large vertical-only pixel
-  // impulses are treated as mouse-wheel notches; finer or horizontal events
-  // are kept in trackpad mode for the duration of the gesture.
-  const isTrackpadModeRef = useRef<boolean>(false);
-  const trackpadModeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Wheel events do not expose their source device; the classifier tells trackpad panning from wheel zooming.
+  const classifyWheel = useMemo(() => createWheelClassifier(), []);
 
-  
   const [cursorX, setCursorX] = useState<number | null>(null);
   const [hoverYearVal, setHoverYearVal] = useState<number | null>(null);
 
@@ -221,42 +216,11 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
       const mouseX = e.clientX - rect.left;
       const mouseY = e.clientY - rect.top;
 
-      // Determine if this is a zoom or pan gesture
-      const isCtrl = e.ctrlKey || e.metaKey; // ctrlKey = trackpad pinch gesture
-      const isShift = e.shiftKey;
-      const isLineOrPageMode = e.deltaMode !== 0; // line/page mode = physical mouse wheel
-      const hasDeltaX = Math.abs(e.deltaX) > 0;
+      const intent = classifyWheel(e);
 
-      // The target mouse reports approximately 90.91px per notch, while the
-      // Precision Touchpad reports fine-grained values around 0.91-3.64px.
-      // Line/page deltas are always physical wheel input.
-      const isMouseWheelImpulse = isLineOrPageMode || (
-        !hasDeltaX && Math.abs(e.deltaY) >= MOUSE_WHEEL_IMPULSE_THRESHOLD_PX
-      );
-      const hasTrackpadSignature = e.deltaMode === WheelEvent.DOM_DELTA_PIXEL && (
-        hasDeltaX || (e.deltaY !== 0 && !isMouseWheelImpulse)
-      );
-
-      // Keep trackpad classification sticky so acceleration within one gesture
-      // cannot cause a mid-gesture switch from panning to zooming.
-      if (hasTrackpadSignature) {
-        isTrackpadModeRef.current = true;
-        if (trackpadModeTimerRef.current) clearTimeout(trackpadModeTimerRef.current);
-        trackpadModeTimerRef.current = setTimeout(() => {
-          isTrackpadModeRef.current = false;
-        }, TRACKPAD_STICKY_MS);
-      }
-
-      const looksLikeTrackpad = isTrackpadModeRef.current || hasTrackpadSignature;
-
-      const shouldZoom = isCtrl || isShift || isLineOrPageMode || !looksLikeTrackpad;
-
-      if (shouldZoom) {
-        // Fine Ctrl/Cmd wheel input is a trackpad pinch. A physical wheel keeps
-        // ordinary wheel sensitivity even when Ctrl/Cmd is held.
-        const scaleSensitivity = isCtrl && !isMouseWheelImpulse ? 0.01 : 0.001;
+      if (intent.kind === 'zoom') {
         setViewState(prev => {
-          let newScale = prev.scale * (1 - e.deltaY * scaleSensitivity);
+          let newScale = prev.scale * intent.factor;
           newScale = Math.max(0.1, Math.min(5, newScale));
           const scaleRatio = newScale / prev.scale;
           const newTranslateX = mouseX - (mouseX - prev.translateX) * scaleRatio;
@@ -266,8 +230,8 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
       } else {
         // Pan: two-finger trackpad scroll
         setViewState(prev => {
-          let nextX = prev.translateX - e.deltaX;
-          const nextY = prev.translateY - e.deltaY;
+          let nextX = prev.translateX - intent.dx;
+          const nextY = prev.translateY - intent.dy;
 
           // Clamp X panning
           const viewportWidth = rect.width;
@@ -283,14 +247,7 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
     };
 
     return listenForCanvasWheel(el, handleWheel, modalActive);
-  }, [highlightedFigureIds, onCanvasInteraction, contentWidth, modalActive, reveal.interrupt]);
-
-  // Cleanup trackpad detection timer
-  useEffect(() => {
-    return () => {
-      if (trackpadModeTimerRef.current) clearTimeout(trackpadModeTimerRef.current);
-    };
-  }, []);
+  }, [highlightedFigureIds, onCanvasInteraction, contentWidth, modalActive, reveal.interrupt, classifyWheel]);
 
   // Let the compatibility mousedown event suppress Chrome's middle-click
   // autoscroll UI while Pointer Events continue to own the drag itself.

@@ -14,6 +14,13 @@ type Link = SimulationLinkDatum<LayoutNode>;
 
 const MARGIN = 90;
 const LABEL_ROOM = 28;
+// The time axis has a spacing of its own instead of being squeezed into whatever width the drawing has:
+// a short span gets this much room per year, a long span gets less (down to a floor), and the camera
+// pans and zooms over the result. 2.2 reference widths is roughly 2.4 times the old fit-to-width spacing.
+const TIME_REFERENCE_WIDTH = 1000;
+const TIME_SPREAD = 2.2;
+const MIN_PIXELS_PER_YEAR = 2;
+const MAX_PIXELS_PER_YEAR = 14;
 const DEFAULT_SIZE = { width: 900, height: 600 };
 const ALPHA_MIN = 0.02;
 
@@ -50,11 +57,12 @@ export class NetworkLayout {
   get active() { return this.dragging !== null || this.simulation.alpha() > ALPHA_MIN; }
   position(id: string) { const node = this.nodes.get(id); return node && node.x !== undefined && node.y !== undefined ? { x: node.x, y: node.y } : undefined; }
 
-  xOf(year: number) {
-    const [from, to] = this.domain, span = Math.max(1, to - from), usable = Math.max(1, this.width - MARGIN * 2);
-    return MARGIN + (year - from) / span * usable;
+  // Independent of the measured size, so resizing or opening the panel never re-spaces the people.
+  get pixelsPerYear() {
+    const span = Math.max(1, this.domain[1] - this.domain[0]);
+    return Math.min(MAX_PIXELS_PER_YEAR, Math.max(MIN_PIXELS_PER_YEAR, TIME_REFERENCE_WIDTH * TIME_SPREAD / span));
   }
-  get pixelsPerYear() { return Math.max(1, this.width - MARGIN * 2) / Math.max(1, this.domain[1] - this.domain[0]); }
+  xOf(year: number) { return MARGIN + (year - this.domain[0]) * this.pixelsPerYear; }
 
   setSize(width: number, height: number) {
     if (!(width > 0) || !(height > 0) || (width === this.width && height === this.height)) return;

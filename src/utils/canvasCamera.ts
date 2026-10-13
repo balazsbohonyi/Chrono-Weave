@@ -33,14 +33,45 @@ export const easeInOut = (progress: number) => {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 };
 
+// CSS-style cubic-bezier(x1, y1, x2, y2) as an easing function of time progress.
+export function cubicBezier(x1: number, y1: number, x2: number, y2: number): (progress: number) => number {
+  const axis = (a: number, b: number, t: number) => 3 * a * (1 - t) * (1 - t) * t + 3 * b * (1 - t) * t * t + t * t * t;
+  const slope = (a: number, b: number, t: number) => 3 * a * (1 - t) * (1 - t) + 6 * (b - a) * (1 - t) * t + 3 * (1 - b) * t * t;
+  return progress => {
+    const x = clamp(progress, 0, 1);
+    if (x === 0 || x === 1) return x;
+    let t = x;
+    for (let i = 0; i < 6; i++) {
+      const error = axis(x1, x2, t) - x, d = slope(x1, x2, t);
+      if (Math.abs(error) < 1e-6) return axis(y1, y2, t);
+      if (Math.abs(d) < 1e-6) break;
+      t -= error / d;
+    }
+    // Newton went astray on a very flat part of the curve: bisect, which cannot fail.
+    let low = 0, high = 1;
+    t = x;
+    for (let i = 0; i < 32; i++) {
+      const value = axis(x1, x2, t);
+      if (Math.abs(value - x) < 1e-6) break;
+      if (value < x) low = t; else high = t;
+      t = (low + high) / 2;
+    }
+    return axis(y1, y2, t);
+  };
+}
+// Leaves gently and slows for a long time before the end, so the camera visibly eases up as it reaches a card.
+export const easeArrival = cubicBezier(0.4, 0, 0.1, 1);
+// A slow drift that starts at once and settles gently, for a camera that creeps in while it rests on something.
+export const easeDrift = cubicBezier(0.1, 0.5, 0.3, 1);
+
 // A point of the flight. `pivot` is the screen point whose world position travels in a straight line
 // (normally the centre of the usable viewport); its coordinates also say how large the viewport is.
 // Long flights zoom out part-way, so the traveller sees the distance instead of a blur.
-export function cameraAt(from: CanvasCamera, to: CanvasCamera, progress: number, pivot?: Point): CanvasCamera {
+export function cameraAt(from: CanvasCamera, to: CanvasCamera, progress: number, pivot?: Point, ease: (progress: number) => number = easeInOut): CanvasCamera {
   const t = clamp(progress, 0, 1);
   if (t >= 1) return to;
   if (t <= 0) return from;
-  const u = easeInOut(t);
+  const u = ease(t);
   const anchor = pivot ?? { x: 0, y: 0 };
   const worldAt = (camera: CanvasCamera) => ({ x: (anchor.x - camera.x) / camera.scale, y: (anchor.y - camera.y) / camera.scale });
   const start = worldAt(from), end = worldAt(to);
@@ -81,6 +112,8 @@ export const prefersReducedMotion = () => typeof window !== 'undefined' && typeo
 
 export interface FlightOptions {
   pivot?: Point;
+  // How the flight's progress maps to distance travelled; defaults to a symmetric ease-in-out.
+  easing?: (progress: number) => number;
   reducedMotion?: boolean;
   scheduler?: FrameScheduler;
 }
@@ -88,7 +121,7 @@ export interface FlightOptions {
 // Animates the camera and says how it ended. Aborting the signal (the user panned or zoomed, or the
 // mode closed) stops the flight where it is. Reduced motion, or no time at all, jumps to the end.
 export function flyCamera(from: CanvasCamera, to: CanvasCamera, durationMs: number, onFrame: (camera: CanvasCamera) => void,
-  signal?: AbortSignal, { pivot, reducedMotion = prefersReducedMotion(), scheduler = browserScheduler }: FlightOptions = {}): Promise<'finished' | 'cancelled'> {
+  signal?: AbortSignal, { pivot, easing, reducedMotion = prefersReducedMotion(), scheduler = browserScheduler }: FlightOptions = {}): Promise<'finished' | 'cancelled'> {
   if (signal?.aborted) return Promise.resolve('cancelled');
   if (reducedMotion || !(durationMs > 0)) {
     onFrame(to);
@@ -109,7 +142,7 @@ export function flyCamera(from: CanvasCamera, to: CanvasCamera, durationMs: numb
         finish('finished');
         return;
       }
-      onFrame(cameraAt(from, to, progress, pivot));
+      onFrame(cameraAt(from, to, progress, pivot, easing));
       cancelFrame = scheduler.request(step);
     };
     signal?.addEventListener('abort', cancel, { once: true });

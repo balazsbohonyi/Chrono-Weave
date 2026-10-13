@@ -95,6 +95,21 @@ test('the year domain widens for people outside the endpoints lifespans, and rem
   assert.equal(layout.position('old'), undefined);
 });
 
+test('years keep their own spacing: wider than a fit to the drawing, and not changed by resizing', () => {
+  const layout = build(), spacing = layout.pixelsPerYear, [from, to] = layout.yearDomain;
+  assert.ok(spacing > (900 - 180) / (to - from) * 2, `${spacing} px per year`);
+  layout.setSize(1600, 700);
+  assert.equal(layout.pixelsPerYear, spacing);
+  assert.ok(Math.abs(layout.xOf(1700) - layout.xOf(1650) - spacing * 50) < 1e-6);
+});
+
+test('the spacing eases off for very long spans but never collapses, and caps for very short ones', () => {
+  const long = new NetworkLayout(), short = new NetworkLayout();
+  long.setBounds(-400, 1950); short.setBounds(1900, 1910);
+  assert.equal(long.pixelsPerYear, 2);
+  assert.equal(short.pixelsPerYear, 14);
+});
+
 test('axis steps follow the zoom: centuries far out, decades up close', () => {
   assert.deepEqual(axisTicks(1500, 1800, 0.3).every(year => year % 200 === 0 || year % 100 === 0), true);
   assert.ok(axisTicks(1600, 1700, 6).length > axisTicks(1600, 1700, 0.5).length);

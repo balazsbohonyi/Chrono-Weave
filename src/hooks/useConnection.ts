@@ -229,6 +229,8 @@ export function useConnection(dependencies: Dependencies) {
   }, [start]);
 
   const replay = useCallback((entry: ConnectionPathEntry) => show(savedConnectionView(entry)), [show]);
+  // Plays the connection on show again from the start, as a fresh show: the stage opens anew on the first person.
+  const replayActive = useCallback(() => { if (active) show({ chain: active.chain, links: active.links }); }, [active, show]);
 
   // The ✕ in the Connection tab hides the thread; saved connections stay listed.
   const close = useCallback(() => {
@@ -254,7 +256,7 @@ export function useConnection(dependencies: Dependencies) {
     picking, isConnecting, progress, active, recent, currentIndex, tabRequest, exploration, explorerOpen, success, closeExplorer, checkpoints, stop, continueSearch, openCheckpoint,
     focusRequest, canvasConnection, isTabVisible: !!active || recent.length > 0 || checkpoints.length > 0,
     isPickable, statusFor,
-    beginPicking, exitPicking, pickFigure, submitName, cancelSearch, reset, replay, close, focusPerson,
+    beginPicking, exitPicking, pickFigure, submitName, cancelSearch, reset, replay, replayActive, close, focusPerson,
     endReveal, setCurrentIndex,
   };
 }

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cameraAt, centerCameraOnBounds, easeInOut, fitCameraToBounds, flyCamera, pinchCamera, unionBounds, zoomCameraAt, type CanvasCamera, type Point } from '../src/utils/canvasCamera';
+import { cameraAt, centerCameraOnBounds, cubicBezier, easeArrival, easeInOut, fitCameraToBounds, flyCamera, pinchCamera, unionBounds, zoomCameraAt, type CanvasCamera, type Point } from '../src/utils/canvasCamera';
 
 const worldPoint = (camera: CanvasCamera, screen: Point) => ({ x: (screen.x - camera.x) / camera.scale,
   y: (screen.y - camera.y) / camera.scale });
@@ -180,4 +180,30 @@ test('bounds of several boxes are their union', () => {
   assert.equal(unionBounds([]), null);
   assert.deepEqual(unionBounds([{ left: 10, top: 20, width: 30, height: 40 }, { left: -5, top: 60, width: 10, height: 100 }]),
     { left: -5, top: 20, width: 45, height: 140 });
+});
+
+test('cubic-bezier easing runs from 0 to 1, never goes backwards, and matches the CSS linear curve for a straight line', () => {
+  const linear = cubicBezier(0.25, 0.25, 0.75, 0.75);
+  for (let step = 0; step <= 20; step++) assert.ok(Math.abs(linear(step / 20) - step / 20) < 1e-4);
+  assert.equal(easeArrival(0), 0);
+  assert.equal(easeArrival(1), 1);
+  let previous = 0;
+  for (let step = 1; step <= 200; step++) { const value = easeArrival(step / 200); assert.ok(value >= previous - 1e-9, `step ${step}`); previous = value; }
+  assert.equal(easeArrival(-1), 0);
+  assert.equal(easeArrival(3), 1);
+});
+
+test('the arrival easing slows down for longer before the end than it speeds up at the start', () => {
+  const speed = (at: number) => (easeArrival(at + 0.01) - easeArrival(at - 0.01)) / 0.02;
+  // Gentle departure, then a long glide: at 85% of the time the camera has covered far more than 85%, and it is crawling.
+  assert.ok(easeArrival(0.85) > 0.95);
+  assert.ok(speed(0.9) < speed(0.1));
+  assert.ok(speed(0.95) < speed(0.5) / 3);
+});
+
+test('a flight can be given its own easing, and still ends exactly on target', () => {
+  const from: CanvasCamera = { x: 0, y: 0, scale: 1 }, to: CanvasCamera = { x: -400, y: -100, scale: 1 };
+  const eased = cameraAt(from, to, 0.5, undefined, easeArrival), plain = cameraAt(from, to, 0.5);
+  assert.ok(Math.abs(eased.x) > Math.abs(plain.x), 'covers more of the distance by half time');
+  assert.deepEqual(cameraAt(from, to, 1, undefined, easeArrival), to);
 });

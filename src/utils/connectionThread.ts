@@ -1,11 +1,13 @@
 import type { HistoricalFigure } from '../types';
-import { GALLERY_CARD_HEIGHT, GALLERY_CARD_WIDTH } from './galleryLayout';
+import { GALLERY_CARD_HEIGHT, GALLERY_CARD_WIDTH, GALLERY_COLUMN_GAP, GALLERY_TIER_GAP } from './galleryLayout';
 import { BASE_PIXELS_PER_YEAR, ROW_HEIGHT } from './timelineLayout';
+import { routeThread, type RouterRect } from './threadRouter';
 
 // Path geometry for the thread that links a chain of people, one path per link, in the world
-// coordinates of the layout it is drawn in. Each path is drawn from its start to its end. Both
-// layouts route the same way: a link leaves the side of one person and enters the side of the next,
-// horizontally, so the thread never runs across the bar or card it connects.
+// coordinates of the layout it is drawn in. Each path is drawn from its start to its end.
+// The timeline routes side to side, horizontally, so the thread never runs across the bar it connects.
+// The gallery has the router in `threadRouter.ts`, which uses all four sides of a card and the gutters
+// between cards; the side-to-side routing here is what it falls back to if no route is found.
 
 // Vertical centre of a person's bar below the top of its row, and the padding between a row's
 // left edge and its bar.
@@ -122,5 +124,13 @@ export function timelineThreadBox({ figure, level }: { figure: HistoricalFigure;
 export const timelineThread = (chain: ReadonlyArray<{ figure: HistoricalFigure; level: number }>, startYear: number): string[] =>
   manhattanThread(chain.map(item => timelineThreadBox(item, startYear)));
 
-export const galleryThread = (cards: ReadonlyArray<{ x: number; y: number }>): string[] =>
-  manhattanThread(cards.map(({ x, y }) => ({ left: x, right: x + GALLERY_CARD_WIDTH, y: y + GALLERY_CARD_HEIGHT / 2 })));
+// `cards` are the chain's cards in order, `board` every card of the board (the chain's included): the thread never
+// crosses a card of the chain, and prefers not to cross the others.
+export function galleryThread(cards: ReadonlyArray<{ x: number; y: number }>, board: ReadonlyArray<{ x: number; y: number }> = cards): string[] {
+  if (cards.length < 2) return [];
+  const rect = ({ x, y }: { x: number; y: number }): RouterRect => ({ x, y, width: GALLERY_CARD_WIDTH, height: GALLERY_CARD_HEIGHT });
+  const inChain = new Set<{ x: number; y: number }>(cards);
+  const routes = routeThread(cards.map(rect), board.filter(card => !inChain.has(card)).map(rect), { x: GALLERY_COLUMN_GAP / 2, y: GALLERY_TIER_GAP / 2 });
+  if (routes) return routes.map(points => roundedPath(points));
+  return manhattanThread(cards.map(({ x, y }) => ({ left: x, right: x + GALLERY_CARD_WIDTH, y: y + GALLERY_CARD_HEIGHT / 2 })));
+}

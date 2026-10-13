@@ -12,6 +12,8 @@ interface Props extends Omit<React.HTMLAttributes<HTMLDivElement>, 'children'> {
   detail?: FigureDetail;
   // A ring marks the card the canvas is working on: the tracing source, or the current person in a chain.
   isActive?: boolean;
+  // What marks the active card, where the usual blue ring does not suit (a chain's current person is amber, like its thread).
+  activeClassName?: string;
   // Makes the card itself a control, for example to fly the camera to this person.
   onSelect?: () => void;
   selectLabel?: string;
@@ -19,9 +21,9 @@ interface Props extends Omit<React.HTMLAttributes<HTMLDivElement>, 'children'> {
   children?: React.ReactNode;
 }
 
-const SidebarFigureCard: React.FC<Props> = ({ figure, detail, isActive = false, onSelect, selectLabel, children, className = '', ...rest }) => (
+const SidebarFigureCard: React.FC<Props> = ({ figure, detail, isActive = false, activeClassName = 'ring-2 ring-accent-marker', onSelect, selectLabel, children, className = '', ...rest }) => (
   <div {...rest}
-    className={`relative bg-surface-card/90 backdrop-blur-sm rounded-xl shadow-sm border border-card-border animate-in fade-in slide-in-from-right-4 duration-500 group transition-colors hover:bg-surface-card-hover ${isActive ? 'ring-2 ring-accent-marker' : ''} ${className}`}
+    className={`relative bg-surface-card/90 backdrop-blur-sm rounded-xl shadow-sm border border-card-border animate-in fade-in slide-in-from-right-4 duration-500 group transition-colors hover:bg-surface-card-hover ${isActive ? activeClassName : ''} ${className}`}
   >
     <div className={`p-4 ${onSelect ? 'cursor-pointer rounded-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-focus' : ''}`}
       {...(onSelect ? { role: 'button', tabIndex: 0, 'aria-label': selectLabel ?? `Show ${figure.name}`, onClick: onSelect,

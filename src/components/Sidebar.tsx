@@ -6,7 +6,7 @@ import { formatYear } from '../utils/formatters';
 
 import SidebarCardActions from './SidebarCardActions';
 import SidebarFigureCard from './SidebarFigureCard';
-import ConnectionPanel, { type ConnectionPanelProps } from './ConnectionPanel';
+import ConnectionPanel, { ConnectionHeader, type ConnectionPanelProps } from './ConnectionPanel';
 import Tooltip from './Tooltip';
 
 // The Connection tab appears while a connection is active or the canvas has saved ones.
@@ -237,8 +237,8 @@ const Sidebar: React.FC<SidebarProps> = ({
             )}
 
             <div className="p-6 border-b border-border/50 bg-surface/30 flex items-center justify-between gap-3">
-                <h2 className="text-3xl font-bold text-content-primary leading-none">
-                    {currentYear ? `Year ${formatYear(Math.floor(currentYear))}` : "Timeline Inspector"}
+                <h2 className="text-3xl font-bold text-content-primary leading-none whitespace-nowrap">
+                    {currentYear ? `Year ${formatYear(Math.floor(currentYear))}` : "Inspector"}
                 </h2>
 
                 {/* View Mode Toggle */}
@@ -248,7 +248,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                         aria-pressed={viewMode === 'FIGURES'}
                         className={tabClass(viewMode === 'FIGURES')}
                     >
-                        Figures
+                        People
                         <span className={badgeClass(viewMode === 'FIGURES')}>
                             {figuresCount}
                         </span>
@@ -269,7 +269,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                             aria-pressed={viewMode === 'CONNECTION'}
                             className={tabClass(viewMode === 'CONNECTION')}
                         >
-                            Connection
+                            Connections
                             {connection?.connection && (
                                 <span className={badgeClass(viewMode === 'CONNECTION')}>
                                     {connection.connection.chain.length - 1}
@@ -279,6 +279,13 @@ const Sidebar: React.FC<SidebarProps> = ({
                     )}
                 </div>
             </div>
+
+            {/* The connection on show stays put above the list that scrolls. */}
+            {viewMode === 'CONNECTION' && connection?.connection && (
+                <div className="px-6 pt-4 pb-4 border-b border-border/50 bg-surface/30 flex-shrink-0">
+                    <ConnectionHeader connection={connection.connection} onClose={connection.onClose} />
+                </div>
+            )}
 
             <div
                 ref={scrollContainerRef}

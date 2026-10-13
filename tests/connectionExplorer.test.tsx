@@ -21,8 +21,29 @@ test('explorer labels hypotheses, accessible selection, stopped states and stora
     assessment: { pair: [people[0].id, people[2].id], verdict: 'unresolved', evidence: '', uncertainty: 'Uncertain meeting.', provenance } }]);
   const markup = render(session);
   assert.match(markup, /aria-modal="true"/); assert.match(markup, /Continue searching/); assert.match(markup, /Unresolved/);
-  assert.match(markup, /role="button" tabindex="0"/); assert.match(markup, /readable list/); assert.match(markup, /Saving across reloads is unavailable/);
+  assert.match(markup, /role="button" tabindex="0"/); assert.match(markup, /role="tablist"/); assert.match(markup, /Search AI-supported people/); assert.match(markup, /Saving across reloads is unavailable/);
   assert.doesNotMatch(markup, /Unchecked biography must not appear/); assert.doesNotMatch(markup, /completion percentage|request count/);
+});
+
+test('the overlay names both endpoints with their details, and shows the clock without announcing it', () => {
+  const markup = render(build(() => [], true), { busy: true });
+  assert.match(markup, /class="connection-explorer"/); assert.match(markup, /relationship-close/);
+  assert.match(markup, /Contact exploration: Alpha to Beta/);
+  assert.match(markup, /ce-endpoint is-a/); assert.match(markup, /ce-endpoint is-b/);
+  assert.match(markup, /role="timer"[^>]*aria-label="0 minutes 12 seconds explored"/); assert.match(markup, /ce-timer is-running/);
+  assert.match(markup, /0:12/);
+  assert.doesNotMatch(markup, /role="status"[^>]*>(?:(?!<\/div>).)*0:12/);
+});
+
+test('the lists pin the endpoints above People and Contacts tabs, each with a search', () => {
+  const session = build(people => [{ from: people[0].id, to: people[2].id, status: 'accepted', claim: '', assessment: { pair: [people[0].id, people[2].id], verdict: 'accepted', interactionType: 'meeting', evidence: 'They met in Paris.', provenance } }], true);
+  const markup = render(session);
+  assert.match(markup, /aria-label="Endpoints"/);
+  assert.match(markup, /id="net-tab-people"[^>]*aria-selected="true"[^>]*aria-label="AI-supported people, 3"/);
+  assert.match(markup, /id="net-tab-contacts"[^>]*aria-selected="false"[^>]*aria-label="AI-supported contacts, 1"/);
+  assert.match(markup, /type="search"/);
+  // People rows carry the same detail line as the cards; the endpoints keep their A/B badges.
+  assert.match(markup, /Middle<\/strong><small>/); assert.match(markup, /net-end-badge is-a/);
 });
 
 test('the default graph draws accepted people only, with the legend as the filter', () => {
@@ -31,7 +52,8 @@ test('the default graph draws accepted people only, with the legend as the filte
     { from: people[2].id, to: people[3].id, status: 'unresolved', claim: 'maybe', assessment: { pair: [people[2].id, people[3].id], verdict: 'unresolved', evidence: '', uncertainty: 'Unclear.', provenance } },
   ], true);
   const markup = render(session);
-  const graph = markup.slice(markup.indexOf('aria-label="Live contact graph"'), markup.indexOf('</svg>'));
+  const graphStart = markup.indexOf('aria-label="Live contact graph"');
+  const graph = markup.slice(graphStart, markup.indexOf('</svg>', graphStart));
   assert.match(graph, /Middle, Reached from Alpha · 1 link/);
   assert.match(graph, /Alpha, Endpoint A/);
   assert.doesNotMatch(graph, /aria-label="Next/);

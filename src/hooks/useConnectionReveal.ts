@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { CONNECTION_REVEAL_MAX_MS } from '../constants';
 import {
-  fitCameraToBounds, flyCamera, prefersReducedMotion, unionBounds, type CameraBounds, type CanvasCamera,
+  easeArrival, easeDrift, fitCameraToBounds, flyCamera, prefersReducedMotion, unionBounds, type CameraBounds, type CanvasCamera,
 } from '../utils/canvasCamera';
+import { planReveal, REVEAL_APPROACH_MS, REVEAL_HOLD_MS, REVEAL_INTRO_MS, REVEAL_OPENING_HOLD_MS, REVEAL_SETTLE_MS } from '../utils/revealTiming';
 
 // What a canvas is asked to show: the chain's people in order, and a token that restarts the reveal.
 export interface ConnectionReveal {
@@ -29,24 +29,34 @@ interface Options {
   onStep?: (index: number | null) => void;
   // The reveal finished, was skipped, or was interrupted.
   onEnd?: () => void;
+  // The canvas appeared together with this reveal (a faded-in gallery): open on the first person, already at
+  // the reveal's zoom, instead of flying in from wherever the camera happens to be. Only the first play counts.
+  startAtFirst?: boolean;
+  // A fixed zoom for the card-to-card flights (1 is 100%); without it the zoom fits each person to the screen.
+  revealScale?: number;
+  // While the camera rests on a person it creeps in by this factor (1.05 is five percent) instead of standing still.
+  dwellZoom?: number;
   // Leaves the connection (Escape once the reveal is over). Only while `canExit`, so dialogs and picking keep their own Escape.
   onExit?: () => void;
   canExit?: boolean;
 }
 
-const INTRO_MS = 600, HOLD_MS = 250, APPROACH_MS = 600, SETTLE_MS = 800, FOCUS_MS = 700;
-const MIN_LINK_MS = 250, MAX_LINK_MS = 1400;
-
-// Time for each link of the thread: what is left of the whole reveal's budget once the fixed phases
-// (frame the chain, approach the first person, settle) are paid for, shared between the links.
-export const revealLinkMs = (links: number) =>
-  Math.min(MAX_LINK_MS, Math.max(MIN_LINK_MS, (CONNECTION_REVEAL_MAX_MS - INTRO_MS - HOLD_MS - APPROACH_MS - SETTLE_MS) / Math.max(1, links)));
-// The whole reveal, from the first frame to the last.
-export const revealTotalMs = (links: number) => INTRO_MS + HOLD_MS + APPROACH_MS + links * revealLinkMs(links) + SETTLE_MS;
+const FOCUS_MS = 700;
+// The part of a link's flight at which the sidebar's current person becomes the one being flown to.
+const HANDOVER = 0.75;
 
 // People fade in as the thread reaches them: the first at once, each next one just before its link ends.
 const FADE_LEAD = 0.3;
 export const isRevealedAt = (progress: number, index: number) => index <= 0 || progress >= index - FADE_LEAD;
+
+// Resolves once `ready` is true, polling about every frame; false if the signal aborts or it takes too long.
+async function until(ready: () => boolean, signal: AbortSignal, limitMs = 1500): Promise<boolean> {
+  for (let waited = 0; waited <= limitMs && !signal.aborted; waited += 16) {
+    if (ready()) return true;
+    await new Promise<void>(resolve => setTimeout(resolve, 16));
+  }
+  return !signal.aborted && ready();
+}
 
 function wait(ms: number, signal: AbortSignal): Promise<'finished' | 'cancelled'> {
   return new Promise(resolve => {
@@ -87,9 +97,27 @@ export function useConnectionReveal(options: Options) {
     const bounds = latest.current.getBounds(figureId), area = latest.current.getArea();
     return bounds && area ? fitCameraToBounds(bounds, area, { padding: 120, minScale: 0.5, maxScale: 1.2 }) : null;
   }, []);
+  // Where the camera rests on a person during the reveal: centred, at the fixed zoom when there is one.
+  const revealCamera = useCallback((figureId: string): CanvasCamera | null => {
+    const scale = latest.current.revealScale;
+    const bounds = latest.current.getBounds(figureId), area = latest.current.getArea();
+    return scale && bounds && area ? fitCameraToBounds(bounds, area, { minScale: scale, maxScale: scale }) : personCamera(figureId);
+  }, [personCamera]);
+  const firstPlay = useRef(true);
   const pivot = () => {
     const area = latest.current.getArea();
     return area ? { x: area.left + area.width / 2, y: area.top + area.height / 2 } : undefined;
+  };
+  // On-screen distance between consecutive people at the zoom the camera settles on them: longer hops get longer flights.
+  const hopDistances = (ids: string[]) => {
+    const spots = ids.map(id => {
+      const bounds = latest.current.getBounds(id), camera = revealCamera(id);
+      return bounds ? { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2, scale: camera?.scale ?? 1 } : null;
+    });
+    return spots.slice(1).map((spot, index) => {
+      const from = spots[index];
+      return from && spot ? Math.hypot(spot.x - from.x, spot.y - from.y) * (from.scale + spot.scale) / 2 : 0;
+    });
   };
   const linkCount = () => Math.max(0, (latest.current.connection?.nodeIds.length ?? 0) - 1);
 
@@ -150,35 +178,59 @@ export function useConnectionReveal(options: Options) {
       revealing.current = true;
       setIsRevealing(true);
       setProgress(0);
+      // A canvas that has only just mounted is measured a moment later.
+      if (!await until(() => !!latest.current.getArea(), signal)) { if (!signal.aborted) finish(); return; }
       const overview = overviewCamera();
       if (!overview || !links) { finish(); return; }
       if (prefersReducedMotion()) { apply(overview); finish(); return; }
 
       const fly = (to: CanvasCamera, ms: number) => flyCamera(startCamera(), to, ms, apply, signal, { pivot: pivot() });
-      const linkMs = revealLinkMs(links);
       const ids = latest.current.connection!.nodeIds;
+      const plan = planReveal(hopDistances(ids));
 
-      if (await fly(overview, INTRO_MS) === 'cancelled' || await wait(HOLD_MS, signal) === 'cancelled') return;
-      step(0);
-      const first = personCamera(ids[0]);
-      if (first && await fly(first, APPROACH_MS) === 'cancelled') return;
+      const atFirst = !!latest.current.startAtFirst && firstPlay.current;
+      firstPlay.current = false;
+      const first = revealCamera(ids[0]);
+      if (atFirst && first) {
+        // The canvas is fading in: it opens on the first person at the reveal's zoom, no flight needed.
+        apply(first);
+        step(0);
+      } else {
+        if (await fly(overview, REVEAL_INTRO_MS) === 'cancelled' || await wait(REVEAL_HOLD_MS, signal) === 'cancelled') return;
+        step(0);
+        if (first && await fly(first, REVEAL_APPROACH_MS) === 'cancelled') return;
+      }
+      // Resting on a person: still, or a slow creep towards them, and the next flight starts from wherever that ended.
+      const rest = (ms: number) => {
+        const zoom = latest.current.dwellZoom, from = startCamera(), at = pivot();
+        if (!zoom || zoom === 1 || !at) return wait(ms, signal);
+        const to = { scale: from.scale * zoom, x: at.x - (at.x - from.x) * zoom, y: at.y - (at.y - from.y) * zoom };
+        return flyCamera(from, to, ms, apply, signal, { pivot: at, easing: easeDrift });
+      };
+      // A reveal that opens on the first person lingers on them, so they are in focus before the thread sets off.
+      if (await rest(plan.dwellMs[0] + (atFirst && first ? REVEAL_OPENING_HOLD_MS : 0)) === 'cancelled') return;
       for (let index = 0; index < links; index++) {
-        const target = personCamera(ids[index + 1]) ?? startCamera();
+        const target = revealCamera(ids[index + 1]) ?? startCamera();
+        const travelMs = plan.travelMs[index];
         const started = performance.now();
         let shown = index;
-        const outcome = await flyCamera(startCamera(), target, linkMs, camera => {
+        // The thread is drawn by the same easing as the camera, so its tip stays where the camera is looking
+        // and both slow down together as they reach the person.
+        const outcome = await flyCamera(startCamera(), target, travelMs, camera => {
           apply(camera);
-          const elapsed = Math.min(1, (performance.now() - started) / linkMs);
-          setProgress(index + elapsed);
-          const nearest = elapsed < 0.5 ? index : index + 1;
+          const travelled = easeArrival(Math.min(1, (performance.now() - started) / travelMs));
+          setProgress(index + travelled);
+          const nearest = travelled < HANDOVER ? index : index + 1;
           if (nearest !== shown) { shown = nearest; step(nearest); }
-        }, signal, { pivot: pivot() });
+        }, signal, { pivot: pivot(), easing: easeArrival });
         if (outcome === 'cancelled') return;
         setProgress(index + 1);
         step(index + 1);
+        // Stay on the person for a moment: this is when the evidence for the link can be read.
+        if (await rest(plan.dwellMs[index + 1]) === 'cancelled') return;
       }
       const last = overviewCamera();
-      if (last && await fly(last, SETTLE_MS) === 'cancelled') return;
+      if (last && await fly(last, REVEAL_SETTLE_MS) === 'cancelled') return;
       if (!signal.aborted) finish();
     };
     void run();

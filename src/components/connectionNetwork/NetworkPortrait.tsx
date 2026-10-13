@@ -3,9 +3,10 @@ import { CATEGORY_BAR_TEXT_COLORS, CATEGORY_COLORS } from '../../constants';
 import type { ContactPerson } from '../../services/connectionGraph';
 import { initials } from '../../services/connectionNetworkView';
 
-interface Props { person: ContactPerson; url?: string; size: number; tentative?: boolean }
+// Anyone with a name and a category: contact people and canvas figures alike.
+interface Props { person: Pick<ContactPerson, 'name' | 'category'>; url?: string; size: number; tentative?: boolean }
 
-// A round portrait for the panels; initials on the category colour when there is no image (or it fails).
+// A round portrait for the panels and lists; initials on the category colour when there is no image (or it fails).
 const NetworkPortrait: React.FC<Props> = ({ person, url, size, tentative }) => {
   const [failed, setFailed] = useState(false);
   const showImage = !!url && !failed && !tentative;

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import ConnectionPanel, { type ConnectionPanelProps } from '../src/components/ConnectionPanel';
+import ConnectionPanel, { ConnectionHeader, type ConnectionPanelProps } from '../src/components/ConnectionPanel';
 import ConnectionPicker from '../src/components/ConnectionPicker';
 import { classifyConnectionTarget } from '../src/services/connectionPath';
 import type { ActiveConnection } from '../src/hooks/useConnection';
@@ -27,7 +27,8 @@ const panel = (overrides: Partial<ConnectionPanelProps> = {}) => renderToStaticM
 
 test('a connected chain reads as a headline, cards from A to B, and the verified evidence for every link', () => {
   const markup = panel();
-  assert.match(text(markup), /Anna Alpha and Bruno Beta are 2 degrees apart\./);
+  // The connection on show is not in the list (the sidebar pins it above): see the header test below.
+  assert.doesNotMatch(markup, /connection-header/);
   const chain = markup.slice(markup.indexOf('connection-chain'));
   assert.ok(chain.indexOf('Anna Alpha') < chain.indexOf('Marco Middle') && chain.indexOf('Marco Middle') < chain.indexOf('Bruno Beta'));
   assert.match(text(markup), /Anna and Marco shared a workshop\./);
@@ -35,19 +36,34 @@ test('a connected chain reads as a headline, cards from A to B, and the verified
   assert.equal(markup.match(/>Why\?</g)?.length, 2);
   assert.equal(markup.match(/data-actions="/g)?.length, 3);
   assert.match(markup, /aria-label="Fly to Marco Middle on the canvas"/);
-  assert.match(markup, /aria-label="Hide this connection"/);
   assert.doesNotMatch(markup, /Try again/);
+});
+
+const header = (connection: ActiveConnection) => renderToStaticMarkup(<ConnectionHeader connection={connection} onClose={() => {}} />);
+
+test('the connection on show is a row like a recent connection: two portraits, who is joined, the degrees, and a way to dismiss it', () => {
+  const markup = header(connected);
+  assert.match(text(markup), /Anna Alpha → Bruno Beta 2 degrees/);
+  assert.equal(markup.match(/net-portrait(?![\w-])/g)?.length, 2, 'both ends have a portrait');
+  assert.match(markup, /connection-header-pair/);
+  assert.match(markup, /aria-label="Hide this connection"/);
+  // Screen readers still get the whole sentence.
+  assert.match(markup, /aria-label="Anna Alpha and Bruno Beta are 2 degrees apart\."/);
+  assert.match(markup, /connection-recent-degrees/);
 });
 
 test('one degree is singular', () => {
   const direct: ActiveConnection = { ...connected, chain: [a, m], links: [connected.links[0]] };
-  assert.match(text(panel({ connection: direct })), /are 1 degree apart\./);
+  assert.match(text(header(direct)), /Anna Alpha → Marco Middle 1 degree/);
+  assert.match(header(direct), /are 1 degree apart\./);
 });
 
 test('the current person is highlighted while the camera is on them', () => {
   const [, second] = panel({ currentIndex: 1 }).split('connection-chain-item').slice(1, 3);
-  assert.match(second, /ring-accent-marker/);
-  assert.doesNotMatch(panel({ currentIndex: null }), /ring-accent-marker/);
+  // The current person carries the thread's amber, not the blue ring of the other lists.
+  assert.match(second, /connection-card-active/);
+  assert.doesNotMatch(second, /ring-accent-marker/);
+  assert.doesNotMatch(panel({ currentIndex: null }), /connection-card-active/);
 });
 
 test('recent connections list names and degrees, and mark the one on show', () => {

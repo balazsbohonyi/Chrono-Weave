@@ -28,6 +28,8 @@ import ConnectionPicker from './components/ConnectionPicker';
 import ConnectionExplorer from './components/ConnectionExplorer';
 import { migrateLegacyConnectionMembers } from './utils/connectionPaths';
 import { figurePerson, identifyPerson, type ContactAssessment } from './services/connectionGraph';
+import { recordedContactSection } from './services/connectionAI';
+import ConnectionStage from './components/ConnectionStage';
 import type { WovenCanvas } from './utils/weaveConnection';
 import { isConfigValid, providerNames } from './utils/providerConfig';
 import { filterTimelineFigures } from './utils/timelineFigures';
@@ -645,17 +647,29 @@ const App: React.FC = () => {
         const version = operationVersion.current, request = ++popoverVersion.current;
         const signal = operationController.current.signal;
         const isCurrent = () => !signal.aborted && operationVersion.current === version && popoverVersion.current === request;
-        const fallback: RelationshipExplanation = { isRelevant: true, evidence: contact.evidence, summary: contact.evidence,
-            sections: [{ title: 'AI-supported contact', content: contact.episode ? `${contact.evidence} Episode: ${contact.episode}.` : contact.evidence }] };
-        setPopoverState({ isOpen: true, source, target, mode: 'relationship', loading: true, data: { explanation: fallback, sourceDetail: undefined, targetDetail: undefined } });
+        const fallback: RelationshipExplanation = { isRelevant: true, evidence: contact.evidence, summary: contact.evidence, sections: [recordedContactSection(contact)] };
+        // The two header cards need their biography and portrait just as in every other relationship dialog; they are
+        // fetched alongside the narrative and shown as soon as they arrive.
+        let details: Awaited<ReturnType<typeof fetchBatchFigureDetails>> = new Map();
+        const open = (loading: boolean, explanation: RelationshipExplanation) => setPopoverState({ isOpen: true, source, target, mode: 'relationship', loading,
+            data: { explanation, sourceDetail: details.get(source.id), targetDetail: details.get(target.id) } });
+        open(true, fallback);
+        const detailsReady = fetchBatchFigureDetails([source, target]).then(found => {
+            details = found;
+            if (isCurrent()) open(true, fallback);
+        }, () => {
+            // Without the lookup the cards still show what the chain already knows about each person.
+            details = new Map([source, target].map(person => [person.id, { description: person.shortDescription ?? '', imageUrl: person.imageUrl ?? null }]));
+            if (isCurrent()) open(true, fallback);
+        });
         let explanation = fallback;
         try {
             const people = [];
             const first = identifyPerson(people, figurePerson(source)), second = identifyPerson(people, figurePerson(target));
             explanation = await aiService.explainPersonalContact(first, second, contact, signal);
         } catch { /* Accepted compact evidence is sufficient when narrative expansion fails. */ }
-        if (isCurrent()) setPopoverState({ isOpen: true, source, target, mode: 'relationship', loading: false,
-            data: { explanation, sourceDetail: undefined, targetDetail: undefined } });
+        await detailsReady;
+        if (isCurrent()) open(false, explanation);
     };
 
     const handleRelationshipCardClick = (targetFigure: HistoricalFigure) => {
@@ -841,8 +855,12 @@ const App: React.FC = () => {
 
     const isBusy = loading || launcherPhase !== 'idle' || isDiscovering || isTracing || connection.isConnecting;
     const canvasIds = useMemo(() => new Set(figures.map(figure => figure.id)), [figures]);
-    const connectionCurrentId = connection.currentIndex === null ? null : connection.active?.chain[connection.currentIndex]?.id ?? null;
     const isConnectionSidebarOpen = (sortedSidebarFigures.length > 0 || connection.isTabVisible) && !isSidebarCollapsed;
+    // A connection plays on a stage of its own over the canvas; the canvas underneath is frozen while it is up. Choosing
+    // the other end of a new connection needs the canvas, so the stage steps aside (and stays as it was) while picking.
+    const stageMounted = !!connection.active && !!connection.canvasConnection;
+    const stageShown = stageMounted && !connection.picking;
+    const modalOpen = isLauncherOpen || !!relationshipState || popoverState.isOpen || isSettingsOpen || connection.explorerOpen;
     const toggleCanvasLayout = () => {
         if (isBusy || !figures.length) return;
         setConfig(previous => ({ ...previous,
@@ -891,7 +909,7 @@ const App: React.FC = () => {
                 onToggleOpen={() => setIsLegendOpen(prev => !prev)}
             />}
 
-            <div className="absolute inset-0 z-0">
+            <div className="absolute inset-0 z-0" inert={stageShown}>
                 <CanvasComponent
                     key={canvasRevision}
                     figures={figures}
@@ -914,13 +932,7 @@ const App: React.FC = () => {
                     pickingSource={connection.picking?.from ?? null}
                     isPickable={connection.isPickable}
                     onPick={connection.pickFigure}
-                    connection={connection.canvasConnection}
-                    connectionCurrentId={connectionCurrentId}
-                    connectionFocus={connection.focusRequest}
-                    onConnectionStep={connection.setCurrentIndex}
-                    onConnectionRevealEnd={connection.endReveal}
-                    onConnectionExit={connection.close}
-                    modalActive={isLauncherOpen || !!relationshipState || popoverState.isOpen || isSettingsOpen || connection.explorerOpen}
+                    modalActive={modalOpen || stageShown}
                     relationshipSourceId={relationshipState?.sourceFigure.id}
                     highlightedFigureIds={highlightedFigureIds}
                     focusedFigureId={focusedFigureId}
@@ -938,6 +950,12 @@ const App: React.FC = () => {
                     isLegendCollapsed={!hasCategoryFilters || !isLegendOpen}
                 />
             </div>
+            {stageMounted && connection.active && connection.canvasConnection && <ConnectionStage key={connection.active.id} hidden={!stageShown}
+                connection={connection.canvasConnection} chain={connection.active.chain} links={connection.active.links}
+                currentIndex={connection.currentIndex} focus={connection.focusRequest}
+                inset={{ top: hasCategoryFilters && isLegendOpen ? 114 : 52, right: isConnectionSidebarOpen ? 544 : 0 }}
+                canExit={!modalOpen && stageShown} onStep={connection.setCurrentIndex} onEnd={connection.endReveal} onExit={connection.close} onReplay={connection.replayActive}
+                onExplain={openConnectionExplanation} onInspect={handleInspectFigure} />}
 
             {loading && !isLauncherOpen && (
                 <ProgressOverlay title="CONSULTING THE ARCHIVES" />
@@ -993,7 +1011,7 @@ const App: React.FC = () => {
 
             {connection.explorerOpen && <ConnectionExplorer session={connection.exploration} phase={connection.progress?.label} busy={connection.isConnecting}
                 onStop={connection.stop} onContinue={() => connection.continueSearch()} onFresh={() => connection.continueSearch(true)} onClose={connection.closeExplorer} success={connection.success} />}
-            {!connection.explorerOpen && !isLauncherOpen && !isSettingsOpen && <CanvasHistory canvases={history} onSelect={commitCanvas} />}
+            {!connection.explorerOpen && !isLauncherOpen && !isSettingsOpen && !relationshipState && !stageShown && <CanvasHistory canvases={history} onSelect={commitCanvas} />}
 
             {isLauncherOpen && <WeaveLauncherOverlay
                 historyControl={<CanvasHistory canvases={history} onSelect={commitCanvas} orientation="horizontal" />}

@@ -1,0 +1,58 @@
+/* The connection stage: the chain's people on a snaking path over the blurred canvas, with a glowing thread. */
+.connection-stage { position: absolute; left: 0; bottom: 0; z-index: 30; overflow: hidden; touch-action: none; user-select: none; cursor: grab;
+  background: rgb(var(--color-surface) / .58); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); animation: stage-in 650ms ease-out both; }
+.connection-stage.is-dragging { cursor: grabbing; }
+.connection-stage[hidden] { display: none; }
+@keyframes stage-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* A field of faint dots that drifts at a quarter of the camera's speed, for a little depth. */
+.stage-backdrop { position: absolute; inset: 0; pointer-events: none; opacity: .9;
+  background-image: radial-gradient(rgb(var(--color-content-muted) / .28) 1.3px, transparent 1.8px); background-size: 46px 46px; }
+.stage-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
+.stage-threads { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; z-index: 2; }
+.stage-tip-core { fill: rgb(var(--color-connection)); filter: drop-shadow(0 0 6px rgb(var(--color-connection)));
+  transform-box: fill-box; transform-origin: center; animation: stage-tip-breathe 1.3s ease-in-out infinite; }
+/* The tip waits at the first card's edge while the thread is about to set off: a slow breath says so. */
+@keyframes stage-tip-breathe { 0%, 100% { transform: scale(.85); opacity: .85; } 50% { transform: scale(1.25); opacity: 1; } }
+.stage-tip-tail { fill: rgb(var(--color-connection)); }
+
+/* A card normally clips what overflows it; the number badge sits on its corner, so the stage's cards (like the connected
+   cards of the canvas) let it show, and the category corner follows the rounded corner instead. */
+.relationship-card.stage-card { overflow: visible; }
+.relationship-card.stage-card .figure-card-corner { border-top-right-radius: 11px; }
+
+/* Cards wait as soft ghosts of themselves and land, with a little overshoot, as the thread reaches them. */
+.stage-card { transform-origin: 50% 100%; cursor: pointer; z-index: 1;
+  transition: opacity 550ms ease, transform 850ms cubic-bezier(.2, 1.35, .35, 1), filter 600ms ease, box-shadow 350ms ease; }
+.stage-card.is-ghost { opacity: .14; filter: blur(5px) grayscale(1); transform: perspective(900px) translateY(36px) rotateX(14deg) scale(.94); pointer-events: none; }
+.stage-card.is-ghost > * { opacity: 0; }
+.stage-card.is-current { box-shadow: 0 0 0 3px rgb(var(--color-connection)), 0 16px 44px rgb(var(--color-connection) / .3); }
+.stage-card .connection-badge { transition: transform 500ms cubic-bezier(.2, 1.6, .4, 1); }
+
+/* What the link was, beside it. Only a few lines: the sidebar and the Why dialog have the whole story. */
+.stage-caption { position: absolute; z-index: 3; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 6px; text-align: center;
+  opacity: 0; transform: translateY(10px); pointer-events: none; transition: opacity 650ms ease, transform 650ms cubic-bezier(.2, .8, .3, 1); }
+.stage-caption.is-beside { justify-content: center; align-items: flex-start; text-align: left; }
+.stage-caption.is-shown { opacity: 1; transform: none; pointer-events: auto; }
+.stage-caption p { margin: 0; font-size: 13px; line-height: 1.45; color: rgb(var(--color-content-body)); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+
+.stage-header { position: absolute; z-index: 6; left: 0; right: 0; top: 0; height: 76px; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 14px 18px 0 22px; pointer-events: none; cursor: default; }
+/* A soft veil behind the title, so a card flying past underneath does not fight with its text. */
+.stage-header::before { content: ''; position: absolute; inset: 0 0 -14px 0; z-index: -1; pointer-events: none;
+  background: linear-gradient(to bottom, rgb(var(--color-surface) / .92), rgb(var(--color-surface) / .7) 60%, transparent); }
+.stage-kicker { font-size: 11px; text-transform: uppercase; letter-spacing: .15em; font-weight: 700; color: rgb(var(--color-accent-marker)); margin: 0 0 6px; }
+.stage-people { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; font-size: 17px; color: rgb(var(--color-content-primary)); }
+.stage-people .net-portrait { border: 2px solid rgb(var(--color-connection)); }
+.stage-people > span[aria-hidden] { color: rgb(var(--color-content-secondary)); }
+.stage-degrees { margin-left: 6px; padding: 2px 11px; border-radius: 999px; font-size: 12px; font-weight: 800; letter-spacing: .02em; color: rgb(var(--color-connection)); background: rgb(var(--color-connection) / 12%); border: 1px solid rgb(var(--color-connection) / 40%); transition: background-color 600ms, color 600ms, transform 600ms cubic-bezier(.2, 1.6, .4, 1); }
+.stage-degrees.is-final { background: rgb(var(--color-connection)); color: rgb(var(--color-connection-contrast)); transform: scale(1.08); }
+.stage-actions { display: flex; align-items: center; gap: 10px; flex: none; pointer-events: auto; }
+
+.stage-header .close-button:focus-visible { outline: 3px solid rgb(var(--color-accent-focus)); outline-offset: 3px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .connection-stage { animation: none; }
+  .stage-tip-core { animation: none; }
+  .stage-card, .stage-caption, .stage-degrees, .stage-card .connection-badge { transition: none; }
+  .stage-card.is-ghost { transform: none; }
+}

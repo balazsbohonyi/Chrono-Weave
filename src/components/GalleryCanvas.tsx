@@ -56,7 +56,7 @@ const GalleryCanvas: React.FC<CanvasProps> = ({ figures, modalActive, highlighte
   const threadSegments = useMemo(() => {
     const byId = new Map(layout.placements.map(placement => [placement.figure.id, placement]));
     const chain = (connection?.nodeIds ?? []).map(id => byId.get(id));
-    return chain.length > 1 && chain.every(Boolean) ? galleryThread(chain as typeof layout.placements) : [];
+    return chain.length > 1 && chain.every(Boolean) ? galleryThread(chain as typeof layout.placements, layout.placements) : [];
   }, [connection, layout]);
 
   useLayoutEffect(() => {

@@ -1,37 +1,77 @@
-.connection-explorer-backdrop { position: fixed; inset: 0; z-index: 180; padding: 28px; background: rgb(var(--color-content-primary) / .38); display: grid; place-items: center; }
-.connection-explorer { width: min(1440px, 100%); height: min(900px, 100%); background: rgb(var(--color-surface)); color: rgb(var(--color-content-primary)); border: 1px solid rgb(var(--color-border-strong)); box-shadow: 0 28px 90px rgb(0 0 0 / .28); display: flex; flex-direction: column; overflow: hidden; border-radius: 12px; }
-.connection-explorer button { border: 1px solid rgb(var(--color-border-strong)); background: rgb(var(--color-surface)); border-radius: 6px; padding: 8px 12px; font-size: 13px; line-height: 1.4; }
-.connection-explorer button:hover { background: rgb(var(--color-surface-muted)); }
-.connection-explorer button:focus-visible, .connection-explorer summary:focus-visible { outline: 2px solid rgb(var(--color-connection)); outline-offset: 3px; }
-.connection-explorer-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; padding: 22px 26px 16px; }
-.connection-explorer-header h2 { font-size: clamp(18px, 2vw, 26px); line-height: 1.25; font-weight: 700; }
-.connection-explorer-header > button { font-size: 22px; padding: 2px 12px; }
-.connection-explorer-kicker { font-size: 10px; letter-spacing: .13em; font-weight: 700; color: rgb(var(--color-content-secondary)); margin-bottom: 8px; }
-.connection-explorer-status { padding: 12px 26px; border-block: 1px solid rgb(var(--color-border)); background: rgb(var(--color-surface-subtle)); display: flex; justify-content: space-between; gap: 16px; font-size: 13px; }
-.connection-explorer-status span { color: rgb(var(--color-content-secondary)); white-space: nowrap; }
-.connection-explorer-body { display: grid; grid-template-columns: minmax(0, 1fr) 340px; flex: 1; min-height: 0; position: relative; }
-.connection-explorer-network { display: flex; flex-direction: column; min-height: 0; background: rgb(var(--color-canvas)); position: relative; }
+/* Overlay shell: the same glass as the relationship overlay, with the exploration's parts floating on it. */
+.connection-explorer { position: fixed; inset: 0; z-index: 180; display: flex; flex-direction: column; gap: 14px; padding: 22px 28px 20px; background: rgb(var(--color-surface) / 60%); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); color: rgb(var(--color-content-primary)); outline: none; }
+.connection-explorer > :not(.close-button) { width: 100%; max-width: 1720px; margin-inline: auto; }
+.connection-explorer button:where(:not(.close-button, .canvas-floating-button)) { border: 1px solid rgb(var(--color-border-strong)); background: rgb(var(--color-surface) / .55); color: inherit; border-radius: 8px; padding: 8px 14px; font-size: 13px; line-height: 1.4; transition: background-color 150ms, border-color 150ms; }
+.connection-explorer button:where(:not(.close-button, .canvas-floating-button)):hover { background: rgb(var(--color-surface-muted) / .85); }
+.connection-explorer button:focus-visible, .connection-explorer summary:focus-visible, .connection-explorer input:focus-visible { outline: 2px solid rgb(var(--color-connection)); outline-offset: 3px; }
+
+/* Header: kicker, the two people, the phase and a prominent clock. */
+.connection-explorer-header { display: flex; flex-direction: column; align-items: center; gap: 10px; padding-right: 56px; }
+.connection-explorer-kicker { font-size: 12px; text-transform: uppercase; letter-spacing: .15em; color: rgb(var(--color-accent-marker)); font-weight: 700; }
+.ce-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 24px; width: 100%; }
+.connection-explorer-status { display: flex; flex-direction: column; gap: 2px; justify-self: start; min-width: 0; font-size: 14px; }
+.connection-explorer-status strong { overflow-wrap: anywhere; }
+.connection-explorer-status span { font-size: 12px; color: rgb(var(--color-content-secondary)); }
+.ce-endpoints { display: flex; align-items: center; justify-content: center; gap: 22px; min-width: 0; }
+.ce-arrow { font-size: 24px; color: rgb(var(--color-content-secondary)); }
+.ce-endpoint { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.ce-endpoint-portrait { position: relative; display: inline-flex; flex: none; }
+.ce-endpoint-portrait .net-portrait { border: 3px solid rgb(var(--color-connection)); box-shadow: 0 6px 18px rgb(var(--color-shadow) / .22); }
+.ce-endpoint-portrait .net-end-badge { position: absolute; right: -4px; bottom: -4px; }
+.ce-endpoint-text { display: flex; flex-direction: column; min-width: 0; }
+.ce-endpoint-name { font-size: clamp(18px, 2vw, 26px); font-weight: 700; line-height: 1.2; overflow-wrap: break-word; }
+.ce-endpoint small { margin-top: 3px; font-size: 12px; color: rgb(var(--color-content-secondary)); overflow-wrap: anywhere; }
+.ce-opening { font-size: 22px; font-weight: 700; text-align: center; }
+.ce-timer { position: relative; isolation: isolate; display: flex; flex-direction: column; align-items: center; justify-self: end; margin-right: 12px; line-height: 1; }
+.ce-timer-value { font-size: 36px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: .01em; }
+.ce-timer-caption { margin-top: 5px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .14em; color: rgb(var(--color-content-secondary)); }
+/* While the search runs a soft glow ripples out from the middle of the clock: it is working, even when
+   nothing new has appeared. Only transform and opacity animate, so it stays smooth and the digits never
+   get re-rasterised at fractional sizes. */
+.ce-timer.is-running::before { content: ''; position: absolute; z-index: -1; inset: -16px -26px; border-radius: 50%; pointer-events: none; will-change: transform, opacity;
+  background: radial-gradient(closest-side, rgb(var(--color-connection) / .75), rgb(var(--color-connection) / .3) 55%, transparent 100%); animation: ce-timer-ripple 1.7s cubic-bezier(.2, .6, .35, 1) infinite; }
+.ce-timer.is-running .ce-timer-value { animation: ce-timer-glow 1.7s ease-in-out infinite; }
+.ce-timer.is-running .ce-timer-caption { color: rgb(var(--color-connection)); }
+@keyframes ce-timer-ripple { 0% { transform: scale(.3); opacity: .9; } 100% { transform: scale(1.15); opacity: 0; } }
+@keyframes ce-timer-glow { 0%, 100% { opacity: .8; } 40% { opacity: 1; } }
+
+/* Body: the network and the inspection are two glass panels. */
+.connection-explorer-body { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 14px; flex: 1; min-height: 0; position: relative; }
+.connection-explorer-network, .connection-explorer-inspection { background: rgb(var(--color-surface) / .42); border: 1px solid rgb(var(--color-border) / .8); border-radius: 14px; box-shadow: 0 8px 28px rgb(var(--color-shadow) / .1333); }
+.connection-explorer-network { display: flex; flex-direction: column; min-height: 0; position: relative; overflow: hidden; }
 
 /* Network graph */
 .net-graph { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .net-empty { margin: auto; color: rgb(var(--color-content-secondary)); font-size: 13px; }
-.net-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 16px; }
-.net-hint { font-size: 11px; color: rgb(var(--color-content-secondary)); margin-left: 4px; }
-.net-mode { display: inline-flex; }
-.connection-explorer .net-mode button { border-radius: 0; padding: 6px 12px; }
-.connection-explorer .net-mode button:first-child { border-radius: 6px 0 0 6px; }
-.connection-explorer .net-mode button:last-child { border-radius: 0 6px 6px 0; border-left: 0; }
-.connection-explorer .net-mode button[aria-pressed="true"] { background: rgb(var(--color-content-primary)); color: rgb(var(--color-surface)); border-color: rgb(var(--color-content-primary)); font-weight: 600; }
-.net-svg { display: block; width: 100%; flex: 1; min-height: 0; touch-action: none; cursor: grab; user-select: none; }
+/* The view controls and the legend float over the bottom of the drawing, above the year strip. The
+   container is the main canvas's own bottom-left toolbar, positioned inside the graph instead of the page. */
+.net-overlay-row { position: absolute; left: 14px; right: 14px; bottom: 36px; z-index: 3; display: flex; align-items: center; gap: 10px; pointer-events: none; }
+.net-overlay-row > * { pointer-events: auto; }
+/* The legend sits at the right end of the row, on the toolbar’s centre line; when the graph is narrow its chips wrap
+   among themselves rather than the legend dropping below the toolbar. */
+.net-overlay-row > .canvas-view-toolbar { flex: none; }
+.net-overlay-row > .net-legend { margin-left: auto; min-width: 0; justify-content: flex-end; }
+.canvas-view-toolbar.net-view-toolbar { position: relative; left: auto; bottom: auto; z-index: auto; }
+.net-stage { position: relative; flex: 1; min-height: 0; }
+.net-svg { position: absolute; inset: 0; display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; user-select: none; }
 .net-svg:active { cursor: grabbing; }
 .net-node, .net-edge, .net-fold { cursor: pointer; outline: none; }
 .net-node:focus, .net-edge:focus, .net-fold:focus, .net-svg:focus { outline: none; }
 .net-node, .net-edge { transition: opacity .2s; }
-.net-node.is-dim, .net-edge.is-dim { opacity: .25; }
+
+/* Year strips: the same thin glass bars the main canvas uses, so the years stay readable over the graph. */
+.net-strip { position: absolute; left: 0; right: 0; height: 24px; overflow: hidden; z-index: 2; pointer-events: none; background: rgb(var(--color-timeline-axis) / .75); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); }
+.net-strip.is-top { top: 0; }
+.net-strip.is-bottom { bottom: 0; }
+.net-tick { position: absolute; top: 0; bottom: 0; transform: translateX(-50%); font-size: 12px; font-weight: 700; line-height: 1; white-space: nowrap; color: rgb(var(--color-timeline-axis-label)); }
+.net-strip.is-top .net-tick { padding-top: 3px; }
+.net-strip.is-bottom .net-tick { padding-top: 8px; }
+.net-tick::before { content: ''; position: absolute; left: 50%; width: 2px; height: 6px; margin-left: -1px; background: rgb(var(--color-timeline-axis-label)); }
+.net-strip.is-top .net-tick::before { bottom: 0; }
+.net-strip.is-bottom .net-tick::before { top: 0; }
 
 .net-axis { pointer-events: none; }
 .net-axis line { stroke: rgb(var(--color-content-muted) / .22); stroke-width: 1; }
-.net-axis text { font-size: 10px; fill: rgb(var(--color-content-muted)); }
 .net-band-a { fill: rgb(var(--color-side-a) / .1); }
 .net-band-b { fill: rgb(var(--color-side-b) / .1); }
 
@@ -43,14 +83,14 @@
 .net-node.is-endpoint .net-ring { stroke: rgb(var(--color-connection)); stroke-width: 4.5; }
 .net-node.is-tentative .net-ring { stroke-dasharray: 3 3; }
 .net-node.is-tentative .net-disc { opacity: .7; }
-.net-disc { stroke: rgb(var(--color-canvas)); stroke-width: 1; }
+.net-disc { stroke: rgb(var(--color-surface)); stroke-width: 1; }
 .net-initials { font-weight: 700; pointer-events: none; }
-.net-name { fill: rgb(var(--color-content-primary)); font-size: 12px; font-weight: 600; paint-order: stroke; stroke: rgb(var(--color-canvas)); stroke-width: 4; stroke-linejoin: round; pointer-events: none; }
+.net-name { fill: rgb(var(--color-content-primary)); font-size: 12px; font-weight: 600; paint-order: stroke; stroke: rgb(var(--color-surface) / .9); stroke-width: 4; stroke-linejoin: round; pointer-events: none; }
 .net-node.is-endpoint .net-name { font-size: 13px; font-weight: 700; }
 .net-node.is-tentative .net-name { font-weight: 500; fill: rgb(var(--color-content-secondary)); }
-.net-badge-ab circle { fill: rgb(var(--color-connection)); stroke: rgb(var(--color-canvas)); stroke-width: 1.5; }
+.net-badge-ab circle { fill: rgb(var(--color-connection)); stroke: rgb(var(--color-surface)); stroke-width: 1.5; }
 .net-badge-ab text { fill: rgb(var(--color-connection-contrast)); font-size: 11px; font-weight: 800; pointer-events: none; }
-.net-pin circle { fill: rgb(var(--color-content-primary)); stroke: rgb(var(--color-canvas)); stroke-width: 1.5; }
+.net-pin circle { fill: rgb(var(--color-content-primary)); stroke: rgb(var(--color-surface)); stroke-width: 1.5; }
 .net-pin path { stroke: rgb(var(--color-surface)); stroke-width: 2; stroke-linecap: round; }
 .net-select-ring { fill: none; stroke: rgb(var(--color-selection)); stroke-width: 3.5; opacity: 0; }
 .net-node.is-selected .net-select-ring, .net-node.is-edge-end .net-select-ring { opacity: 1; }
@@ -79,16 +119,27 @@
 .net-gap-line { stroke: rgb(var(--color-content-muted)); stroke-width: 2; stroke-dasharray: 1 7; stroke-linecap: round; }
 .net-gap-hit { stroke: transparent; stroke-width: 14; pointer-events: stroke; }
 
-.net-outside { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); box-shadow: 0 4px 14px rgb(0 0 0 / .2); }
-.net-success { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); background: rgb(var(--color-connection)); color: rgb(var(--color-connection-contrast)); padding: 8px 18px; border-radius: 999px; font-weight: 700; font-size: 15px; text-align: center; box-shadow: 0 6px 20px rgb(0 0 0 / .25); pointer-events: none; }
+/* What the selection leaves behind: faded further and drained of colour, so only the focus carries any.
+   Edges and discs simply turn grey; only the raster portraits take a grayscale filter, which keeps the cost
+   of a dimmed crowd low while the layout moves. Only the opacity transitions, the colour change is immediate. */
+.net-node.is-dim, .net-edge.is-dim { opacity: .13; }
+.net-edge.is-dim .net-edge-line { stroke: rgb(var(--color-content-muted)); }
+.net-node.is-dim image { filter: grayscale(1); }
+.net-node.is-dim .net-disc { fill: rgb(var(--color-content-muted)); }
+.net-node.is-dim .net-initials { fill: rgb(var(--color-surface)) !important; }
+.net-node.is-dim .net-ring { stroke: rgb(var(--color-content-muted)); }
+.net-node.is-dim .net-name { fill: rgb(var(--color-content-muted)); }
+
+.net-outside { position: absolute; left: 50%; top: 40px; transform: translateX(-50%); box-shadow: 0 4px 14px rgb(0 0 0 / .2); z-index: 3; }
+.net-success { position: absolute; top: 76px; left: 50%; transform: translateX(-50%); background: rgb(var(--color-connection)); color: rgb(var(--color-connection-contrast)); padding: 8px 18px; border-radius: 999px; font-weight: 700; font-size: 15px; text-align: center; box-shadow: 0 6px 20px rgb(0 0 0 / .25); pointer-events: none; z-index: 3; }
 .net-success small { display: block; font-size: 10px; font-weight: 500; opacity: .85; }
 .net-graph.is-success .net-svg { cursor: pointer; }
 
 /* Legend / filters */
 .net-legend { display: flex; flex-wrap: wrap; gap: 6px; }
-.connection-explorer .net-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: 11px; background: rgb(var(--color-surface)); color: rgb(var(--color-content-secondary)); border: 1px solid rgb(var(--color-border-strong)); }
-.net-chip.is-fixed { border-style: solid; background: rgb(var(--color-surface-subtle)); }
-.connection-explorer .net-chip.is-on { background: rgb(var(--color-surface-muted)); color: rgb(var(--color-content-primary)); border-color: rgb(var(--color-content-primary)); font-weight: 600; }
+.connection-explorer .net-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: 11px; backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); background: rgb(var(--color-surface) / .6); color: rgb(var(--color-content-secondary)); border: 1px solid rgb(var(--color-border-strong)); }
+.net-chip.is-fixed { border-style: solid; background: rgb(var(--color-surface-muted) / .6); }
+.connection-explorer .net-chip.is-on { background: rgb(var(--color-surface-muted) / .9); color: rgb(var(--color-content-primary)); border-color: rgb(var(--color-content-primary)); font-weight: 600; }
 .net-chip b { font-weight: 700; }
 .net-chip i { display: inline-block; width: 20px; height: 2px; background: currentColor; }
 .net-chip.is-accepted i { height: 3px; background: rgb(var(--color-connection)); }
@@ -96,58 +147,96 @@
 .net-chip.is-proposed i { background: repeating-linear-gradient(90deg, currentColor 0 3px, transparent 3px 7px); }
 .net-chip.is-blocked i { background: repeating-linear-gradient(90deg, rgb(var(--color-danger-text)) 0 2px, transparent 2px 7px); }
 .net-filters { position: relative; }
-.net-filters-popover { position: absolute; z-index: 6; top: calc(100% + 6px); left: 0; padding: 10px; background: rgb(var(--color-surface)); border: 1px solid rgb(var(--color-border-strong)); border-radius: 8px; box-shadow: 0 8px 24px rgb(0 0 0 / .2); width: max-content; max-width: 80vw; }
+.net-filters-popover { position: absolute; z-index: 6; bottom: calc(100% + 6px); left: 0; padding: 10px; background: rgb(var(--color-surface)); border: 1px solid rgb(var(--color-border-strong)); border-radius: 8px; box-shadow: 0 8px 24px rgb(0 0 0 / .2); width: max-content; max-width: 80vw; }
 
 /* Inspection */
-.connection-explorer-inspection { overflow-y: auto; padding: 22px; border-left: 1px solid rgb(var(--color-border)); font-size: 13px; line-height: 1.6; background: rgb(var(--color-surface)); }
-.connection-explorer-inspection h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .07em; margin-bottom: 22px; color: rgb(var(--color-content-secondary)); }
+.connection-explorer-inspection { display: flex; flex-direction: column; min-height: 0; padding: 18px 18px 14px; font-size: 13px; line-height: 1.6; overflow: hidden; }
+.connection-explorer-inspection[hidden] { display: none; }
+.net-inspect-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.connection-explorer-inspection h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: rgb(var(--color-content-secondary)); }
+.connection-explorer .net-back { padding: 3px 10px; font-size: 12px; font-weight: 600; }
 .connection-explorer-inspection h4 { font-size: 16px; line-height: 1.4; font-weight: 700; margin-bottom: 12px; }
 .connection-explorer-inspection h5 { font-size: 12px; font-weight: 700; margin: 16px 0 8px; color: rgb(var(--color-content-secondary)); }
 .connection-explorer-inspection p { margin-bottom: 14px; overflow-wrap: anywhere; }
 .connection-explorer-inspection small { color: rgb(var(--color-content-secondary)); overflow-wrap: anywhere; }
+.net-detail { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.net-detail-fixed { flex: none; }
+.net-detail-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.net-browser { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.net-browser[hidden] { display: none; }
 .connection-inspection-verdict { font-size: 11px; font-weight: 700; }
-.net-summary { font-size: 14px; }
-.net-closest { font-size: 12px; color: rgb(var(--color-content-secondary)); }
+.net-summary { font-size: 14px; margin-bottom: 4px !important; }
+.net-closest { font-size: 12px; color: rgb(var(--color-content-secondary)); margin-bottom: 6px !important; }
+.net-hint-line { font-size: 11px; line-height: 1.5; color: rgb(var(--color-content-secondary)); margin-bottom: 4px !important; }
 .net-side-line { font-size: 12px; font-weight: 600; color: rgb(var(--color-content-secondary)); }
 .net-person-head, .net-edge-head { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }
 .net-person-head h4 { margin-bottom: 2px; }
 .net-person-head p { margin-bottom: 0; color: rgb(var(--color-content-secondary)); }
 .net-edge-head { justify-content: center; font-size: 18px; color: rgb(var(--color-content-secondary)); }
-.net-portrait { display: inline-flex; flex: none; align-items: center; justify-content: center; border-radius: 50%; overflow: hidden; font-weight: 700; border: 2px solid rgb(var(--color-surface)); box-shadow: 0 0 0 1px rgb(var(--color-border-strong)); }
-.net-portrait.is-tentative { opacity: .7; border-style: dashed; }
-.net-portrait img { width: 100%; height: 100%; object-fit: cover; }
-.net-contact-rows { display: grid; gap: 6px; list-style: none; padding: 0; }
+.net-contact-rows { display: grid; gap: 6px; list-style: none; padding: 0; margin: 0; }
 .connection-explorer .net-contact-rows button { width: 100%; text-align: left; display: flex; align-items: center; gap: 10px; }
 .net-contact-rows span { min-width: 0; }
 .net-contact-rows em { font-style: normal; color: rgb(var(--color-content-secondary)); }
 .net-contact-rows small { display: block; line-height: 1.4; }
 .net-unverified { margin-top: 16px; }
 .net-unverified summary { cursor: pointer; font-weight: 600; margin-bottom: 8px; }
-.connection-explorer-storage { border-top: 1px solid rgb(var(--color-border)); padding-top: 16px; margin-top: 24px; }
-.connection-explorer-list { border-top: 1px solid rgb(var(--color-border)); padding-top: 16px; margin-top: 24px; }
-.connection-explorer-list summary { cursor: pointer; font-weight: 600; }
-.connection-explorer-list h4 { margin-top: 18px; font-size: 13px; }
-.connection-explorer-list ul { display: grid; gap: 6px; list-style: none; padding: 0; }
-.connection-explorer-list button { width: 100%; text-align: left; }
+.connection-explorer-storage { border-top: 1px solid rgb(var(--color-border)); padding-top: 12px; margin: 12px 0 0 !important; font-size: 12px; }
+
+/* The lists: endpoints stay pinned above the tabs, only the list under the search scrolls. */
+.net-endpoints h5 { margin: 12px 0 6px; }
+.connection-explorer .net-row { border-color: transparent; background: transparent; padding: 5px 8px; }
+.connection-explorer .net-row:hover { background: rgb(var(--color-surface-muted) / .7); }
+.net-row strong { display: block; font-size: 13px; line-height: 1.3; overflow-wrap: anywhere; }
+.net-row small { display: block; font-size: 11px; line-height: 1.35; }
+.net-row .net-end-badge { margin-left: auto; }
+.net-end-badge { display: inline-grid; place-items: center; flex: none; width: 18px; height: 18px; border-radius: 50%; font-size: 11px; font-weight: 800; line-height: 1; border: 2px solid rgb(var(--color-surface)); background: rgb(var(--color-side-a)); color: rgb(var(--color-surface)); box-sizing: content-box; }
+.net-end-badge.is-b, .ce-endpoint.is-b .net-end-badge { background: rgb(var(--color-side-b)); }
+.ce-endpoint.is-a .net-end-badge { background: rgb(var(--color-side-a)); }
+.net-tablist { display: flex; gap: 2px; margin-top: 14px; padding: 4px; border-radius: 10px; background: rgb(var(--color-surface-muted) / .5); }
+.connection-explorer .net-tab { flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; border: 0; border-radius: 7px; background: transparent; padding: 6px 10px; font-size: 12px; font-weight: 700; color: rgb(var(--color-content-muted)); }
+.connection-explorer .net-tab:hover { background: transparent; color: rgb(var(--color-content-body)); }
+.connection-explorer .net-tab.is-selected { background: rgb(var(--color-tab-selected)); color: rgb(var(--color-content-primary)); box-shadow: 0 1px 2px rgb(var(--color-shadow) / .18); }
+.net-tab-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; font-size: 10px; line-height: 1; background: rgb(var(--color-surface-placeholder)); color: rgb(var(--color-content-secondary)); }
+.net-tab.is-selected .net-tab-badge { background: rgb(var(--color-tab-badge)); color: rgb(var(--color-tab-badge-text)); }
+.net-search { width: 100%; margin: 10px 0 8px; padding: 8px 12px; border-radius: 8px; border: 1px solid rgb(var(--color-border-strong)); background: rgb(var(--color-surface) / .6); color: inherit; font-size: 13px; }
+.net-search::placeholder { color: rgb(var(--color-content-muted)); }
+.net-list { flex: 1; min-height: 0; overflow-y: auto; }
+.net-list-empty { color: rgb(var(--color-content-secondary)); font-size: 12px; margin: 8px 4px; }
 .net-sheet-close { display: none; }
-.connection-explorer-footer { padding: 16px 26px; display: flex; align-items: center; justify-content: space-between; gap: 16px; border-top: 1px solid rgb(var(--color-border)); }
-.connection-explorer-footer p { font-size: 11px; color: rgb(var(--color-content-secondary)); }
+
+.connection-explorer-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 14px; border-radius: 14px; background: rgb(var(--color-surface) / .42); border: 1px solid rgb(var(--color-border) / .8); }
+.connection-explorer-footer p { font-size: 12px; color: rgb(var(--color-content-secondary)); }
 .connection-explorer-footer > div { display: flex; flex-wrap: wrap; gap: 8px; }
 .connection-explorer button.connection-explorer-primary { background: rgb(var(--color-content-primary)); color: rgb(var(--color-surface)); border-color: rgb(var(--color-content-primary)); font-weight: 700; }
 
+@media (max-width: 1100px) {
+  .connection-explorer-body { grid-template-columns: minmax(0, 1fr) 320px; }
+  .ce-heading { grid-template-columns: minmax(0, 1fr) auto; }
+  .connection-explorer-status { grid-column: 1 / -1; grid-row: 2; justify-self: center; align-items: center; text-align: center; flex-direction: row; gap: 10px; }
+  .ce-endpoints { grid-column: 1; grid-row: 1; justify-content: flex-start; }
+  .ce-timer { grid-column: 2; grid-row: 1; }
+}
 @media (max-width: 760px) {
-  .connection-explorer-backdrop { padding: 8px; }
-  .connection-explorer { border-radius: 8px; }
-  .connection-explorer-header { padding: 16px; gap: 12px; }
-  .connection-explorer-status { flex-direction: column; gap: 4px; padding: 10px 16px; }
+  .connection-explorer { padding: 12px 8px 8px; gap: 8px; }
+  .connection-explorer-header { padding-right: 48px; gap: 6px; }
+  .ce-heading { grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; }
+  .ce-endpoints { grid-column: 1 / -1; grid-row: 1; justify-content: space-between; gap: 8px; }
+  .ce-endpoint { flex: 1 1 0; gap: 8px; }
+  .connection-explorer-status { grid-column: 1; grid-row: 2; justify-self: start; flex-direction: column; align-items: flex-start; text-align: left; gap: 2px; font-size: 13px; }
+  .ce-timer { grid-column: 2; grid-row: 2; }
+  .ce-endpoint-portrait .net-portrait { width: 40px !important; height: 40px !important; }
+  .ce-endpoint-name { font-size: 14px; }
+  .ce-endpoint small { display: none; }
+  .ce-arrow { font-size: 16px; }
+  .ce-timer-value { font-size: 24px; }
   /* The graph takes the whole body; inspection is a bottom sheet over it. */
   .connection-explorer-body { display: block; }
   .connection-explorer-network { height: 100%; }
-  .net-toolbar { padding: 8px 12px; gap: 6px; }
-  .connection-explorer-inspection.is-sheet { position: absolute; left: 0; right: 0; bottom: 0; height: 45%; z-index: 5; border-left: 0; border-top: 1px solid rgb(var(--color-border-strong)); box-shadow: 0 -10px 28px rgb(0 0 0 / .22); border-radius: 14px 14px 0 0; padding: 14px 16px; }
-  .connection-explorer-inspection.is-sheet h3 { margin-bottom: 8px; }
+  .net-overlay-row { left: 8px; right: 8px; bottom: 32px; gap: 6px; }
+  .connection-explorer-inspection.is-sheet { position: absolute; left: 0; right: 0; bottom: 0; height: 55%; z-index: 5; background: rgb(var(--color-surface) / .92); box-shadow: 0 -10px 28px rgb(0 0 0 / .22); border-radius: 14px 14px 0 0; padding: 14px 16px; }
+  .connection-explorer-inspection.is-sheet .net-inspect-head { padding-right: 36px; margin-bottom: 8px; }
   .connection-explorer .net-sheet-close { display: block; position: absolute; top: 6px; right: 10px; padding: 0 10px; font-size: 20px; }
-  .connection-explorer-footer { padding: 12px 16px; flex-direction: column; align-items: flex-start; gap: 8px; }
+  .connection-explorer-footer { padding: 8px 10px; flex-direction: column; align-items: flex-start; gap: 8px; }
   .net-success { top: 54px; font-size: 13px; }
 }
 @media (prefers-reduced-motion: reduce) {

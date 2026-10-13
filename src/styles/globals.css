@@ -1501,27 +1501,49 @@ input[type=number] {
 .connection-picker-error { font-size: 13px; font-weight: 600; color: rgb(var(--color-danger-text)); }
 
 .connection-panel { display: flex; flex-direction: column; gap: 16px; }
-.connection-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.connection-headline { font-size: 18px; font-weight: 700; line-height: 1.35; color: rgb(var(--color-content-primary)); }
+/* The connection on show, pinned above the chain: laid out like a row of the recent connections below it. */
+.connection-header { display: flex; align-items: center; gap: 12px; padding: 8px 10px 8px 12px; border-radius: 10px; background: rgb(var(--color-surface-card) / 70%); border: 1px solid rgb(var(--color-card-border)); }
+.connection-header-pair .net-portrait + .net-portrait { margin-left: -15px; }
+.connection-headline { flex: 1; min-width: 0; font-size: 16px; font-weight: 700; line-height: 1.3; overflow-wrap: anywhere; color: rgb(var(--color-content-primary)); }
+/* The person the camera is on carries the same amber as the thread that joins the chain. `div.` beats the card's own utilities. */
+.connection-chain div.connection-card-active { border-color: rgb(var(--color-connection)); box-shadow: 0 0 0 2px rgb(var(--color-connection)), 0 6px 20px rgb(var(--color-connection) / .18); }
 .connection-close { display: grid; place-items: center; width: 30px; height: 30px; flex-shrink: 0; border-radius: 8px; color: rgb(var(--color-content-muted)); }
 .connection-close:hover { color: rgb(var(--color-accent-text)); background: rgb(var(--color-accent-soft) / 50%); }
 .connection-close:focus-visible, .connection-link-why:focus-visible, .connection-recent-entry:focus-visible { outline: 2px solid rgb(var(--color-accent-focus)); outline-offset: 2px; }
 .connection-chain { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 .connection-link { display: flex; gap: 14px; align-items: stretch; padding: 0 0 0 28px; min-height: 56px; }
-.connection-link-thread { width: 3px; flex-shrink: 0; border-radius: 9999px; background: rgb(var(--color-accent-solid)); box-shadow: 0 0 8px rgb(var(--color-accent-focus) / 60%); }
+/* The SVG is taken out of the flow so its intrinsic height cannot make the link taller than its text. */
+.connection-link-thread { position: relative; width: 3px; align-self: stretch; flex-shrink: 0; }
+.connection-link-thread svg { position: absolute; inset: 0; width: 3px; height: 100%; overflow: visible; }
+
+/* Round portraits, alone or two overlapping as a pair (the explorer's lists and the Connection tab). */
+.net-portrait { display: inline-flex; flex: none; align-items: center; justify-content: center; border-radius: 50%; overflow: hidden; font-weight: 700; border: 2px solid rgb(var(--color-surface)); box-shadow: 0 0 0 1px rgb(var(--color-border-strong)); }
+.net-portrait.is-tentative { opacity: .7; border-style: dashed; }
+.net-portrait img { width: 100%; height: 100%; object-fit: cover; object-position: top; }
+.net-pair { display: inline-flex; flex: none; }
+.net-pair .net-portrait + .net-portrait { margin-left: -11px; }
+
 .connection-link-body { flex: 1; min-width: 0; padding: 10px 0; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
 .connection-link-evidence { font-size: 13px; line-height: 1.5; color: rgb(var(--color-content-body)); }
-.connection-link-why { padding: 2px 10px; font-size: 12px; font-weight: 700; border-radius: 9999px; color: rgb(var(--color-action-text)); background: rgb(var(--color-action-surface)); border: 1px solid rgb(var(--color-action-border)); }
-.connection-link-why:hover { background: rgb(var(--color-action-surface-hover)); }
+/* An amber tint over the card colour, so the pill stays solid over the stage's blurred canvas as well as on the sidebar. */
+.connection-link-why { display: inline-flex; align-items: center; padding: 3px 12px; font-size: 12px; font-weight: 700; line-height: 1.35; letter-spacing: .01em; border-radius: 9999px; cursor: pointer;
+  color: rgb(var(--color-connection-text)); border: 1px solid rgb(var(--color-connection) / 60%);
+  background: linear-gradient(rgb(var(--color-connection) / 13%), rgb(var(--color-connection) / 13%)), rgb(var(--color-surface-card));
+  transition: background-color 150ms, border-color 150ms, box-shadow 150ms; }
+.connection-link-why:hover { border-color: rgb(var(--color-connection)); box-shadow: 0 1px 6px rgb(var(--color-connection) / .25);
+  background: linear-gradient(rgb(var(--color-connection) / 26%), rgb(var(--color-connection) / 26%)), rgb(var(--color-surface-card)); }
 .connection-empty { font-size: 14px; line-height: 1.5; color: rgb(var(--color-content-muted)); }
 .connection-recent h4 { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: rgb(var(--color-content-muted)); margin-bottom: 8px; }
 .connection-recent ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.connection-recent-entry { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; text-align: left; font-size: 14px; border-radius: 8px; color: rgb(var(--color-content-primary)); background: rgb(var(--color-surface-card) / 70%); border: 1px solid rgb(var(--color-card-border)); }
+.connection-recent-entry { width: 100%; display: flex; align-items: center; gap: 12px; padding: 8px 12px; text-align: left; font-size: 14px; border-radius: 8px; color: rgb(var(--color-content-primary)); background: rgb(var(--color-surface-card) / 70%); border: 1px solid rgb(var(--color-card-border)); }
 .connection-recent-entry:hover:not(:disabled) { background: rgb(var(--color-surface-card-hover)); border-color: rgb(var(--color-accent-border-strong)); }
 .connection-recent-entry.is-current { border-color: rgb(var(--color-accent-marker)); }
 .connection-recent-entry:disabled { opacity: 0.6; cursor: default; }
-.connection-recent-names { min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
-.connection-recent-degrees { flex-shrink: 0; font-size: 12px; font-weight: 700; color: rgb(var(--color-card-muted)); }
+.connection-recent-names { flex: 1; min-width: 0; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+/* The number of degrees is the point of an entry, so it gets the thread's amber as a pill. */
+.connection-recent-degrees { flex-shrink: 0; display: inline-flex; align-items: baseline; gap: 4px; padding: 2px 10px; border-radius: 9999px; font-size: 12px; font-weight: 700; color: rgb(var(--color-connection)); background: rgb(var(--color-connection) / 12%); border: 1px solid rgb(var(--color-connection) / 40%); }
+.connection-recent-degrees b { font-size: 15px; font-weight: 800; line-height: 1.2; }
+.connection-recent-open { flex-shrink: 0; font-size: 12px; font-weight: 700; color: rgb(var(--color-card-muted)); }
 
 @media (prefers-reduced-motion: reduce) {
     .connection-node-current, .gallery-current { animation: none !important; }

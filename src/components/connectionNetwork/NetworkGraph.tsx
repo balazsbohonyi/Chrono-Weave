@@ -5,11 +5,17 @@ import {
   closestApproachLabel, describeSide, initials, STATUS_LABELS, truncateName, type NetworkNode, type NetworkSelection, type NetworkView,
 } from '../../services/connectionNetworkView';
 import { formatYear } from '../../utils/formatters';
+import { createWheelClassifier } from '../../utils/wheelGesture';
+import Tooltip from '../Tooltip';
+import { fitCamera as fitPoints, type Camera, type CameraPoint } from './camera';
 import { labelLimit, nodeRadius } from './metrics';
 
-interface Camera { x: number; y: number; k: number }
 interface Point { x: number; y: number }
 const MIN_ZOOM = 0.15, MAX_ZOOM = 4, DRAG_SLOP = 4, FIT_PADDING = 70;
+// The year strips cover this much of the top and bottom of the drawing; nothing should hide under them.
+const STRIP_HEIGHT = 24;
+// While following a growing network the camera stays at least this close, even when that means panning.
+const READABLE_ZOOM = 0.8, READABLE_ZOOM_NARROW = 0.6;
 
 export interface RevealRequest { n: number; person?: string; edge?: string }
 interface Props {
@@ -56,11 +62,20 @@ const NetworkGraph: React.FC<Props> = ({
   const cameraRef = useRef(camera);
   cameraRef.current = camera;
   const userMoved = useRef(false);
+  // Following the graph normally keeps a readable zoom; "Fit network" asks for everything at once.
+  const followAll = useRef(false);
+  // False while the camera follows at a readable zoom and part of the network is out of view.
+  const followsWhole = useRef(true);
+  // While the winning chain is lit, the camera frames it, whatever else is on screen.
+  const litChain = useRef<ReadonlySet<string> | null>(null);
+  const classifyWheel = useRef(createWheelClassifier()).current;
   const [outside, setOutside] = useState(false);
   const [failed, setFailed] = useState(() => new Set<string>());
   const [domain, setDomain] = useState(layout.yearDomain);
   const sizeRef = useRef(size);
   sizeRef.current = size;
+  const narrowRef = useRef(narrow);
+  narrowRef.current = narrow;
   const known = useRef(new Set<string>());
 
   const apply = useCallback((next: Camera) => { cameraRef.current = next; setCamera(next); }, []);
@@ -88,24 +103,24 @@ const NetworkGraph: React.FC<Props> = ({
     }
   }, [layout]);
 
-  const fitCamera = useCallback((): Camera | null => {
-    const points: Array<Point & { r: number }> = [];
+  // `only` frames just those people (the lit chain); otherwise everybody, at a readable zoom unless asked for it all.
+  const fitCamera = useCallback((everything: boolean, only?: ReadonlySet<string>): Camera | null => {
+    const points: CameraPoint[] = [];
     for (const [id, node] of layout.nodes) {
       const at = layout.position(id);
-      if (at) points.push({ ...at, r: node.radius + 22 });
+      if (at && (!only || only.has(id))) points.push({ ...at, r: node.radius + 22, endpoint: node.endpoint !== null });
     }
-    if (!points.length) return null;
-    const { width, height } = sizeRef.current;
-    const left = Math.min(...points.map(p => p.x - p.r)), right = Math.max(...points.map(p => p.x + p.r));
-    const top = Math.min(...points.map(p => p.y - p.r)), bottom = Math.max(...points.map(p => p.y + p.r));
-    const bw = Math.max(1, right - left), bh = Math.max(1, bottom - top);
-    const k = Math.max(MIN_ZOOM, Math.min(1.25, (width - FIT_PADDING) / bw, (height - FIT_PADDING) / bh));
-    return { k, x: width / 2 - (left + right) / 2 * k, y: height / 2 - (top + bottom) / 2 * k };
+    const result = fitPoints(points, sizeRef.current, {
+      everything: everything || !!only, readableZoom: narrowRef.current ? READABLE_ZOOM_NARROW : READABLE_ZOOM,
+      minZoom: MIN_ZOOM, maxZoom: 1.25, padding: FIT_PADDING, strip: STRIP_HEIGHT,
+    });
+    if (!only) followsWhole.current = result?.whole ?? true;
+    return result?.camera ?? null;
   }, [layout]);
 
   const fit = useCallback(() => {
-    userMoved.current = false; setOutside(false);
-    const next = fitCamera(); if (next) apply(next);
+    userMoved.current = false; followAll.current = true; setOutside(false);
+    const next = fitCamera(true); if (next) apply(next);
   }, [fitCamera, apply]);
 
   const centerOn = useCallback((x: number, y: number) => {
@@ -117,7 +132,7 @@ const NetworkGraph: React.FC<Props> = ({
   const visibleOnScreen = useCallback((at: Point) => {
     const { width, height } = sizeRef.current, { x, y, k } = cameraRef.current;
     const sx = at.x * k + x, sy = at.y * k + y;
-    return sx > 20 && sx < width - 20 && sy > 20 && sy < height - 20;
+    return sx > 20 && sx < width - 20 && sy > STRIP_HEIGHT + 8 && sy < height - STRIP_HEIGHT - 8;
   }, []);
 
   // Positions painted by the layout, plus follow-the-graph camera until the user takes over.
@@ -126,7 +141,7 @@ const NetworkGraph: React.FC<Props> = ({
     paint();
     const current = layout.yearDomain;
     setDomain(previous => previous[0] === current[0] && previous[1] === current[1] ? previous : current);
-    if (!userMoved.current && (ticks.current++ % 3 === 0 || !layout.active)) { const next = fitCamera(); if (next) apply(next); }
+    if (!userMoved.current && (ticks.current++ % 3 === 0 || !layout.active)) { const next = fitCamera(followAll.current, litChain.current ?? undefined); if (next) apply(next); }
   }), [layout, paint, fitCamera, apply]);
   useLayoutEffect(() => { paint(); });
 
@@ -146,7 +161,8 @@ const NetworkGraph: React.FC<Props> = ({
   useEffect(() => {
     const fresh = view.nodes.filter(node => !known.current.has(node.id)).map(node => node.id);
     known.current = new Set(view.nodes.map(node => node.id));
-    if (!fresh.length || !userMoved.current) return;
+    // Following the whole network, new people are always on screen; otherwise they may land out of view.
+    if (!fresh.length || (!userMoved.current && followsWhole.current)) return;
     const timer = setTimeout(() => {
       if (fresh.some(id => { const at = layout.position(id); return at && !visibleOnScreen(at); })) setOutside(true);
     }, reducedMotion ? 0 : 700);
@@ -161,6 +177,17 @@ const NetworkGraph: React.FC<Props> = ({
     if (!points.length || points.every(visibleOnScreen)) return;
     centerOn(points.reduce((sum, p) => sum + p.x, 0) / points.length, points.reduce((sum, p) => sum + p.y, 0) / points.length);
   }, [reveal?.n]);
+
+  // The chain lights up for a moment before the overlay closes: bring it into view even when the camera
+  // sits on the middle of a wider network or the user had panned away, and keep it framed while it settles.
+  const chainKey = success && view.chain ? JSON.stringify(view.chain.nodeIds) : '';
+  useEffect(() => {
+    if (!chainKey) { litChain.current = null; return; }
+    litChain.current = new Set<string>(JSON.parse(chainKey));
+    userMoved.current = false; setOutside(false);
+    const next = fitCamera(true, litChain.current); if (next) apply(next);
+    return () => { litChain.current = null; };
+  }, [chainKey]);
 
   const zoomBy = useCallback((factor: number, anchor?: Point) => {
     const { width, height } = sizeRef.current, c = cameraRef.current, at = anchor ?? { x: width / 2, y: height / 2 };
@@ -178,12 +205,21 @@ const NetworkGraph: React.FC<Props> = ({
     return { x: (at.x - c.x) / c.k, y: (at.y - c.y) / c.k };
   };
 
+  // The same gestures as the main canvas: a mouse wheel and a trackpad pinch zoom around the pointer,
+  // a two-finger trackpad scroll pans.
   useEffect(() => {
     const element = svg.current; if (!element) return;
-    const wheel = (event: WheelEvent) => { event.preventDefault(); zoomBy(Math.exp(-event.deltaY * 0.0012), local(event)); };
+    const wheel = (event: WheelEvent) => {
+      event.preventDefault();
+      const intent = classifyWheel(event);
+      if (intent.kind === 'zoom') { zoomBy(intent.factor, local(event)); return; }
+      userMoved.current = true;
+      const c = cameraRef.current;
+      apply({ ...c, x: c.x - intent.dx, y: c.y - intent.dy });
+    };
     element.addEventListener('wheel', wheel, { passive: false });
     return () => element.removeEventListener('wheel', wheel);
-  }, [zoomBy]);
+  }, [zoomBy, apply, classifyWheel]);
 
   // One finger or mouse pans the background, two fingers pinch; a tap on empty space clears the selection.
   const pointers = useRef(new Map<number, Point>());
@@ -253,28 +289,20 @@ const NetworkGraph: React.FC<Props> = ({
   const dimmed = (nodeId?: string, edgeKey?: string) => !!view.focus && (nodeId ? !view.focus.nodes.has(nodeId) : !view.focus.edges.has(edgeKey!));
   const [bandA, bandB] = [0, 1].map(index => view.nodes.find(node => node.endpoint === index)?.person);
   const sx = (year: number) => camera.x + layout.xOf(year) * camera.k;
-  const ticksForAxis = mode === 'time' ? axisTicks(domain[0], domain[1], layout.pixelsPerYear * camera.k) : [];
+  const ticksForAxis = mode === 'time'
+    ? axisTicks(domain[0], domain[1], layout.pixelsPerYear * camera.k).filter(year => sx(year) > -40 && sx(year) < size.width + 40) : [];
+  const freeLabel = mode === 'time' ? 'Switch to free layout' : 'Switch to year-based timeline';
   const closest = view.closest;
   const closestVisible = closest && layout.nodes.has(closest.a) && layout.nodes.has(closest.b) && view.nodes.some(n => n.id === closest.a) && view.nodes.some(n => n.id === closest.b);
 
   return <div className={`net-graph ${success ? 'is-success' : ''}`}>
-    <div className="net-toolbar">
-      <button type="button" onClick={() => zoomBy(1.25)} aria-label="Zoom network in">+</button>
-      <button type="button" onClick={() => zoomBy(0.8)} aria-label="Zoom network out">−</button>
-      <button type="button" onClick={fit}>Fit network</button>
-      <div className="net-mode" role="group" aria-label="Layout">
-        <button type="button" aria-pressed={mode === 'time'} onClick={() => onModeChange('time')}>Timeline</button>
-        <button type="button" aria-pressed={mode === 'free'} onClick={() => onModeChange('free')}>Free</button>
-      </div>
-      {legend}
-      {!narrow && <span className="net-hint">Drag to pan · scroll to zoom · drag people to pin</span>}
-    </div>
+    <div className="net-stage">
     <svg ref={svg} className="net-svg" role="group" aria-label="Live contact graph"
       onPointerDown={onBackgroundDown} onPointerMove={onBackgroundMove} onPointerUp={onBackgroundUp} onPointerCancel={onBackgroundUp}>
       {mode === 'time' && <g className="net-axis" aria-hidden="true">
         {[bandA, bandB].map((person, index) => person && <rect key={index} className={index === 0 ? 'net-band-a' : 'net-band-b'}
           x={sx(person.birthYear)} width={Math.max(2, (person.deathYear - person.birthYear) * layout.pixelsPerYear * camera.k)} y={0} height={size.height} />)}
-        {ticksForAxis.map(year => <g key={year}><line x1={sx(year)} x2={sx(year)} y1={0} y2={size.height} /><text x={sx(year) + 4} y={size.height - 8}>{formatYear(year)}</text></g>)}
+        {ticksForAxis.map(year => <line key={year} x1={sx(year)} x2={sx(year)} y1={0} y2={size.height} />)}
       </g>}
       <g className="net-content" transform={`translate(${camera.x} ${camera.y}) scale(${camera.k})`}>
         {view.edges.map(edge => {
@@ -328,6 +356,41 @@ const NetworkGraph: React.FC<Props> = ({
         })}
       </g>
     </svg>
+    {mode === 'time' && ['top', 'bottom'].map(edge => <div key={edge} className={`net-strip is-${edge}`} aria-hidden="true">
+      {ticksForAxis.map(year => <span key={year} className="net-tick" style={{ left: sx(year) }}>{formatYear(year)}</span>)}
+    </div>)}
+    <div className="net-overlay-row">
+      <div data-net-controls className="canvas-view-toolbar net-view-toolbar" role="toolbar" aria-label="Network view controls">
+        <Tooltip text={freeLabel}><button type="button" className="canvas-floating-button" aria-label={freeLabel} onClick={event => {
+          if (event.detail > 0) event.currentTarget.blur();
+          onModeChange(mode === 'time' ? 'free' : 'time');
+        }}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            {mode === 'free' ? <>
+              <path d="M3 20h18M6 18v3M12 18v3M18 18v3" />
+              <rect x="3" y="3" width="11" height="3" rx="1" fill="currentColor" stroke="none" />
+              <rect x="8" y="8" width="13" height="3" rx="1" fill="currentColor" stroke="none" />
+              <rect x="5" y="13" width="10" height="3" rx="1" fill="currentColor" stroke="none" />
+            </> : <>
+              <circle cx="6" cy="7" r="2.6" /><circle cx="18" cy="6" r="2.6" /><circle cx="12" cy="18" r="2.6" />
+              <path d="M8.5 7h7M7.4 9.3l3.3 6.4M16.7 8.4l-3.4 7.2" />
+            </>}
+          </svg>
+        </button></Tooltip>
+        <span className="canvas-toolbar-divider" aria-hidden="true" />
+        <Tooltip text="Zoom in"><button type="button" className="canvas-floating-button" aria-label="Zoom network in" onClick={event => { if (event.detail > 0) event.currentTarget.blur(); zoomBy(1.25); }}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.5 15.5 5 5M10.5 7.8v5.4M7.8 10.5h5.4" /></svg>
+        </button></Tooltip>
+        <Tooltip text="Zoom out"><button type="button" className="canvas-floating-button" aria-label="Zoom network out" onClick={event => { if (event.detail > 0) event.currentTarget.blur(); zoomBy(0.8); }}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.5 15.5 5 5M7.8 10.5h5.4" /></svg>
+        </button></Tooltip>
+        <Tooltip text="Fit the whole network"><button type="button" className="canvas-floating-button" aria-label="Fit network" onClick={event => { if (event.detail > 0) event.currentTarget.blur(); fit(); }}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /><rect x="9" y="9" width="6" height="6" rx="1" /></svg>
+        </button></Tooltip>
+      </div>
+      {legend}
+    </div>
+    </div>
     {outside && <button type="button" className="net-outside" onClick={fit}>New contacts outside view · Fit</button>}
     {success && <div className="net-success" role="status">Connected · {success.degrees} {success.degrees === 1 ? 'degree' : 'degrees'}<small>Opening the connection… click or press Esc to skip</small></div>}
   </div>;

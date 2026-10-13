@@ -32,8 +32,8 @@ export const MAX_RECENT_CONNECTIONS = 20;
 export const PATH_CATALOG_LIMIT = 150;
 // Canvas people whose lives fall this close to the span between the endpoints are offered as candidates.
 export const PATH_CATALOG_PADDING_YEARS = 50;
-// The whole camera reveal is capped so long chains do not drag on.
-export const CONNECTION_REVEAL_MAX_MS = 8000;
+// The whole camera reveal is capped so very long chains do not drag on; shorter ones play at their natural pace.
+export const CONNECTION_REVEAL_MAX_MS = 16000;
 export const DEEP_DIVE_SECTION_TITLES = [
   'Early Life', 'Major Achievements', 'Key Relationships', 'Historical Legacy',
 ] as const;
