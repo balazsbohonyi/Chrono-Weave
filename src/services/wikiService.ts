@@ -78,6 +78,10 @@ const fetchBatchWikipediaImages = async (names: string[]): Promise<Map<string, s
     return imageMap;
 };
 
+// Portraits by name, for callers that have no HistoricalFigure (Six Degrees contacts). Misses are simply absent.
+export const fetchWikipediaImagesByName = (names: string[]): Promise<Map<string, string>> =>
+  fetchBatchWikipediaImages([...new Set(names)]);
+
 export const fetchBatchFigureDetails = async (
   figures: HistoricalFigure[]
 ): Promise<Map<string, { description: string; imageUrl: string | null }>> => {

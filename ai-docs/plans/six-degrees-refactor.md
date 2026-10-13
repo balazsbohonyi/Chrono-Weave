@@ -244,6 +244,8 @@ Only inspect existing evidence during an active search; inspection must not sile
 
 Use bounded deterministic graph layout and stable node positions, with endpoints anchored on opposing sides. Render with SVG and existing styling primitives unless measurements establish a need for a graph dependency. Retain cycles and cross-links in the actual graph; the renderer's layout must not constrain search.
 
+Superseded for presentation (2026-10-13): the [network view redesign](six-degrees-network-view.md) replaces the lattice with an accepted-only, time-anchored `d3-force` layout (physics helper only; React still renders SVG), portrait nodes, filter chips and a success hold. Search, persistence and lifecycle decisions in this plan are unchanged.
+
 Do not continually refit after the user pans or zooms. Preserve selection as new batches arrive. Respect reduced motion, support keyboard selection and a readable list alternative, trap/restore modal focus using existing utilities, and do not rely on color alone.
 
 Provide compact mobile layout/inspection without changing the rest of the app's layout. Scope CSS to Six Degrees components and use existing theme tokens.

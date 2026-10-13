@@ -992,7 +992,7 @@ const App: React.FC = () => {
             </div>
 
             {connection.explorerOpen && <ConnectionExplorer session={connection.exploration} phase={connection.progress?.label} busy={connection.isConnecting}
-                onStop={connection.stop} onContinue={() => connection.continueSearch()} onFresh={() => connection.continueSearch(true)} onClose={connection.cancelSearch} />}
+                onStop={connection.stop} onContinue={() => connection.continueSearch()} onFresh={() => connection.continueSearch(true)} onClose={connection.closeExplorer} success={connection.success} />}
             {!connection.explorerOpen && !isLauncherOpen && !isSettingsOpen && <CanvasHistory canvases={history} onSelect={commitCanvas} />}
 
             {isLauncherOpen && <WeaveLauncherOverlay

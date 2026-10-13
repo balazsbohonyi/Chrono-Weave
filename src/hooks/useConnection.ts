@@ -12,6 +12,8 @@ import {
 import { listConnectionPaths, type ConnectionPathEntry } from '../utils/connectionPaths';
 import type { WovenCanvas } from '../utils/weaveConnection';
 import type { ConnectionFocusRequest, ConnectionReveal } from './useConnectionReveal';
+import { createSuccessHold } from '../services/connectionSuccessHold';
+import { successHoldMs } from '../services/connectionNetworkView';
 
 export interface ActiveConnection extends ConnectionView {
   id: number;
@@ -74,6 +76,9 @@ export function useConnection(dependencies: Dependencies) {
   const [checkpoints, setCheckpoints] = useState<ConnectionSession[]>([]);
   const [checkpointRevision, setCheckpointRevision] = useState(0);
   const explorerInvoker = useRef<HTMLElement | null>(null);
+  // A verified chain stays lit in the explorer for a moment before the canvas reveal takes over.
+  const hold = useRef(createSuccessHold());
+  const [success, setSuccess] = useState<{ degrees: number } | null>(null);
   const repository = dependencies.repository ?? connectionRepository();
   useEffect(() => {
     let current = true;
@@ -88,6 +93,8 @@ export function useConnection(dependencies: Dependencies) {
 
   // Stops a running search. Completed assessments stay cached; nothing is woven or saved.
   const cancelSearch = useCallback(() => {
+    hold.current.abandon();
+    setSuccess(null);
     search.current?.abort(new DOMException('Connection search cancelled.', 'AbortError'));
     search.current = null;
     setIsConnecting(false);
@@ -134,6 +141,8 @@ export function useConnection(dependencies: Dependencies) {
     if (!invoker?.closest('.connection-explorer, [data-connection-picker]')) explorerInvoker.current = invoker;
 
     latest.current.onSearchStart();
+    hold.current.abandon();
+    setSuccess(null);
     const action = latest.current.begin();
     const own = new AbortController();
     search.current?.abort();
@@ -162,7 +171,13 @@ export function useConnection(dependencies: Dependencies) {
           },
           applyWoven: woven => latest.current.applyWoven(woven),
           pathsChanged: () => setPathRevision(previous => previous + 1),
-          show: view => { setExplorerOpen(false); show(view); },
+          show: view => {
+            // Settlement has already run. With a live exploration on screen, only the hand-over waits.
+            if (!hasSession) { setExplorerOpen(false); show(view); return; }
+            const reduced = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            setSuccess({ degrees: view.chain.length - 1 });
+            hold.current.begin(successHoldMs(reduced), () => { setSuccess(null); setExplorerOpen(false); show(view); });
+          },
           failPicking,
           notify: (message, type) => latest.current.notify(message, type),
         },
@@ -185,7 +200,7 @@ export function useConnection(dependencies: Dependencies) {
   useEffect(() => {
     const stop = () => search.current?.abort(new DOMException('Page closed.', 'AbortError'));
     window.addEventListener('pagehide', stop);
-    return () => { window.removeEventListener('pagehide', stop); stop(); };
+    return () => { window.removeEventListener('pagehide', stop); stop(); hold.current.abandon(); };
   }, []);
   const stop = useCallback(() => { search.current?.abort(new DOMException('Search stopped.', 'AbortError')); }, []);
   const continueSearch = useCallback((fresh = false) => {
@@ -193,6 +208,8 @@ export function useConnection(dependencies: Dependencies) {
     const [from, to] = exploration.endpoints.map(id => canvasPerson(exploration.people.find(p => p.id === id)!, latest.current.figures));
     void start(from, { figure: to }, fresh ? undefined : exploration, fresh ? 'fresh' : 'resume');
   }, [exploration, start]);
+  // Closing the explorer while a chain is lit hands over to the reveal at once; otherwise it stops the search.
+  const closeExplorer = useCallback(() => { if (!hold.current.skip()) cancelSearch(); }, [cancelSearch]);
   const openCheckpoint = useCallback((session: ConnectionSession) => {
     explorerInvoker.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     cancelSearch(); setExploration(session); setExplorerOpen(true);
@@ -234,7 +251,7 @@ export function useConnection(dependencies: Dependencies) {
   const endReveal = useCallback(() => setReveal(previous => previous.animate ? { ...previous, animate: false } : previous), []);
 
   return {
-    picking, isConnecting, progress, active, recent, currentIndex, tabRequest, exploration, explorerOpen, checkpoints, stop, continueSearch, openCheckpoint,
+    picking, isConnecting, progress, active, recent, currentIndex, tabRequest, exploration, explorerOpen, success, closeExplorer, checkpoints, stop, continueSearch, openCheckpoint,
     focusRequest, canvasConnection, isTabVisible: !!active || recent.length > 0 || checkpoints.length > 0,
     isPickable, statusFor,
     beginPicking, exitPicking, pickFigure, submitName, cancelSearch, reset, replay, close, focusPerson,

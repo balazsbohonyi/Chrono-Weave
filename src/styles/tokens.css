@@ -58,6 +58,10 @@
   /* Six Degrees thread, outlines and badges: a deeper amber on light surfaces, a lighter one on dark. */
   --color-connection: 217 119 6;
   --color-connection-contrast: 255 255 255;
+  /* Six Degrees network: selection blue, and the side tints (reached from A / from B). */
+  --color-selection: 37 99 235;
+  --color-side-a: 13 148 136;
+  --color-side-b: 124 58 237;
   --color-accent-solid: 37 99 235;
   --color-accent-solid-hover: 29 78 216;
   --color-on-accent: 255 255 255;
@@ -166,6 +170,9 @@
   --color-accent-emphasis: 191 219 254;
   --color-connection: 251 191 36;
   --color-connection-contrast: 41 28 4;
+  --color-selection: 96 165 250;
+  --color-side-a: 45 212 191;
+  --color-side-b: 167 139 250;
   --color-accent-solid: 37 99 235;
   --color-accent-solid-hover: 29 78 216;
   --color-on-accent: 255 255 255;

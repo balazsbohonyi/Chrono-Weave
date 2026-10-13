@@ -131,6 +131,7 @@ All components are in `src/components/`:
 - **Toast**: Notification system
 - **ActionBar**: Hover toolbar with Discover/Trace/Inspect buttons
 - **FloatingToolbar**: Secondary interaction toolbar
+- **ConnectionExplorer**: Six Degrees live contact-network overlay (shell) over `src/components/connectionNetwork/` (`NetworkGraph`, `NetworkInspector`, `NetworkLegend`). Accepted-only by default, time-anchored `d3-force` layout with portraits; design in `ai-docs/plans/six-degrees-network-view.md`. Visible people/edges/folds/closest approach are the pure view model in `src/services/connectionNetworkView.ts`; physics is `src/services/connectionNetworkLayout.ts` (driven by `useNetworkSimulation`); the post-success hold is `src/services/connectionSuccessHold.ts`
 - **ConnectionPicker / ConnectionProgress / ConnectionPanel / ConnectionThread**: Six Degrees — choosing the other end, the live search card, the sidebar Connection tab, and the SVG thread (React state lives in `src/hooks/useConnection.ts`, the rules around a request and a finished search in `src/services/connectionFlow.ts`, the search itself in `src/services/connectionPath.ts`)
 
 ## Configuration Constants
