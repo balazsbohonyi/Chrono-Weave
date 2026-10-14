@@ -22,18 +22,32 @@
 .ce-endpoint-name { font-size: clamp(18px, 2vw, 26px); font-weight: 700; line-height: 1.2; overflow-wrap: break-word; }
 .ce-endpoint small { margin-top: 3px; font-size: 12px; color: rgb(var(--color-content-secondary)); overflow-wrap: anywhere; }
 .ce-opening { font-size: 22px; font-weight: 700; text-align: center; }
-.ce-timer { position: relative; isolation: isolate; display: flex; flex-direction: column; align-items: center; justify-self: end; margin-right: 12px; line-height: 1; }
-.ce-timer-value { font-size: 36px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: .01em; }
+/* The clock and the sign that the search is working, side by side. The clock has a fixed width and every character
+   a cell of its own, so its centre never moves while the digits change. */
+.ce-clock { display: flex; align-items: center; gap: 14px; justify-self: end; margin-right: 12px; }
+.ce-timer { position: relative; isolation: isolate; display: flex; flex-direction: column; align-items: center; width: 124px; line-height: 1; }
+.ce-timer-value { display: flex; justify-content: center; font-size: 36px; font-weight: 800; letter-spacing: 0; transform-origin: 50% 50%; }
+.ce-digit, .ce-colon { display: inline-block; text-align: center; }
+.ce-digit { width: .66em; }
+.ce-colon { width: .34em; }
 .ce-timer-caption { margin-top: 5px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .14em; color: rgb(var(--color-content-secondary)); }
-/* While the search runs a soft glow ripples out from the middle of the clock: it is working, even when
-   nothing new has appeared. Only transform and opacity animate, so it stays smooth and the digits never
+/* While the search runs a soft glow ripples out from the middle of the clock and the time breathes: it is working,
+   even when nothing new has appeared. Only transform and opacity animate, so it stays smooth and the digits never
    get re-rasterised at fractional sizes. */
-.ce-timer.is-running::before { content: ''; position: absolute; z-index: -1; inset: -16px -26px; border-radius: 50%; pointer-events: none; will-change: transform, opacity;
+.ce-timer.is-running::before { content: ''; position: absolute; z-index: -1; inset: -16px -4px; border-radius: 50%; pointer-events: none; will-change: transform, opacity;
   background: radial-gradient(closest-side, rgb(var(--color-connection) / .75), rgb(var(--color-connection) / .3) 55%, transparent 100%); animation: ce-timer-ripple 1.7s cubic-bezier(.2, .6, .35, 1) infinite; }
-.ce-timer.is-running .ce-timer-value { animation: ce-timer-glow 1.7s ease-in-out infinite; }
+.ce-timer.is-running .ce-timer-value { will-change: transform; animation: ce-timer-pulse 1.7s ease-in-out infinite; }
 .ce-timer.is-running .ce-timer-caption { color: rgb(var(--color-connection)); }
 @keyframes ce-timer-ripple { 0% { transform: scale(.3); opacity: .9; } 100% { transform: scale(1.15); opacity: 0; } }
-@keyframes ce-timer-glow { 0%, 100% { opacity: .8; } 40% { opacity: 1; } }
+@keyframes ce-timer-pulse { 0%, 100% { transform: scale(1); opacity: .85; } 50% { transform: scale(1.09); opacity: 1; } }
+
+/* A magnifying glass that sweeps about as if looking for something, shown while the search runs. Its space is
+   always kept, so the clock does not move when the search stops. */
+.ce-working { position: relative; flex: none; width: 38px; height: 38px; color: rgb(var(--color-connection)); opacity: 0; transition: opacity 300ms; }
+.ce-working.is-working { opacity: 1; }
+.ce-working svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.ce-working.is-working .ce-working-glass { animation: ce-working-scan 2.6s ease-in-out infinite; transform-origin: 50% 50%; }
+@keyframes ce-working-scan { 0%, 100% { transform: translate(-3px, 2px) rotate(-12deg); } 25% { transform: translate(2px, -3px) rotate(6deg); } 50% { transform: translate(3px, 2px) rotate(12deg); } 75% { transform: translate(-2px, 3px) rotate(-6deg); } }
 
 /* Body: the network and the inspection are two glass panels. */
 .connection-explorer-body { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 14px; flex: 1; min-height: 0; position: relative; }
@@ -130,10 +144,13 @@
 .net-node.is-dim .net-ring { stroke: rgb(var(--color-content-muted)); }
 .net-node.is-dim .net-name { fill: rgb(var(--color-content-muted)); }
 
-.net-outside { position: absolute; left: 50%; top: 40px; transform: translateX(-50%); box-shadow: 0 4px 14px rgb(0 0 0 / .2); z-index: 3; }
-.net-success { position: absolute; top: 76px; left: 50%; transform: translateX(-50%); background: rgb(var(--color-connection)); color: rgb(var(--color-connection-contrast)); padding: 8px 18px; border-radius: 999px; font-weight: 700; font-size: 15px; text-align: center; box-shadow: 0 6px 20px rgb(0 0 0 / .25); pointer-events: none; z-index: 3; }
+/* The lit chain's announcement and the Reveal button under it. Only the button takes clicks; the graph underneath stays explorable. */
+.net-success-wrap { position: absolute; top: 76px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 10px; pointer-events: none; z-index: 3; }
+.net-success { background: rgb(var(--color-connection)); color: rgb(var(--color-connection-contrast)); padding: 8px 18px; border-radius: 999px; font-weight: 700; font-size: 15px; text-align: center; box-shadow: 0 6px 20px rgb(0 0 0 / .25); }
 .net-success small { display: block; font-size: 10px; font-weight: 500; opacity: .85; }
-.net-graph.is-success .net-svg { cursor: pointer; }
+.connection-explorer button.net-reveal { pointer-events: auto; background: rgb(var(--color-connection)); color: rgb(var(--color-connection-contrast)); border-color: rgb(var(--color-connection)); border-radius: 999px; padding: 10px 34px; font-size: 15px; font-weight: 800; letter-spacing: .04em; box-shadow: 0 6px 20px rgb(0 0 0 / .25); transition: transform 150ms, box-shadow 150ms, filter 150ms; }
+.connection-explorer button.net-reveal:hover { background: rgb(var(--color-connection)); filter: brightness(1.08); transform: translateY(-1px); box-shadow: 0 8px 24px rgb(0 0 0 / .3); }
+.connection-explorer button.net-reveal:active { transform: translateY(0); }
 
 /* Legend / filters */
 .net-legend { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -214,7 +231,7 @@
   .ce-heading { grid-template-columns: minmax(0, 1fr) auto; }
   .connection-explorer-status { grid-column: 1 / -1; grid-row: 2; justify-self: center; align-items: center; text-align: center; flex-direction: row; gap: 10px; }
   .ce-endpoints { grid-column: 1; grid-row: 1; justify-content: flex-start; }
-  .ce-timer { grid-column: 2; grid-row: 1; }
+  .ce-clock { grid-column: 2; grid-row: 1; }
 }
 @media (max-width: 760px) {
   .connection-explorer { padding: 12px 8px 8px; gap: 8px; }
@@ -223,7 +240,9 @@
   .ce-endpoints { grid-column: 1 / -1; grid-row: 1; justify-content: space-between; gap: 8px; }
   .ce-endpoint { flex: 1 1 0; gap: 8px; }
   .connection-explorer-status { grid-column: 1; grid-row: 2; justify-self: start; flex-direction: column; align-items: flex-start; text-align: left; gap: 2px; font-size: 13px; }
-  .ce-timer { grid-column: 2; grid-row: 2; }
+  .ce-clock { grid-column: 2; grid-row: 2; gap: 10px; }
+  .ce-working { width: 30px; height: 30px; }
+  .ce-timer { width: 92px; }
   .ce-endpoint-portrait .net-portrait { width: 40px !important; height: 40px !important; }
   .ce-endpoint-name { font-size: 14px; }
   .ce-endpoint small { display: none; }
@@ -237,7 +256,8 @@
   .connection-explorer-inspection.is-sheet .net-inspect-head { padding-right: 36px; margin-bottom: 8px; }
   .connection-explorer .net-sheet-close { display: block; position: absolute; top: 6px; right: 10px; padding: 0 10px; font-size: 20px; }
   .connection-explorer-footer { padding: 8px 10px; flex-direction: column; align-items: flex-start; gap: 8px; }
-  .net-success { top: 54px; font-size: 13px; }
+  .net-success-wrap { top: 54px; }
+  .net-success { font-size: 13px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .connection-explorer *, .connection-explorer *::before { animation: none !important; transition: none !important; }

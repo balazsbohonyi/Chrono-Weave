@@ -87,6 +87,47 @@ test('new people enter beside the contact that introduced them, and existing one
   assert.ok(Math.hypot(at(layout, 'y').x - before.x, at(layout, 'y').y - before.y) < 60);
 });
 
+const crowd = (count: number, offset = 0): LayoutInput[] => Array.from({ length: count }, (_, index) =>
+  ({ id: `p${offset + index}`, year: 1640 + ((offset + index) * 7) % 150, endpoint: null, radius: 22 }));
+const minGap = (layout: NetworkLayout, ids: string[]) => {
+  let gap = Infinity;
+  for (let i = 0; i < ids.length; i++) for (let j = i + 1; j < ids.length; j++) {
+    const a = at(layout, ids[i]), b = at(layout, ids[j]);
+    gap = Math.min(gap, Math.hypot(a.x - b.x, a.y - b.y));
+  }
+  return gap;
+};
+
+test('a crowd that arrives at once is seated before it is drawn: nothing is left to jump around', () => {
+  for (const mode of ['time', 'free'] as const) {
+    const layout = new NetworkLayout();
+    layout.setSize(1300, 700); layout.setBounds(1625, 1825); layout.setMode(mode);
+    const people = [...inputs.filter(input => input.endpoint !== null), ...crowd(45)];
+    const ids = people.map(person => person.id);
+    layout.setGraph(people, [{ a: 'a', b: 'p0' }, { a: 'p0', b: 'p1' }, { a: 'p1', b: 'b' }]);
+    assert.equal(layout.active, false, `${mode}: already at rest`);
+    assert.equal(layout.step(), false, `${mode}: no frame has anything left to move`);
+    const seated = ids.map(id => at(layout, id));
+    layout.settle();
+    assert.deepEqual(ids.map(id => at(layout, id)), seated, `${mode}: settling again changes nothing`);
+    // Nobody sits on top of anybody else (they have room for their disc, at the very least).
+    assert.ok(minGap(layout, ids) > 30, `${mode}: closest pair is ${minGap(layout, ids).toFixed(1)}px apart`);
+  }
+});
+
+test('a big round of new contacts finds its places beside the people already there, who stay where they are', () => {
+  const layout = new NetworkLayout();
+  layout.setSize(1300, 700); layout.setBounds(1625, 1825);
+  const first = [...inputs.filter(input => input.endpoint !== null), ...crowd(10)];
+  layout.setGraph(first, [{ a: 'a', b: 'p0' }]);
+  layout.settle();
+  const before = first.map(person => at(layout, person.id));
+  const more = crowd(12, 100);
+  layout.setGraph([...first, ...more], [{ a: 'a', b: 'p0' }, { a: 'p0', b: 'p100' }]);
+  assert.deepEqual(first.map(person => at(layout, person.id)), before, 'the people already there did not move');
+  assert.ok(minGap(layout, [...first, ...more].map(person => person.id)) > 25);
+});
+
 test('the year domain widens for people outside the endpoints lifespans, and removed people are forgotten', () => {
   const layout = build(), [from, to] = layout.yearDomain;
   layout.setGraph([...inputs, { id: 'old', year: 1400, endpoint: null, radius: 22 }], links);

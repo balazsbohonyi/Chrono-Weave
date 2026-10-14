@@ -13,7 +13,6 @@ import { listConnectionPaths, type ConnectionPathEntry } from '../utils/connecti
 import type { WovenCanvas } from '../utils/weaveConnection';
 import type { ConnectionFocusRequest, ConnectionReveal } from './useConnectionReveal';
 import { createSuccessHold } from '../services/connectionSuccessHold';
-import { successHoldMs } from '../services/connectionNetworkView';
 
 export interface ActiveConnection extends ConnectionView {
   id: number;
@@ -41,13 +40,18 @@ interface Dependencies {
   // Joins the busy/abort rules of mapping and expanding: starting one stops the other.
   begin: () => { signal: AbortSignal; isCurrent: () => boolean };
   applyWoven: (woven: WovenCanvas) => void;
-  openSidebar: () => void;
+  // Slides the sidebar away (a no-op when it is already closed).
+  hideSidebar: () => void;
   notify: (message: string, type: 'success' | 'info' | 'error') => void;
   // Stops anything else that is running, and closes dialogs the search would sit behind.
   onSearchStart: () => void;
 }
 
-export const connectionHeadline = (connection: ActiveConnection) => {
+// How long the first person is on the stage before the sidebar slides away: the stage has faded in and the camera
+// is resting on them (the opening dwell lasts a couple of seconds), so the sidebar leaves while nothing else moves.
+const SIDEBAR_HIDE_DELAY_MS = 900;
+
+export const connectionHeadline =(connection: ActiveConnection) => {
   const first = connection.chain[0].name, last = connection.chain[connection.chain.length - 1].name;
   return `${first} and ${last} are ${degreeLabel(connection.chain.length - 1)} apart.`;
 };
@@ -76,7 +80,7 @@ export function useConnection(dependencies: Dependencies) {
   const [checkpoints, setCheckpoints] = useState<ConnectionSession[]>([]);
   const [checkpointRevision, setCheckpointRevision] = useState(0);
   const explorerInvoker = useRef<HTMLElement | null>(null);
-  // A verified chain stays lit in the explorer for a moment before the canvas reveal takes over.
+  // A verified chain stays lit in the explorer until the user presses Reveal.
   const hold = useRef(createSuccessHold());
   const [success, setSuccess] = useState<{ degrees: number } | null>(null);
   const repository = dependencies.repository ?? connectionRepository();
@@ -106,15 +110,21 @@ export function useConnection(dependencies: Dependencies) {
     });
   }, []);
 
+  // The stage and the sidebar say the same thing, so the sidebar does not stay open while the connection plays: it
+  // loads the cards, and slides away once the first person has been on the stage for a moment.
+  const sidebarTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelSidebarHide = useCallback(() => { if (sidebarTimer.current) clearTimeout(sidebarTimer.current); sidebarTimer.current = null; }, []);
+
   const reset = useCallback(() => {
     generation.current++;
     cancelSearch();
+    cancelSidebarHide();
     setExploration(null);
     setPicking(null);
     setActive(null);
     setCurrentIndex(null);
     setFocusRequest(null);
-  }, [cancelSearch]);
+  }, [cancelSearch, cancelSidebarHide]);
 
   const show = useCallback((connection: ConnectionView) => {
     setActive({ ...connection, id: ++nextId.current });
@@ -122,8 +132,9 @@ export function useConnection(dependencies: Dependencies) {
     setCurrentIndex(null);
     setFocusRequest(null);
     setTabRequest(previous => previous + 1);
-    latest.current.openSidebar();
-  }, []);
+    cancelSidebarHide();
+    sidebarTimer.current = setTimeout(() => { sidebarTimer.current = null; latest.current.hideSidebar(); }, SIDEBAR_HIDE_DELAY_MS);
+  }, [cancelSidebarHide]);
 
   const start = useCallback(async (from: HistoricalFigure, requested: ConnectionTarget, session?: ConnectionSession, mode: 'auto' | 'resume' | 'fresh' = 'auto') => {
     const { storage: canvasStorage, service, figures: canvasFigures } = latest.current;
@@ -172,11 +183,10 @@ export function useConnection(dependencies: Dependencies) {
           applyWoven: woven => latest.current.applyWoven(woven),
           pathsChanged: () => setPathRevision(previous => previous + 1),
           show: view => {
-            // Settlement has already run. With a live exploration on screen, only the hand-over waits.
+            // Settlement has already run. With a live exploration on screen, only the hand-over waits, until the user reveals it.
             if (!hasSession) { setExplorerOpen(false); show(view); return; }
-            const reduced = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
             setSuccess({ degrees: view.chain.length - 1 });
-            hold.current.begin(successHoldMs(reduced), () => { setSuccess(null); setExplorerOpen(false); show(view); });
+            hold.current.begin(() => { setSuccess(null); setExplorerOpen(false); show(view); });
           },
           failPicking,
           notify: (message, type) => latest.current.notify(message, type),
@@ -200,16 +210,17 @@ export function useConnection(dependencies: Dependencies) {
   useEffect(() => {
     const stop = () => search.current?.abort(new DOMException('Page closed.', 'AbortError'));
     window.addEventListener('pagehide', stop);
-    return () => { window.removeEventListener('pagehide', stop); stop(); hold.current.abandon(); };
-  }, []);
+    return () => { window.removeEventListener('pagehide', stop); stop(); hold.current.abandon(); cancelSidebarHide(); };
+  }, [cancelSidebarHide]);
   const stop = useCallback(() => { search.current?.abort(new DOMException('Search stopped.', 'AbortError')); }, []);
   const continueSearch = useCallback((fresh = false) => {
     if (!exploration || search.current) return;
     const [from, to] = exploration.endpoints.map(id => canvasPerson(exploration.people.find(p => p.id === id)!, latest.current.figures));
     void start(from, { figure: to }, fresh ? undefined : exploration, fresh ? 'fresh' : 'resume');
   }, [exploration, start]);
-  // Closing the explorer while a chain is lit hands over to the reveal at once; otherwise it stops the search.
-  const closeExplorer = useCallback(() => { if (!hold.current.skip()) cancelSearch(); }, [cancelSearch]);
+  // Plays a lit chain on the canvas. Closing the explorer instead leaves without playing it: the connection is
+  // already saved and stays in the Connection tab to replay.
+  const revealConnection = useCallback(() => { hold.current.reveal(); }, []);
   const openCheckpoint = useCallback((session: ConnectionSession) => {
     explorerInvoker.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     cancelSearch(); setExploration(session); setExplorerOpen(true);
@@ -253,7 +264,7 @@ export function useConnection(dependencies: Dependencies) {
   const endReveal = useCallback(() => setReveal(previous => previous.animate ? { ...previous, animate: false } : previous), []);
 
   return {
-    picking, isConnecting, progress, active, recent, currentIndex, tabRequest, exploration, explorerOpen, success, closeExplorer, checkpoints, stop, continueSearch, openCheckpoint,
+    picking, isConnecting, progress, active, recent, currentIndex, tabRequest, exploration, explorerOpen, success, revealConnection, checkpoints, stop, continueSearch, openCheckpoint,
     focusRequest, canvasConnection, isTabVisible: !!active || recent.length > 0 || checkpoints.length > 0,
     isPickable, statusFor,
     beginPicking, exitPicking, pickFigure, submitName, cancelSearch, reset, replay, replayActive, close, focusPerson,

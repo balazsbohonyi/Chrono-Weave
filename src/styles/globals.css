@@ -1548,3 +1548,10 @@ input[type=number] {
 @media (prefers-reduced-motion: reduce) {
     .connection-node-current, .gallery-current { animation: none !important; }
 }
+
+/* The sidebar leaves with a little wind-up and an elastic settle, so a connection that plays on the stage can send it away
+   without a hard cut. Opening keeps the plain ease from its utility classes. */
+#canvas-sidebar.translate-x-full { transition-duration: 650ms; transition-timing-function: cubic-bezier(.6, -.3, .3, 1.12); }
+@media (prefers-reduced-motion: reduce) {
+  #canvas-sidebar.translate-x-full { transition-duration: 150ms; transition-timing-function: ease-in-out; }
+}

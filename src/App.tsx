@@ -212,7 +212,7 @@ const App: React.FC = () => {
             setSelectedCategories(woven.selectedCategories);
             setNewlyDiscoveredIds(new Set(woven.newIds));
         },
-        openSidebar: () => setIsSidebarCollapsed(false),
+        hideSidebar: () => setIsSidebarCollapsed(true),
         notify: (message, type) => setToast({ message, type }),
         onSearchStart: () => {
             // The search replaces any mapping or expansion that was running, and its dialogs.
@@ -953,7 +953,7 @@ const App: React.FC = () => {
             {stageMounted && connection.active && connection.canvasConnection && <ConnectionStage key={connection.active.id} hidden={!stageShown}
                 connection={connection.canvasConnection} chain={connection.active.chain} links={connection.active.links}
                 currentIndex={connection.currentIndex} focus={connection.focusRequest}
-                inset={{ top: hasCategoryFilters && isLegendOpen ? 114 : 52, right: isConnectionSidebarOpen ? 544 : 0 }}
+                inset={{ top: hasCategoryFilters && isLegendOpen ? 114 : 52, right: isConnectionSidebarOpen && !connection.canvasConnection.animate ? 544 : 0 }}
                 canExit={!modalOpen && stageShown} onStep={connection.setCurrentIndex} onEnd={connection.endReveal} onExit={connection.close} onReplay={connection.replayActive}
                 onExplain={openConnectionExplanation} onInspect={handleInspectFigure} />}
 
@@ -991,7 +991,8 @@ const App: React.FC = () => {
                 onConnect={connection.beginPicking}
                 connection={{
                     isVisible: connection.isTabVisible, tabRequest: connection.tabRequest,
-                    connection: connection.active, currentIndex: connection.currentIndex, recent: connection.recent,
+                    // While it plays the stage shows who is current; the list does not follow it card by card.
+                    connection: connection.active, currentIndex: connection.canvasConnection?.animate ? null : connection.currentIndex, recent: connection.recent,
                     canvasIds, isBusy, onClose: connection.close, onReplay: connection.replay,
                     onFocusPerson: connection.focusPerson, onExplain: openConnectionExplanation,
                     checkpoints: connection.checkpoints, onOpenCheckpoint: connection.openCheckpoint,
@@ -1010,7 +1011,7 @@ const App: React.FC = () => {
             </div>
 
             {connection.explorerOpen && <ConnectionExplorer session={connection.exploration} phase={connection.progress?.label} busy={connection.isConnecting}
-                onStop={connection.stop} onContinue={() => connection.continueSearch()} onFresh={() => connection.continueSearch(true)} onClose={connection.closeExplorer} success={connection.success} />}
+                onStop={connection.stop} onContinue={() => connection.continueSearch()} onFresh={() => connection.continueSearch(true)} onClose={connection.cancelSearch} onReveal={connection.revealConnection} success={connection.success} />}
             {!connection.explorerOpen && !isLauncherOpen && !isSettingsOpen && !relationshipState && !stageShown && <CanvasHistory canvases={history} onSelect={commitCanvas} />}
 
             {isLauncherOpen && <WeaveLauncherOverlay

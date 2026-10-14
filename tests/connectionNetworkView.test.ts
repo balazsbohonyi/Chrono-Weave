@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { CandidateContact, ConnectionSession, ContactPerson } from '../src/services/connectionGraph';
 import {
-  buildNetworkView, closestApproachLabel, portraitSubjects, describeSide, lifespanGap, NO_FILTERS, NETWORK_FOLD_THRESHOLD, successHoldMs,
+  buildNetworkView, closestApproachLabel, portraitSubjects, describeSide, lifespanGap, NO_FILTERS, NETWORK_FOLD_THRESHOLD,
 } from '../src/services/connectionNetworkView';
 
 const provenance = { provider: 'synthetic', model: 'synthetic', version: 2, assessedAt: 1 };
@@ -161,11 +161,6 @@ test('selection focus dims everything except the selection and its neighbours', 
   assert.deepEqual([...edge.focus!.nodes].sort(), ['x', 'y']);
   assert.equal(edge.focus!.edges.size, 1);
   assert.equal(buildNetworkView(s).focus, null);
-});
-
-test('success hold is shorter with reduced motion', () => {
-  assert.equal(successHoldMs(false), 1500);
-  assert.ok(successHoldMs(true) < successHoldMs(false));
 });
 
 test('only AI-supported people are ever offered for portraits', () => {

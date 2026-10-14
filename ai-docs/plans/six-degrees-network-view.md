@@ -114,15 +114,16 @@ The explorer draws every candidate in the session — proposed, checking, accept
 ## Live behaviour
 
 - New accepted people enter beside the contact that introduced them (at their year in time mode), fade and scale in, and gently reheat the simulation at low alpha so existing nodes nudge rather than jump. With reduced motion: no animation, short synchronous settle.
-- Camera: auto-fit as the graph grows until the first user pan, zoom or drag. After that, never refit automatically. A "Fit" button and a "New contacts outside view" chip handle off-screen arrivals.
+- Camera: auto-fit as the graph grows until the first user pan, zoom or drag. After that, never refit automatically. The toolbar's Fit button brings everyone back into view (there is no "New contacts outside view" chip).
+- A crowd (6 or more people at once, or the very first people of an exploration) is seated before it is drawn: scattered over the area (rows at their year in time mode, a spiral in free mode), then settled off-screen with everyone already there held in place, so nothing jumps on screen. The layout waits for the drawing's real size (`ready`) so it is not placed for a guess and shuffled later.
 - The status bar (phase, elapsed time, "no background search") is unchanged. Still no request counts or completion percentages.
 
 ## Success hand-off
 
-- On an accepted route, settlement (weave, save, guards) runs immediately, exactly as now. Only the overlay's close is delayed.
-- The winning chain's nodes and edges light up in amber and everything else dims. A banner reads "Connected · n degrees". The chain may include people not yet visible (e.g. folded leaves), which are unfolded for the highlight.
-- After ~1.5s (`NETWORK_SUCCESS_HOLD_MS`) the overlay closes automatically and the existing canvas reveal plays. Click or Esc skips straight to the reveal. Reduced motion: static highlight for ~1s.
-- Lifecycle guards still apply. If the canvas changes during the hold, the hold is abandoned and the existing settlement rules decide what happens.
+- On an accepted route, settlement (weave, save, guards) runs immediately, exactly as now. Only the overlay's close and the reveal are deferred.
+- The winning chain's nodes and edges light up in amber and everything else dims. A banner reads "Connected · n degrees", with an amber **Reveal** button under it. The chain may include people not yet visible (e.g. folded leaves), which are unfolded for the highlight.
+- The overlay stays as it is, with no timer, and the graph stays explorable (pan, zoom, select) until the user presses **Reveal**; only then does the overlay close and the existing canvas reveal play. Clicking the graph does not reveal. Closing the overlay (✕, Back to canvas, Esc with nothing selected) leaves without playing the animation: the connection is already saved and stays in the Connection tab to replay.
+- Lifecycle guards still apply. If the canvas changes while the chain is lit, the hand-off is abandoned and the existing settlement rules decide what happens.
 
 ## Inspection panel
 
@@ -176,7 +177,7 @@ No Wikipedia or other external links. Inspection never triggers AI work.
 | `src/components/ConnectionExplorer.tsx` | Shell: header, status, footer controls, success hold; composes the parts below. |
 | `src/components/connectionNetwork/` (new) | `NetworkGraph` (SVG, camera, axis, nodes, edges), `NetworkInspector` (panel/bottom sheet), `NetworkLegend` (filter chips / Filters button). |
 | `src/styles/connectionExplorer.css` / `tokens.css` | Scoped styles; new `--color-selection` and side-tint tokens for both themes. |
-| `src/hooks/useConnection.ts` | Only change: keep the overlay open for the success hold after settlement, then close. |
+| `src/hooks/useConnection.ts` | Only change: keep the overlay open after settlement until the user presses Reveal (`revealConnection`), then close and play. |
 
 Remove `networkPosition` and the lattice. No changes to `connectionPath.ts`, `connectionGraph.ts` semantics, `connectionKnowledge.ts`, `connectionFlow.ts` settlement, `ConnectionPanel.tsx`, the reveal, or any AI prompts.
 
@@ -187,7 +188,7 @@ Remove `networkPosition` and the lattice. No changes to `connectionPath.ts`, `co
 - View model: accepted-only default; chip filters; contextual reveal appears and clears; sides/distances; unattached people; closest approach (overlap = 0, tie-breaking, hidden once connected); fold threshold and exemptions (endpoints, closest pair, selection, pins); expanded folds; success chain unfolds hidden members.
 - Simulation (seeded, fixed tick count): time-mode X stays near year targets; endpoints fixed in X; vertical-only endpoint drag; time-mode drop keeps Y and returns X; free-mode pins; mode switch retargets.
 - Portraits: only accepted people requested; unverified never requested; failures fall back.
-- Success hold: overlay closes after the hold; skip closes immediately; settlement is not delayed; canvas change during the hold abandons it.
+- Success hold: nothing happens on its own; Reveal hands over once; leaving without revealing abandons it; settlement is not delayed; canvas change while the chain is lit abandons it. The explorer shows the Reveal button only for a lit chain.
 - Existing Six Degrees, lifecycle and settlement tests keep passing. Update or remove the tests that depended on `networkPosition`.
 - `npm run typecheck` and `npm run build` pass. Check the bundle-size delta from `d3-force`.
 
@@ -197,7 +198,7 @@ Remove `networkPosition` and the lattice. No changes to `connectionPath.ts`, `co
 - Live search: arrivals, pulse, no refit after user pan, selection preserved.
 - Time/free toggle, drag/pin rules, endpoint vertical drag.
 - Edge selection is blue with no bounding rectangle; dimming; Esc ordering.
-- Success hold → canvas reveal in timeline and gallery layouts; skip.
+- Success hold → press Reveal → canvas reveal in timeline and gallery layouts; leaving without Reveal.
 - Light/dark themes, reduced motion, keyboard, narrow viewport bottom sheet and touch.
 - Portrait fallback with the network blocked.
 

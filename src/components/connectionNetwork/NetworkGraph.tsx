@@ -34,6 +34,7 @@ interface Props {
   narrow: boolean;
   reducedMotion: boolean;
   success: { degrees: number } | null;
+  onReveal: () => void;
   reveal: RevealRequest | null;
   onPinsChange: () => void;
   onToggleFold: (hostId: string) => void;
@@ -51,7 +52,7 @@ const activate = (action: () => void) => (event: React.KeyboardEvent) => {
 // so the simulation never re-renders the explorer. The camera is a transform over screen-sized content.
 const NetworkGraph: React.FC<Props> = ({
   view, endpointNames, nameOf, layout, kick, mode, onModeChange, size, onSize, selection, onSelect, portraits, narrow, reducedMotion,
-  success, reveal, onPinsChange, onToggleFold, legend,
+  success, onReveal, reveal, onPinsChange, onToggleFold, legend,
 }) => {
   const uid = useId().replace(/:/g, '');
   const svg = useRef<SVGSVGElement>(null);
@@ -64,19 +65,15 @@ const NetworkGraph: React.FC<Props> = ({
   const userMoved = useRef(false);
   // Following the graph normally keeps a readable zoom; "Fit network" asks for everything at once.
   const followAll = useRef(false);
-  // False while the camera follows at a readable zoom and part of the network is out of view.
-  const followsWhole = useRef(true);
   // While the winning chain is lit, the camera frames it, whatever else is on screen.
   const litChain = useRef<ReadonlySet<string> | null>(null);
   const classifyWheel = useRef(createWheelClassifier()).current;
-  const [outside, setOutside] = useState(false);
   const [failed, setFailed] = useState(() => new Set<string>());
   const [domain, setDomain] = useState(layout.yearDomain);
   const sizeRef = useRef(size);
   sizeRef.current = size;
   const narrowRef = useRef(narrow);
   narrowRef.current = narrow;
-  const known = useRef(new Set<string>());
 
   const apply = useCallback((next: Camera) => { cameraRef.current = next; setCamera(next); }, []);
 
@@ -114,12 +111,11 @@ const NetworkGraph: React.FC<Props> = ({
       everything: everything || !!only, readableZoom: narrowRef.current ? READABLE_ZOOM_NARROW : READABLE_ZOOM,
       minZoom: MIN_ZOOM, maxZoom: 1.25, padding: FIT_PADDING, strip: STRIP_HEIGHT,
     });
-    if (!only) followsWhole.current = result?.whole ?? true;
     return result?.camera ?? null;
   }, [layout]);
 
   const fit = useCallback(() => {
-    userMoved.current = false; followAll.current = true; setOutside(false);
+    userMoved.current = false; followAll.current = true;
     const next = fitCamera(true); if (next) apply(next);
   }, [fitCamera, apply]);
 
@@ -156,19 +152,6 @@ const NetworkGraph: React.FC<Props> = ({
     return () => observer.disconnect();
   }, [onSize]);
 
-  // New people outside the view after the user has panned or zoomed: say so instead of moving the camera.
-  const idsKey = view.nodes.map(node => node.id).join('|');
-  useEffect(() => {
-    const fresh = view.nodes.filter(node => !known.current.has(node.id)).map(node => node.id);
-    known.current = new Set(view.nodes.map(node => node.id));
-    // Following the whole network, new people are always on screen; otherwise they may land out of view.
-    if (!fresh.length || (!userMoved.current && followsWhole.current)) return;
-    const timer = setTimeout(() => {
-      if (fresh.some(id => { const at = layout.position(id); return at && !visibleOnScreen(at); })) setOutside(true);
-    }, reducedMotion ? 0 : 700);
-    return () => clearTimeout(timer);
-  }, [idsKey]);
-
   // The inspector asked to look at something; pan there only when it is off-screen.
   useEffect(() => {
     if (!reveal) return;
@@ -178,13 +161,13 @@ const NetworkGraph: React.FC<Props> = ({
     centerOn(points.reduce((sum, p) => sum + p.x, 0) / points.length, points.reduce((sum, p) => sum + p.y, 0) / points.length);
   }, [reveal?.n]);
 
-  // The chain lights up for a moment before the overlay closes: bring it into view even when the camera
-  // sits on the middle of a wider network or the user had panned away, and keep it framed while it settles.
+  // The chain lights up and stays lit until the user reveals it: bring it into view even when the camera
+  // sits on the middle of a wider network or the user had panned away, and keep it framed until they take over.
   const chainKey = success && view.chain ? JSON.stringify(view.chain.nodeIds) : '';
   useEffect(() => {
     if (!chainKey) { litChain.current = null; return; }
     litChain.current = new Set<string>(JSON.parse(chainKey));
-    userMoved.current = false; setOutside(false);
+    userMoved.current = false;
     const next = fitCamera(true, litChain.current); if (next) apply(next);
     return () => { litChain.current = null; };
   }, [chainKey]);
@@ -391,8 +374,10 @@ const NetworkGraph: React.FC<Props> = ({
       {legend}
     </div>
     </div>
-    {outside && <button type="button" className="net-outside" onClick={fit}>New contacts outside view · Fit</button>}
-    {success && <div className="net-success" role="status">Connected · {success.degrees} {success.degrees === 1 ? 'degree' : 'degrees'}<small>Opening the connection… click or press Esc to skip</small></div>}
+    {success && <div className="net-success-wrap">
+      <div className="net-success" role="status">Connected · {success.degrees} {success.degrees === 1 ? 'degree' : 'degrees'}<small>Look the chain over, then press Reveal to play it</small></div>
+      <button type="button" className="net-reveal" onClick={onReveal} autoFocus>Reveal</button>
+    </div>}
   </div>;
 };
 export default NetworkGraph;

@@ -6,10 +6,6 @@ import { pairKey } from './pathService';
 
 // Above this many visible people, dead-end leaves fold into "+n" badges.
 export const NETWORK_FOLD_THRESHOLD = 30;
-// How long the winning chain stays lit before the overlay hands over to the canvas reveal.
-export const NETWORK_SUCCESS_HOLD_MS = 1500;
-export const NETWORK_SUCCESS_HOLD_REDUCED_MS = 1000;
-export const successHoldMs = (reducedMotion: boolean) => reducedMotion ? NETWORK_SUCCESS_HOLD_REDUCED_MS : NETWORK_SUCCESS_HOLD_MS;
 
 export type ContactStatus = CandidateContact['status'];
 // Chips for the statuses that are not AI-supported; 'checking' pairs travel with 'proposed'.

@@ -39,6 +39,14 @@ test('a connected chain reads as a headline, cards from A to B, and the verified
   assert.doesNotMatch(markup, /Try again/);
 });
 
+test('the sidebar renders Markdown in the evidence next to the Why button instead of showing its symbols', () => {
+  const markup = panel({ connection: { ...connected, links: [
+    { from: a, to: m, evidence: 'In 1657 Anna sent Marco *De Ratiociniis* and a **long** letter.' }, connected.links[1]] } });
+  assert.match(markup, /<em>De Ratiociniis<\/em>/);
+  assert.match(markup, /<strong>long<\/strong>/);
+  assert.doesNotMatch(markup, /\*De Ratiociniis\*|\*\*long\*\*/);
+});
+
 const header = (connection: ActiveConnection) => renderToStaticMarkup(<ConnectionHeader connection={connection} onClose={() => {}} />);
 
 test('the connection on show is a row like a recent connection: two portraits, who is joined, the degrees, and a way to dismiss it', () => {

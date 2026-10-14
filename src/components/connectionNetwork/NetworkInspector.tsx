@@ -4,6 +4,8 @@ import {
   closestApproachLabel, describeSide, edgeId, personContacts, STATUS_LABELS, years, type NetworkEdge, type NetworkNode, type NetworkSelection, type NetworkView,
 } from '../../services/connectionNetworkView';
 import NetworkPortrait from './NetworkPortrait';
+import MarkdownContent from '../MarkdownContent';
+import { stripMarkdown } from '../../utils/plainText';
 
 interface Props {
   session: ConnectionSession | null;
@@ -27,7 +29,11 @@ interface Props {
 type Tab = 'people' | 'contacts';
 const UNVERIFIED_GROUPS = [['unresolved', 'Unresolved'], ['proposed', 'Proposed / checking'], ['blocked', 'Blocked']] as const;
 
-const excerpt = (text: string, max = 96) => text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text;
+// A clamped excerpt: Markdown in the stored text would only show as stray symbols, so it is stripped before cutting.
+const excerpt = (text: string, max = 96) => {
+  const plain = stripMarkdown(text);
+  return plain.length > max ? `${plain.slice(0, max - 1).trimEnd()}…` : plain;
+};
 const interaction = (contact: CandidateContact) => contact.assessment?.interactionType?.replace(/-/g, ' ') ?? '';
 const detailOf = (contact: CandidateContact) => contact.assessment?.evidence || contact.assessment?.uncertainty || contact.blockedReason || contact.claim || 'Awaiting assessment';
 // Accent- and case-insensitive: every word typed has to appear somewhere in the text.
@@ -94,9 +100,9 @@ const NetworkInspector: React.FC<Props> = ({ session, view, selection, portraits
         <p className={`connection-inspection-verdict is-${contact.status}`}>{STATUS_LABELS[contact.status]}{interaction(contact) && ` · ${interaction(contact)}`}{assessment?.year !== undefined && ` · ${assessment.year}`}</p>
       </div>
       <div className="net-detail-scroll no-scrollbar">
-        {contact.status === 'accepted'
-          ? <p>{assessment?.evidence}</p>
-          : <p>{contact.status === 'blocked' ? contact.blockedReason : assessment?.uncertainty || `Unverified proposal: ${contact.claim || 'awaiting assessment'}`}</p>}
+        <MarkdownContent>{(contact.status === 'accepted'
+          ? assessment?.evidence
+          : contact.status === 'blocked' ? contact.blockedReason : assessment?.uncertainty || `Unverified proposal: ${contact.claim || 'awaiting assessment'}`) ?? ''}</MarkdownContent>
         {assessment?.episode && <p>Episode: {assessment.episode}</p>}
         {assessment && <small>AI assessment · {assessment.provenance.provider} / {assessment.provenance.model} · {new Date(assessment.provenance.assessedAt).toLocaleDateString()}</small>}
       </div>

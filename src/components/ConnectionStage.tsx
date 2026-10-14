@@ -7,6 +7,7 @@ import { isRevealedAt, useConnectionReveal, type ConnectionFocusRequest, type Co
 import { useFigurePortraits } from '../hooks/useFigurePortraits';
 import { easeInOut, prefersReducedMotion, zoomCameraAt, type CanvasCamera } from '../utils/canvasCamera';
 import { createWheelClassifier } from '../utils/wheelGesture';
+import { stripMarkdown } from '../utils/plainText';
 import { bestStageColumns, layoutStage, pointAtProgress } from '../utils/connectionStageLayout';
 import FigureCard from './FigureCard';
 import ConnectionThread from './ConnectionThread';
@@ -54,6 +55,8 @@ const ConnectionStage: React.FC<Props> = ({ connection, chain, links, currentInd
   const layout = useMemo(() => layoutStage(chain.length, columns ?? undefined), [chain.length, columns]);
   const indexOf = useMemo(() => new Map(chain.map((person, index) => [person.id, index])), [chain]);
   const portraits = useFigurePortraits(chain);
+  // The captions show only the first lines of the evidence, so Markdown in it would just be stray symbols there.
+  const plainEvidence = useMemo(() => links.map(entry => stripMarkdown(entry.evidence)), [links]);
   const reduced = useState(() => prefersReducedMotion())[0];
   const [camera, setCameraState] = useState<CanvasCamera>({ x: 0, y: 0, scale: 1 });
   const cameraRef = useRef(camera);
@@ -188,7 +191,7 @@ const ConnectionStage: React.FC<Props> = ({ connection, chain, links, currentInd
         <defs><radialGradient id={gradient}>
           <stop offset="0" stopColor="rgb(var(--color-connection))" stopOpacity="0.85" /><stop offset="0.45" stopColor="rgb(var(--color-connection))" stopOpacity="0.28" /><stop offset="1" stopColor="rgb(var(--color-connection))" stopOpacity="0" />
         </radialGradient></defs>
-        <ConnectionThread segments={layout.links.map(link => link.d)} progress={progress} strokeWidth={3 / scale} />
+        <ConnectionThread segments={layout.links.map(link => link.d)} progress={progress} strokeWidth={3 / scale} extent={layout.bounds} />
         {tip && <g className="stage-tip">
           {tip.tail.map((point, index) => <circle key={index} cx={point.x} cy={point.y} r={(4.5 - index * 0.6) / scale} className="stage-tip-tail" opacity={0.7 - index * 0.13} />)}
           <circle cx={tip.at.x} cy={tip.at.y} r={30 / scale} fill={`url(#${gradient})`} />
@@ -209,7 +212,7 @@ const ConnectionStage: React.FC<Props> = ({ connection, chain, links, currentInd
         return <div key={link.index} className={`stage-caption ${shown ? 'is-shown' : ''} ${vertical ? 'is-beside' : ''}`} aria-hidden={shown ? undefined : true}
           style={{ left: link.caption.x, top: link.caption.y, width: link.caption.width, height: link.caption.height }}>
           {entry && <>
-            <p>{entry.evidence}</p>
+            <p>{plainEvidence[link.index]}</p>
             <button type="button" data-stage-control className="connection-link-why" tabIndex={shown ? 0 : -1}
               aria-label={`Why were ${entry.from.name} and ${entry.to.name} connected?`} onClick={() => explain(entry.from, entry.to, entry.contact)}>Why?</button>
           </>}

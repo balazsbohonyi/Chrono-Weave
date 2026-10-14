@@ -8,6 +8,7 @@ import { fetchBatchFigureDetails } from '../services/wikiService';
 import { prefersReducedMotion } from '../utils/canvasCamera';
 import SidebarFigureCard, { type FigureDetail } from './SidebarFigureCard';
 import NetworkPortrait from './connectionNetwork/NetworkPortrait';
+import MarkdownContent from './MarkdownContent';
 import { useNetworkPortraits } from '../hooks/useNetworkPortraits';
 import type { ContactAssessment, ConnectionSession } from '../services/connectionGraph';
 
@@ -41,7 +42,7 @@ const LinkConnector: React.FC<{ link: ConnectionLinkResult; onExplain: Connectio
         </svg>
       </span>
       <div className="connection-link-body">
-        <p className="connection-link-evidence">{link.evidence}</p>
+        <MarkdownContent className="connection-link-evidence">{link.evidence}</MarkdownContent>
         <button type="button" className="connection-link-why" onClick={() => onExplain(link.from, link.to, link.contact)}
           aria-label={`Why were ${link.from.name} and ${link.to.name} connected?`}>Why?</button>
       </div>

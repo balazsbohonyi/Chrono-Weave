@@ -17,8 +17,8 @@ test('a finished connection shows everyone, the whole thread, every caption with
   assert.equal(markup.match(/stage-card/g)?.length, 3);
   assert.doesNotMatch(markup, /is-ghost/);
   for (const number of [1, 2, 3]) assert.ok(markup.includes(`Number ${number} in the chain`), `badge ${number}`);
-  // Both links are drawn all the way: a mask and a line for each.
-  assert.equal(markup.match(/<mask /g)?.length, 2);
+  // Both links are drawn all the way: a plain line for each, with no mask left to rasterise while the stage is zoomed.
+  assert.equal(markup.match(/<mask /g), null);
   assert.equal(markup.match(/connection-thread-line/g)?.length, 2);
   assert.equal(markup.match(/stage-caption is-shown/g)?.length, 2);
   assert.match(markup, /Anna and Marco shared a workshop in Florence\./);
@@ -32,6 +32,14 @@ test('a finished connection shows everyone, the whole thread, every caption with
   // There is no row of progress dots: the sidebar's chain list is how to jump to a person.
   assert.doesNotMatch(markup, /stage-dot|People in the chain/);
   assert.ok(markup.indexOf('Replay the connection') < markup.indexOf('Close the connection'));
+});
+
+test('the clamped captions show the evidence as plain words, without Markdown symbols', () => {
+  const withMarkdown = [{ from: a, to: m, evidence: 'In 1657 Anna sent Marco *De Ratiociniis* and a **long** [letter](https://example.org).' }, links[1]];
+  const markup = renderToStaticMarkup(<ConnectionStage connection={{ nodeIds: ['a', 'm', 'b'], playId: 1, animate: false }} chain={[a, m, b]} links={withMarkdown}
+    currentIndex={null} focus={null} inset={{ top: 52, right: 0 }} canExit hidden={false} onStep={() => {}} onEnd={() => {}} onExit={() => {}} onReplay={() => {}} onExplain={() => {}} onInspect={() => {}} />);
+  assert.match(markup, /<p>In 1657 Anna sent Marco De Ratiociniis and a long letter\.<\/p>/);
+  assert.doesNotMatch(markup, /\*|https:\/\/example\.org/);
 });
 
 test('the number badge on a card corner is not clipped: the stage cards let it overflow', () => {

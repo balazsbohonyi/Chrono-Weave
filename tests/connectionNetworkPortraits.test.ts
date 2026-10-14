@@ -34,48 +34,32 @@ test('an empty request makes no lookup', async () => {
   assert.equal(result.size, 0); assert.equal(called, false);
 });
 
-function fakeTimers() {
-  const pending = new Map<number, () => void>(); let next = 1;
-  return {
-    timers: { set: (callback: () => void) => { pending.set(next, callback); return next++; }, clear: (handle: unknown) => { pending.delete(handle as number); } },
-    fire: () => { for (const [id, callback] of [...pending]) { pending.delete(id); callback(); } },
-    get size() { return pending.size; },
-  };
-}
-
-test('the success hold hands over once when its time is up', () => {
-  const fake = fakeTimers(), hold = createSuccessHold(fake.timers);
+test('the success hold waits until it is asked to reveal, then hands over once', async () => {
+  const hold = createSuccessHold();
   let handovers = 0;
-  hold.begin(1500, () => { handovers++; });
+  hold.begin(() => { handovers++; });
   assert.equal(hold.active, true);
-  fake.fire();
+  // Nothing happens on its own, however long the chain stays lit.
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(handovers, 0); assert.equal(hold.active, true);
+  assert.equal(hold.reveal(), true);
   assert.equal(handovers, 1); assert.equal(hold.active, false);
-  fake.fire(); assert.equal(handovers, 1);
+  assert.equal(hold.reveal(), false); assert.equal(handovers, 1);
 });
 
-test('skipping hands over immediately and cancels the timer', () => {
-  const fake = fakeTimers(), hold = createSuccessHold(fake.timers);
+test('abandoning drops the hand-over, as when the canvas changed or the user left without revealing', () => {
+  const hold = createSuccessHold();
   let handovers = 0;
-  hold.begin(1500, () => { handovers++; });
-  assert.equal(hold.skip(), true);
-  assert.equal(handovers, 1); assert.equal(fake.size, 0);
-  assert.equal(hold.skip(), false);
-  fake.fire(); assert.equal(handovers, 1);
-});
-
-test('abandoning drops the hand-over, as when the canvas changed during the hold', () => {
-  const fake = fakeTimers(), hold = createSuccessHold(fake.timers);
-  let handovers = 0;
-  hold.begin(1500, () => { handovers++; });
+  hold.begin(() => { handovers++; });
   hold.abandon();
-  fake.fire();
-  assert.equal(handovers, 0); assert.equal(hold.skip(), false);
+  assert.equal(hold.active, false);
+  assert.equal(hold.reveal(), false); assert.equal(handovers, 0);
 });
 
 test('a new hold replaces the previous one', () => {
-  const fake = fakeTimers(), hold = createSuccessHold(fake.timers), seen: string[] = [];
-  hold.begin(1500, () => seen.push('first'));
-  hold.begin(1500, () => seen.push('second'));
-  fake.fire();
+  const hold = createSuccessHold(), seen: string[] = [];
+  hold.begin(() => seen.push('first'));
+  hold.begin(() => seen.push('second'));
+  hold.reveal();
   assert.deepEqual(seen, ['second']);
 });

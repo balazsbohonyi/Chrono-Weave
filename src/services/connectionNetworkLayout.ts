@@ -23,6 +23,9 @@ const MIN_PIXELS_PER_YEAR = 2;
 const MAX_PIXELS_PER_YEAR = 14;
 const DEFAULT_SIZE = { width: 900, height: 600 };
 const ALPHA_MIN = 0.02;
+// This many people arriving at once (or the very first people) are seated before they are drawn instead of animating.
+const SEAT_THRESHOLD = 6;
+const SEAT_MAX_TICKS = 400;
 
 // A small seeded generator so a given graph always settles the same way (also what the tests rely on).
 export function seededRandom(seed = 0x2f6e2b1) {
@@ -88,13 +91,20 @@ export class NetworkLayout {
       neighbours.set(a, [...(neighbours.get(a) ?? []), b]); neighbours.set(b, [...(neighbours.get(b) ?? []), a]);
     }
     let added = false;
+    const fresh = new Set<string>();
+    const firstPeople = ![...this.nodes.values()].some(node => node.x !== undefined);
     for (const input of inputs) {
       const existing = this.nodes.get(input.id);
       if (existing) { existing.year = input.year; existing.radius = input.radius; existing.endpoint = input.endpoint; continue; }
       this.nodes.set(input.id, { id: input.id, year: input.year, endpoint: input.endpoint, radius: input.radius });
+      fresh.add(input.id);
       added = true;
     }
     this.updateDomain();
+    // A crowd arriving at once (a saved exploration opening, or a big round of contacts) is laid out spread over the
+    // whole area rather than beside one another, so the collision force has little to push apart.
+    const crowd = fresh.size >= SEAT_THRESHOLD;
+    if (crowd) this.scatter(inputs.filter(input => fresh.has(input.id)).map(input => this.nodes.get(input.id)!));
     for (const input of inputs) {
       const node = this.nodes.get(input.id)!;
       if (node.x !== undefined) continue;
@@ -108,9 +118,13 @@ export class NetworkLayout {
     this.simulation.nodes([...this.nodes.values()]);
     this.configureForces();
     this.applyEndpoints();
-    if (added) this.reheat(0.35);
+    if (crowd || (firstPeople && added)) this.seat(fresh);
+    else if (added) this.reheat(0.35);
     this.emit();
   }
+
+  // Redraws the screen at the layout's current positions (the layout is at rest, so nothing else would).
+  refresh() { this.emit(); }
 
   subscribe(listener: () => void) { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
 
@@ -166,6 +180,48 @@ export class NetworkLayout {
   stop() { this.simulation.stop(); }
 
   private emit() { for (const listener of this.listeners) listener(); }
+
+  // Spreads people that have no place yet: in time mode at their year, in rows above and below the middle, taken in
+  // year order so neighbours in time land in different rows; in free mode along a spiral around the middle.
+  private scatter(people: LayoutNode[]) {
+    const ordered = [...people].filter(node => node.endpoint === null).sort((a, b) => a.year - b.year || a.id.localeCompare(b.id));
+    const cx = this.width / 2, cy = this.height / 2;
+    // The two endpoints sit on the middle line, at their year (or on their side in free mode).
+    for (const node of people) if (node.endpoint !== null) { node.x = this.fixedX(node); node.y = cy; }
+    if (!ordered.length) return;
+    if (this.mode === 'time') {
+      const rowHeight = 2 * (Math.max(...ordered.map(node => node.radius)) + LABEL_ROOM) * 0.8;
+      const rows = Math.max(1, Math.floor((this.height - 2 * LABEL_ROOM) / rowHeight));
+      ordered.forEach((node, index) => {
+        // Rows alternate around the middle: 0, +1, -1, +2, -2, ...
+        const slot = index % rows, offset = slot === 0 ? 0 : (slot % 2 === 1 ? 1 : -1) * Math.ceil(slot / 2);
+        node.x = this.xOf(node.year) + (this.random() - 0.5) * 6;
+        node.y = cy + offset * rowHeight + (this.random() - 0.5) * 6;
+      });
+      return;
+    }
+    const golden = Math.PI * (3 - Math.sqrt(5));
+    ordered.forEach((node, index) => {
+      const distance = 46 * Math.sqrt(index + 1);
+      node.x = cx + distance * Math.cos(index * golden);
+      node.y = cy + distance * Math.sin(index * golden);
+    });
+  }
+
+  // Lets new people find their places before anything is drawn. The people already there stay put meanwhile
+  // (or stay where a drag pinned them), and are only given a small nudge afterwards to make room.
+  private seat(fresh: ReadonlySet<string>) {
+    const held: Array<[LayoutNode, number | null | undefined, number | null | undefined]> = [];
+    for (const node of this.nodes.values()) {
+      if (fresh.has(node.id)) continue;
+      held.push([node, node.fx, node.fy]);
+      node.fx = node.fx ?? node.x; node.fy = node.fy ?? node.y;
+    }
+    this.simulation.alpha(Math.max(this.simulation.alpha(), 0.6));
+    this.settle(SEAT_MAX_TICKS);
+    for (const [node, fx, fy] of held) { node.fx = fx; node.fy = fy; node.vx = 0; node.vy = 0; }
+    if (held.length) this.reheat(0.1);
+  }
 
   private fixedX(node: LayoutNode) {
     if (this.mode === 'time') return this.xOf(node.year);

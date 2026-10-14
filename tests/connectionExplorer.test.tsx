@@ -31,7 +31,12 @@ test('the overlay names both endpoints with their details, and shows the clock w
   assert.match(markup, /Contact exploration: Alpha to Beta/);
   assert.match(markup, /ce-endpoint is-a/); assert.match(markup, /ce-endpoint is-b/);
   assert.match(markup, /role="timer"[^>]*aria-label="0 minutes 12 seconds explored"/); assert.match(markup, /ce-timer is-running/);
-  assert.match(markup, /0:12/);
+  // Every character has a cell of its own, so a changing digit cannot move the clock.
+  assert.match(markup, /<span class="ce-digit">0<\/span><span class="ce-colon">:<\/span><span class="ce-digit">1<\/span><span class="ce-digit">2<\/span>/);
+  // The working sign is shown while the search runs, and only then.
+  assert.match(markup, /class="ce-working is-working"/);
+  assert.doesNotMatch(render(build(() => [], true), { busy: false }), /ce-working is-working/);
+  assert.match(markup, /Six Degrees of Separation · Contact exploration/);
   assert.doesNotMatch(markup, /role="status"[^>]*>(?:(?!<\/div>).)*0:12/);
 });
 
@@ -65,7 +70,7 @@ test('the default graph draws accepted people only, with the legend as the filte
   assert.doesNotMatch(markup, /Saving across reloads is unavailable/);
 });
 
-test('a verified chain is announced in the graph while the overlay holds', () => {
+test('a verified chain is announced in the graph and waits for the Reveal button', () => {
   const session = build(people => [
     { from: people[0].id, to: people[2].id, status: 'accepted', claim: '', assessment: { pair: [people[0].id, people[2].id], verdict: 'accepted', interactionType: 'meeting', evidence: 'x', provenance } },
     { from: people[2].id, to: people[1].id, status: 'accepted', claim: '', assessment: { pair: [people[2].id, people[1].id], verdict: 'accepted', interactionType: 'meeting', evidence: 'y', provenance } },
@@ -73,7 +78,11 @@ test('a verified chain is announced in the graph while the overlay holds', () =>
   session.status = 'connected';
   const markup = render(session, { success: { degrees: 2 } });
   assert.match(markup, /Connected · 2 degrees/);
+  assert.match(markup, /<button[^>]*class="net-reveal"[^>]*>Reveal<\/button>/);
+  assert.doesNotMatch(markup, /Opening the connection|click or press Esc to skip/);
   assert.match(markup, /is-chain/);
   assert.doesNotMatch(markup, /Resume search|Continue searching/);
   assert.doesNotMatch(markup, /Closest approach/);
+  // Without a lit chain there is nothing to reveal.
+  assert.doesNotMatch(render(session), /net-reveal/);
 });
