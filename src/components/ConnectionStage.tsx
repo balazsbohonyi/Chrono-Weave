@@ -13,6 +13,7 @@ import FigureCard from './FigureCard';
 import ConnectionThread from './ConnectionThread';
 import NetworkPortrait from './connectionNetwork/NetworkPortrait';
 import Tooltip from './Tooltip';
+import { SixDegreesInfoButton } from './SixDegreesInfo';
 import '../styles/connectionStage.css';
 
 interface Props {
@@ -34,6 +35,8 @@ interface Props {
   onReplay: () => void;
   onExplain: (from: HistoricalFigure, to: HistoricalFigure, contact?: ContactAssessment) => void;
   onInspect: (figure: HistoricalFigure) => void;
+  // Opens the explanation of Six Degrees of Separation.
+  onOpenInfo?: () => void;
 }
 
 // The space the title takes at the top, and a little breathing room below the cards.
@@ -47,7 +50,7 @@ const TAIL = [0.035, 0.07, 0.11, 0.16, 0.22];
 // the tip of the thread from person to person, each card lands as the thread reaches it, and its evidence appears beside
 // the link. At the end the camera pulls back and a light runs along the whole thread once. The canvas stays behind,
 // blurred. It is not a dialog: the sidebar next to it (the evidence, the Why buttons) keeps working.
-const ConnectionStage: React.FC<Props> = ({ connection, chain, links, currentIndex, focus, inset, canExit, hidden, onStep, onEnd, onExit, onReplay, onExplain, onInspect }) => {
+const ConnectionStage: React.FC<Props> = ({ connection, chain, links, currentIndex, focus, inset, canExit, hidden, onStep, onEnd, onExit, onReplay, onExplain, onInspect, onOpenInfo }) => {
   const root = useRef<HTMLElement>(null);
   const gradient = `stage-tip-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
   // How many people stand in a row is chosen once, from the stage's shape when it opens, so cards never move mid-reveal.
@@ -183,6 +186,12 @@ const ConnectionStage: React.FC<Props> = ({ connection, chain, links, currentInd
     onExplain(from, to, contact);
   };
 
+  // Like asking why, opening the explanation takes over from a reveal that is playing.
+  const openInfo = () => {
+    interrupted.current = true; revealRef.current.skip();
+    onOpenInfo?.();
+  };
+
   return <section ref={root} className={`connection-stage ${dragging ? 'is-dragging' : ''}`} data-connection-stage data-sidebar={inset.right > 0 ? 'open' : 'closed'} hidden={hidden}
     aria-label={`The connection between ${first.name} and ${last.name}`} style={{ top: inset.top, right: inset.right }} onPointerDown={onPointerDown}>
     <div className="stage-backdrop" aria-hidden="true" style={{ backgroundPosition: `${camera.x * 0.25}px ${camera.y * 0.25}px` }} />
@@ -222,12 +231,13 @@ const ConnectionStage: React.FC<Props> = ({ connection, chain, links, currentInd
 
     <header className="stage-header" data-stage-control>
       <div className="stage-title">
-        <p className="stage-kicker">Six Degrees · Connection</p>
+        <p className="stage-kicker">Six Degrees of Separation · Connection</p>
         <div className="stage-people">
           <NetworkPortrait person={first} size={36} url={first.imageUrl || portraits.get(first.id)} /><strong>{first.name}</strong>
           <span aria-hidden="true">→</span>
           <NetworkPortrait person={last} size={36} url={last.imageUrl || portraits.get(last.id)} /><strong>{last.name}</strong>
           <span className={`stage-degrees ${finished ? 'is-final' : ''}`}>{degreeLabel(chain.length - 1)} apart</span>
+          {onOpenInfo && <SixDegreesInfoButton onOpen={openInfo} plain stageControl />}
         </div>
       </div>
       <div className="stage-actions">

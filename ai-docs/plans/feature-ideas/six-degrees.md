@@ -1,6 +1,6 @@
 # Six Degrees: connect two people through personal contacts
 
-Implemented refactor, 2026-10-12. The [settled refactor specification](../six-degrees-refactor.md) records the user decisions; [validation/evaluation records](../../evaluation/six-degrees/progress.md) record actual outcomes and remaining evidence.
+Implemented refactor, 2026-10-12. The [settled refactor specification](../six-degrees/six-degrees-refactor.md) records the user decisions.
 
 Pick two people and ChronoWeave searches for a chain of **personal contacts** between them. People the accepted chain needs that are missing from the canvas are woven in, the camera flies along the chain while an amber thread draws, and the sidebar lists the chain with evidence for every link. Each link needs an independent AI assessment; unaccepted links never appear as successful connections. Production assessments use model knowledge and do not retrieve historical sources.
 
@@ -131,4 +131,4 @@ Legacy paths/contact verdicts are not imported or displayed as new Recent connec
 
 ## Verification
 
-Run bun test, npm run typecheck and npm run build. The [comparison harness](../../evaluation/six-degrees/README.md) preserves old-engine commit 88ccd35 and records real model outcomes separately from synthetic mechanics. Review returned contacts independently under the personal-interaction/named-opposition rubric. The five priority cases are mandatory reports, not assumed historical positives. No discovery-improvement claim is justified while provider availability/quota blocks comparable runs.
+Run bun test, npm run typecheck and npm run build. Review returned contacts independently under the personal-interaction/named-opposition rubric. The five priority cases are mandatory reports, not assumed historical positives. No discovery-improvement claim is justified while provider availability/quota blocks comparable runs.

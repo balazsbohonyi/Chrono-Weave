@@ -283,7 +283,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             {/* The connection on show stays put above the list that scrolls. */}
             {viewMode === 'CONNECTION' && connection?.connection && (
                 <div className="px-6 pt-4 pb-4 border-b border-border/50 bg-surface/30 flex-shrink-0">
-                    <ConnectionHeader connection={connection.connection} onClose={connection.onClose} />
+                    <ConnectionHeader connection={connection.connection} onClose={connection.onClose} onOpenInfo={connection.onOpenInfo} />
                 </div>
             )}
 

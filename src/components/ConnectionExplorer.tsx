@@ -13,6 +13,7 @@ import NetworkGraph, { type RevealRequest } from './connectionNetwork/NetworkGra
 import NetworkInspector from './connectionNetwork/NetworkInspector';
 import NetworkLegend from './connectionNetwork/NetworkLegend';
 import NetworkPortrait from './connectionNetwork/NetworkPortrait';
+import { SixDegreesInfoButton } from './SixDegreesInfo';
 import { NARROW_QUERY, nodeRadius, REDUCED_MOTION_QUERY } from './connectionNetwork/metrics';
 import '../styles/connectionExplorer.css';
 
@@ -21,12 +22,15 @@ interface Props {
   // A verified chain stays lit, and the graph stays explorable, until the user presses Reveal to play it on the canvas.
   success?: { degrees: number } | null;
   onReveal?: () => void;
+  // Opens the explanation of Six Degrees of Separation. While it is open the overlay stands back: it is inert and its Escape is the dialog's.
+  onOpenInfo?: () => void;
+  suspended?: boolean;
 }
 const NO_SELECTION: NetworkSelection = {};
 const midpoint = (person: { birthYear: number; deathYear: number }) => (person.birthYear + person.deathYear) / 2;
 
 // HERO: two endpoint anchors frame the growing contact network, separate from the timeline.
-const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onContinue, onFresh, onClose, success = null, onReveal = () => {} }) => {
+const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onContinue, onFresh, onClose, success = null, onReveal = () => {}, onOpenInfo, suspended = false }) => {
   const dialog = useRef<HTMLDivElement>(null);
   const narrow = useMediaQuery(NARROW_QUERY);
   const reducedMotion = useMediaQuery(REDUCED_MOTION_QUERY);
@@ -144,12 +148,15 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
   };
 
   return <div ref={dialog} role="dialog" aria-modal="true" aria-label={session ? `Contact exploration: ${endpointNames[0]} to ${endpointNames[1]}` : 'Opening contact exploration'}
-    className="connection-explorer" tabIndex={-1}>
+    className="connection-explorer" tabIndex={-1} inert={suspended}>
     <button type="button" className="close-button relationship-close" aria-label="Close contact exploration" onClick={onClose}>
       <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 6l12 12M6 18L18 6" /></svg>
     </button>
     <header className="connection-explorer-header">
-      <p className="connection-explorer-kicker">Six Degrees of Separation · Contact exploration</p>
+      <div className="connection-explorer-kicker-row">
+        <p className="connection-explorer-kicker">Six Degrees of Separation · Contact exploration</p>
+        {onOpenInfo && <SixDegreesInfoButton onOpen={onOpenInfo} plain />}
+      </div>
       <div className="ce-heading">
         <div className="connection-explorer-status" role="status" aria-live="polite">
           <strong>{busy ? session?.phase ?? phase ?? 'Identifying endpoint' : session?.phase ?? 'Paused'}</strong>

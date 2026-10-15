@@ -150,4 +150,4 @@ sequenceDiagram
 
 `ConnectionExplorer.tsx` renders immutable session snapshots as an SVG network, with stable positions, anchored endpoints, independent pan/zoom, evidence inspection, keyboard selection and a readable list. Inspecting during search makes no extra model/biography requests. Only a fully accepted route changes the canvas. `ConnectionPanel` and the existing timeline/gallery thread/camera reveal show the resulting chain. Why uses the dedicated accepted-record narrative and falls back to its compact evidence; it neither consults nor alters general relationship rejections.
 
-Production search is AI-only. Reference sources and old/new evaluation artifacts are confined to `ai-docs/evaluation/six-degrees/`; mocked unit/browser scenarios do not establish historical discovery success.
+Production search is AI-only; mocked unit/browser scenarios do not establish historical discovery success.

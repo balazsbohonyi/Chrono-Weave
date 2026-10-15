@@ -3,6 +3,7 @@ import type { HistoricalFigure } from '../types';
 import type { ConnectionTargetStatus } from '../services/connectionPath';
 import { formatYear } from '../utils/formatters';
 import { canonicalName } from '../utils/names';
+import { SixDegreesInfoButton } from './SixDegreesInfo';
 
 interface Props {
   source: HistoricalFigure;
@@ -16,13 +17,15 @@ interface Props {
   onPick: (figure: HistoricalFigure) => void;
   onSubmitName: (name: string) => void;
   onCancel: () => void;
+  // Opens the explanation of Six Degrees of Separation.
+  onOpenInfo?: () => void;
 }
 
 const MAX_SUGGESTIONS = 6;
 
 // The banner for choosing the other end of a chain: click a bar, or type a name. Canvas people are
 // suggested first; a name that is not on the canvas is identified by the model after Enter.
-const ConnectionPicker: React.FC<Props> = ({ source, figures, error, initialDraft, topOffset, statusFor, onPick, onSubmitName, onCancel }) => {
+const ConnectionPicker: React.FC<Props> = ({ source, figures, error, initialDraft, topOffset, statusFor, onPick, onSubmitName, onCancel, onOpenInfo }) => {
   const [draft, setDraft] = useState(initialDraft);
   const [highlight, setHighlight] = useState(-1);
   const [localError, setLocalError] = useState<string | null>(null);
@@ -68,9 +71,12 @@ const ConnectionPicker: React.FC<Props> = ({ source, figures, error, initialDraf
   const message = localError ?? error;
   return (
     <div data-connection-picker className="connection-picker" style={{ top: topOffset }} role="region" aria-label="Choose who to connect">
-      <p className="connection-picker-text">
-        Connecting from <strong>{source.name}</strong>: pick a person on the canvas or type a name. Esc to cancel.
-      </p>
+      <div className="connection-picker-heading">
+        <p className="connection-picker-text">
+          Connecting from <strong>{source.name}</strong>: pick a person on the canvas or type a name. Esc to cancel.
+        </p>
+        {onOpenInfo && <SixDegreesInfoButton onOpen={onOpenInfo} plain />}
+      </div>
       <div className="connection-picker-row">
         <input ref={input} value={draft} type="text" className="connection-picker-input" placeholder="Type a name"
           aria-label="Name of the person to connect to" aria-invalid={!!message} aria-controls="connection-picker-suggestions"

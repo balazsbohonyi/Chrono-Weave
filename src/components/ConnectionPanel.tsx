@@ -9,6 +9,7 @@ import { prefersReducedMotion } from '../utils/canvasCamera';
 import SidebarFigureCard, { type FigureDetail } from './SidebarFigureCard';
 import NetworkPortrait from './connectionNetwork/NetworkPortrait';
 import MarkdownContent from './MarkdownContent';
+import { SixDegreesInfoButton, SixDegreesInfoLink } from './SixDegreesInfo';
 import { useNetworkPortraits } from '../hooks/useNetworkPortraits';
 import type { ContactAssessment, ConnectionSession } from '../services/connectionGraph';
 
@@ -24,6 +25,8 @@ export interface ConnectionPanelProps {
   onExplain: (from: HistoricalFigure, to: HistoricalFigure, contact?: ContactAssessment) => void;
   checkpoints?: ConnectionSession[];
   onOpenCheckpoint?: (session: ConnectionSession) => void;
+  // Opens the explanation of Six Degrees of Separation.
+  onOpenInfo?: () => void;
   // The same hover actions as every other card in the sidebar.
   renderActions: (figure: HistoricalFigure) => React.ReactNode;
 }
@@ -52,7 +55,7 @@ const LinkConnector: React.FC<{ link: ConnectionLinkResult; onExplain: Connectio
 
 // The ends of the connection on show, in the same style as a row of recent connections: the two portraits overlapping,
 // who is connected, how many degrees, and a way to dismiss it. The sidebar keeps it above the scrolling list.
-export const ConnectionHeader: React.FC<{ connection: ActiveConnection; onClose: () => void }> = ({ connection, onClose }) => {
+export const ConnectionHeader: React.FC<{ connection: ActiveConnection; onClose: () => void; onOpenInfo?: () => void }> = ({ connection, onClose, onOpenInfo }) => {
   const first = connection.chain[0], last = connection.chain[connection.chain.length - 1], degrees = connection.chain.length - 1;
   const portraits = useNetworkPortraits(useMemo(() => [first, last].filter(person => !person.imageUrl).map(person => ({ id: person.id, name: person.name })), [first, last]));
   return (
@@ -62,6 +65,7 @@ export const ConnectionHeader: React.FC<{ connection: ActiveConnection; onClose:
       </span>
       <h3 className="connection-headline" aria-live="polite" aria-label={connectionHeadline(connection)}>{first.name} → {last.name}</h3>
       <span className="connection-recent-degrees"><b>{degrees}</b> {degrees === 1 ? 'degree' : 'degrees'}</span>
+      {onOpenInfo && <SixDegreesInfoButton onOpen={onOpenInfo} plain />}
       <button type="button" className="connection-close" onClick={onClose} aria-label="Hide this connection">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M6 6l12 12M6 18L18 6" /></svg>
       </button>
@@ -72,7 +76,7 @@ export const ConnectionHeader: React.FC<{ connection: ActiveConnection; onClose:
 // The Connection tab: the chain from one person to the other with the verified evidence for every
 // link, and the connections already made on this canvas.
 const ConnectionPanel: React.FC<ConnectionPanelProps> = ({ connection, currentIndex, recent, canvasIds, isBusy, onClose,
-  onReplay, onFocusPerson, onExplain, renderActions, checkpoints = [], onOpenCheckpoint }) => {
+  onReplay, onFocusPerson, onExplain, renderActions, checkpoints = [], onOpenCheckpoint, onOpenInfo }) => {
   const [details, setDetails] = useState<Map<string, FigureDetail>>(new Map());
   const chainRef = useRef<HTMLOListElement>(null);
   const known = connection?.chain ?? [];
@@ -128,6 +132,7 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({ connection, currentIn
       ) : (
         <p className="connection-empty">
           Choose <strong>Connect to…</strong> on a person to link them to anyone else through documented personal contacts.
+          {onOpenInfo && <> <SixDegreesInfoLink onOpen={onOpenInfo} /></>}
         </p>
       )}
 

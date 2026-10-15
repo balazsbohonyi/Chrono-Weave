@@ -5,7 +5,7 @@ Date: 2026-10-15.
 
 ## As implemented (read this first)
 
-**Decision:** the pre-registered live measurement (cases, A/A, paired arms, gates G1 to G5, T1 simulator, T2 replay, warm snapshots, batch benchmark) was dropped as too expensive. The changes were implemented directly and are verified by mocked tests (`bun test`, typecheck, build) and by manual use. None of the efficacy predictions in this plan or in the guide has been measured; they remain hypotheses. The measurement harness that had been built under `ai-docs/evaluation/six-degrees/` was removed.
+**Decision:** the pre-registered live measurement (cases, A/A, paired arms, gates G1 to G5, T1 simulator, T2 replay, warm snapshots, batch benchmark) was dropped as too expensive. The changes were implemented directly and are verified by mocked tests (`bun test`, typecheck, build) and by manual use. None of the efficacy predictions in this plan or in the guide has been measured; they remain hypotheses. The measurement harness that had been built for it was removed.
 
 | Stage | Where | What it does |
 | --- | --- | --- |
@@ -73,7 +73,7 @@ Source analysis: `ai-docs/guides/six-degrees-requests/optimizing-six-degrees-req
 
 ## Objective
 
-Send fewer model requests, and spend fewer seconds, per successful Six Degrees connection, without lowering the accuracy of accepted links and without weakening any invariant in `AGENTS.md` or `ai-docs/plans/six-degrees-refactor.md`: AI-only assessment, each pair judged independently with discovery claims withheld, one re-ask per promising unresolved pair per segment, the 21-link bound, cross-model reuse, explicit Continue, and no change to global concurrency policy.
+Send fewer model requests, and spend fewer seconds, per successful Six Degrees connection, without lowering the accuracy of accepted links and without weakening any invariant in `AGENTS.md` or `ai-docs/plans/six-degrees/six-degrees-refactor.md`: AI-only assessment, each pair judged independently with discovery claims withheld, one re-ask per promising unresolved pair per segment, the 21-link bound, cross-model reuse, explicit Continue, and no change to global concurrency policy.
 
 Non-goals: improving discovery success rate, changing the contact definition, adding source retrieval, touching the general Map/Expand/Follow/biography prompts or caches, and any new UI.
 
@@ -85,7 +85,7 @@ All comparisons are paired by case and repeat against the baseline engine, same 
 
 | # | Guardrail | Threshold |
 | --- | --- | --- |
-| G1 | Accepted-link precision (blind review, rubric in the eval README) | not lower than baseline by more than 5 points, pooled |
+| G1 | Accepted-link precision (blind review against the contact rules in the refactor plan) | not lower than baseline by more than 5 points, pooled |
 | G2 | The four unsupported direct-edge controls | accepted in 0 runs |
 | G3 | Chain found within twice the segment budget | not lost in more than 1 paired run in 12 |
 | G4 | Segments ending in status `error` (not quota) | not higher than baseline |
@@ -130,9 +130,9 @@ Request counts and seconds are the cost; success within budget and precision are
 | Tier | Answers | Model calls | Deterministic | Lives in |
 | --- | --- | --- | --- | --- |
 | T0 mocked tests | does each change do what it claims, and are invariants kept | none | yes | `tests/`, run by `bun test` |
-| T1 simulated worlds | request counts and rounds across thousands of searches, including the delay from filling batches | none | yes (seeded) | `ai-docs/evaluation/six-degrees/sim.ts`, run explicitly |
-| T2 offline replay | does triage keep the edges that mattered | none | yes | `ai-docs/evaluation/six-degrees/replay.ts` on exported sessions |
-| T3 live A/B | real request counts, seconds, precision, malformed-reply rates on the real model | yes, quota | no (repeated, interleaved) | `ai-docs/evaluation/six-degrees/run.ts` and a summarizer |
+| T1 simulated worlds | request counts and rounds across thousands of searches, including the delay from filling batches | none | yes (seeded) | never built (dropped) |
+| T2 offline replay | does triage keep the edges that mattered | none | yes | never built (dropped) |
+| T3 live A/B | real request counts, seconds, precision, malformed-reply rates on the real model | yes, quota | no (repeated, interleaved) | never built (dropped) |
 
 T1 and T2 are cheap filters that decide what is worth a T3 run. Only T3 supports a claim about the real model, and only for the model it ran on.
 
@@ -142,8 +142,7 @@ Each stage is its own change on this branch, in this order. Stages that edit `co
 
 ### 0. Freeze the baseline (S)
 
-- Record the baseline commit. The engine files are unchanged from `HEAD` (`b9901ca`); create a detached checkout `D:/develop/benchmarks/ChronoWeave-<sha>` with `node_modules` junctioned, as the eval README already describes, so every arm can be compared against the identical engine.
-- Add `ai-docs/evaluation/six-degrees/efficiency-cases.ts` (see "Cases").
+- Record the baseline commit. The engine files are unchanged from `HEAD` (`b9901ca`); create a detached checkout `D:/develop/benchmarks/ChronoWeave-<sha>` with `node_modules` junctioned, so every arm can be compared against the identical engine.
 - No behavior change.
 
 Gate: the baseline checkout runs the existing five priority cases with `--dry-run`.
@@ -172,12 +171,7 @@ diagnostics: {
 - Old stored sessions lack the fields; every reader treats them as absent. `ConnectionSession.version` stays 2.
 - No change to batching, limits, prompts or retries.
 
-**Harness session** (`ai-docs/evaluation/six-degrees/`):
-
-- `run.ts` gains `--arm=<name>`, `--limits=assessmentPairs=16,wallMs=360000,tasks=64`, `--repeat=N`, `--order=abba`, `--cases=<set>`, and writes one JSON line per run. It currently passes no `limits`, counts only service-method calls (`modelTasks`), and hard-codes `AbortSignal.timeout(180_000)` per case, so the outer timeout must follow `wallMs` or a raised limit is silently cut off.
-- A wire logger in the existing `globalThis.fetch` wrapper records each provider POST: kind (from the prompt's first line), start, end, status, prompt and reply characters.
-- `summarize.ts` produces the paired tables and bootstrap intervals described under "Reporting".
-- `sim.ts` (T1) and `replay.ts` (T2) skeletons.
+**Harness session**: dropped together with the live measurement (see the Decision above); there is no benchmark harness in the repository.
 
 Gate: (i) engine counters sum to `diagnostics.tasks` in every test; (ii) on a mocked transport the engine counters equal the wire log exactly; (iii) golden trace: the sequence of (kind, batch size) on the existing `fakeContacts` worlds is byte-identical before and after this stage; (iv) a live pilot of 2 cases x 2 repeats on the baseline produces the first **measured** requests-by-kind table. That table confirms or overturns the guide's inferred numbers (assessment share, re-ask share, context-change re-asks, malformed-reply rate), and the order of stages 2 to 6 is revisited if it does.
 
@@ -268,7 +262,7 @@ The 20 direct reviewed positives alone cannot test batching: each resolves in th
 
 ## Reporting
 
-- Raw per-run JSON lines and the wire logs in `ai-docs/evaluation/six-degrees/efficiency/<date>-<arm>/`; one `REPORT.md` per stage with the tables below.
+- Raw per-run JSON lines and the wire logs in a results folder per run; one `REPORT.md` per stage with the tables below.
 - Paired differences per (case, repeat), median and interquartile range, a bootstrap interval over cases, and the A/A spread. No p-values.
 - Every table lists requests by kind, HTTP calls, seconds, segments, success within 180 s, rounds to success, malformed replies, and precision, cold and warm apart.
 - Exported saved-session data (stage 7) stays out of git by default; see Decisions.
@@ -284,14 +278,14 @@ The 20 direct reviewed positives alone cannot test batching: each resolves in th
 | Stored sessions break on upgrade | New fields optional; context migration in stage 6; version unchanged |
 | The simulator flatters the change | Calibrate T1 to the **measured** numbers from the stage-A pilot (new pairs per discovery slot, unresolved share, flip rate, batch fill, requests per round), not to the lab's closed form, which was itself fitted to the Harriot run. Then treat the closed form as the thing under test: the real baseline engine in T1 must land within 10% of the pilot's requests and pair-asks per discovery round (identity and unattributed requests are outside the simulation). If not, fix the model, not the claim |
 | Quota or cost | Pilot first; one provider; stop rules above |
-| Reviewing by the same model family | Review is human or an independent source check, per the eval README |
+| Reviewing by the same model family | Review is human or an independent source check |
 
 ## Decisions needed (defaults if you say nothing)
 
 1. **Live budget.** Default: Ollama cloud only, pilot first, up to about 4 hours of runs per stage that reaches T3. Say if quota makes that wrong, or if Gemini should be measured too.
 2. **Negatives for the batch benchmark.** False-accept rate needs at least 12 pairs reviewed as having no qualifying contact. Default: I draft candidates from the reviewed people; you or another independent reviewer approves them. Without them, stage 3 measures recall, unresolved-rate drift and position effects only.
 3. **Batch size as a setting.** Default: an internal per-provider constant, not user-visible.
-4. **Exported session data.** Default: kept under `ai-docs/evaluation/six-degrees/data/`, gitignored. It holds only public names and model text, but also your canvas history.
+4. **Exported session data.** Default: kept outside version control. It holds only public names and model text, but also your canvas history.
 5. **Change granularity.** Default: one commit per stage on this branch, each with its own gate result in the message.
 6. **In-app transport counters.** Default: task-level counters plus the validation-retry delta in the app; HTTP-level counts only in the harness.
 

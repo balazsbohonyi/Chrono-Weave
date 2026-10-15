@@ -332,3 +332,6 @@
 @media (prefers-reduced-motion: reduce) {
   .connection-explorer *, .connection-explorer *::before { animation: none !important; transition: none !important; }
 }
+
+/* The kicker with the “?” that explains Six Degrees of Separation. */
+.connection-explorer-kicker-row { display: flex; align-items: center; justify-content: center; gap: 8px; }

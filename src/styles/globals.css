@@ -1475,6 +1475,7 @@ input[type=number] {
     border: 1px solid rgb(var(--color-border) / 50%); background: rgb(var(--color-surface) / 80%);
     backdrop-filter: blur(24px); box-shadow: 0 8px 28px rgb(var(--color-shadow) / 18%);
 }
+.connection-picker-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .connection-picker-text { font-size: 14px; color: rgb(var(--color-content-body)); }
 .connection-picker-text strong { color: rgb(var(--color-content-primary)); }
 .connection-picker-row { display: flex; gap: 8px; align-items: center; }

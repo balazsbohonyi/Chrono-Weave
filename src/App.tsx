@@ -30,6 +30,7 @@ import { migrateLegacyConnectionMembers } from './utils/connectionPaths';
 import { figurePerson, identifyPerson, type ContactAssessment } from './services/connectionGraph';
 import { recordedContactSection } from './services/connectionAI';
 import ConnectionStage from './components/ConnectionStage';
+import SixDegreesInfoDialog from './components/SixDegreesInfo';
 import type { WovenCanvas } from './utils/weaveConnection';
 import { isConfigValid, providerNames } from './utils/providerConfig';
 import { filterTimelineFigures } from './utils/timelineFigures';
@@ -112,6 +113,7 @@ const App: React.FC = () => {
 
     // Settings State
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+    const [isSixDegreesInfoOpen, setIsSixDegreesInfoOpen] = useState(false);
 
     const { getEffectiveConfig } = useEnvironment();
 
@@ -860,7 +862,9 @@ const App: React.FC = () => {
     // the other end of a new connection needs the canvas, so the stage steps aside (and stays as it was) while picking.
     const stageMounted = !!connection.active && !!connection.canvasConnection;
     const stageShown = stageMounted && !connection.picking;
-    const modalOpen = isLauncherOpen || !!relationshipState || popoverState.isOpen || isSettingsOpen || connection.explorerOpen;
+    const modalOpen = isLauncherOpen || !!relationshipState || popoverState.isOpen || isSettingsOpen || connection.explorerOpen || isSixDegreesInfoOpen;
+    const openSixDegreesInfo = useCallback(() => setIsSixDegreesInfoOpen(true), []);
+    const closeSixDegreesInfo = useCallback(() => setIsSixDegreesInfoOpen(false), []);
     const toggleCanvasLayout = () => {
         if (isBusy || !figures.length) return;
         setConfig(previous => ({ ...previous,
@@ -881,7 +885,7 @@ const App: React.FC = () => {
 
     return (
         <div className="relative w-screen h-screen overflow-hidden font-sans text-content-primary bg-canvas" data-canvas-wheel-scope>
-            <div className="absolute inset-0" inert={isLauncherOpen || !!relationshipState || popoverState.isOpen || isSettingsOpen || connection.explorerOpen}>
+            <div className="absolute inset-0" inert={isLauncherOpen || !!relationshipState || popoverState.isOpen || isSettingsOpen || connection.explorerOpen || isSixDegreesInfoOpen}>
             <ControlPanel
                 key={`controls-${activeCanvas?.id ?? 'empty'}`}
                 canvasPrompt={figures.length ? formatCanvasPrompt(config) : ''}
@@ -955,7 +959,7 @@ const App: React.FC = () => {
                 currentIndex={connection.currentIndex} focus={connection.focusRequest}
                 inset={{ top: hasCategoryFilters && isLegendOpen ? 114 : 52, right: isConnectionSidebarOpen && !connection.canvasConnection.animate ? 544 : 0 }}
                 canExit={!modalOpen && stageShown} onStep={connection.setCurrentIndex} onEnd={connection.endReveal} onExit={connection.close} onReplay={connection.replayActive}
-                onExplain={openConnectionExplanation} onInspect={handleInspectFigure} />}
+                onExplain={openConnectionExplanation} onInspect={handleInspectFigure} onOpenInfo={openSixDegreesInfo} />}
 
             {loading && !isLauncherOpen && (
                 <ProgressOverlay title="CONSULTING THE ARCHIVES" />
@@ -972,6 +976,7 @@ const App: React.FC = () => {
                     onPick={connection.pickFigure}
                     onSubmitName={connection.submitName}
                     onCancel={connection.exitPicking}
+                    onOpenInfo={openSixDegreesInfo}
                 />
             )}
 
@@ -995,7 +1000,7 @@ const App: React.FC = () => {
                     connection: connection.active, currentIndex: connection.canvasConnection?.animate ? null : connection.currentIndex, recent: connection.recent,
                     canvasIds, isBusy, onClose: connection.close, onReplay: connection.replay,
                     onFocusPerson: connection.focusPerson, onExplain: openConnectionExplanation,
-                    checkpoints: connection.checkpoints, onOpenCheckpoint: connection.openCheckpoint,
+                    checkpoints: connection.checkpoints, onOpenCheckpoint: connection.openCheckpoint, onOpenInfo: openSixDegreesInfo,
                 }}
                 activeTracingFigureId={relationshipState?.sourceFigure.id}
                 focusFigureId={focusFigure?.id}
@@ -1011,7 +1016,8 @@ const App: React.FC = () => {
             </div>
 
             {connection.explorerOpen && <ConnectionExplorer session={connection.exploration} phase={connection.progress?.label} busy={connection.isConnecting}
-                onStop={connection.stop} onContinue={() => connection.continueSearch()} onFresh={() => connection.continueSearch(true)} onClose={connection.cancelSearch} onReveal={connection.revealConnection} success={connection.success} />}
+                onStop={connection.stop} onContinue={() => connection.continueSearch()} onFresh={() => connection.continueSearch(true)} onClose={connection.cancelSearch} onReveal={connection.revealConnection} success={connection.success}
+                onOpenInfo={openSixDegreesInfo} suspended={isSixDegreesInfoOpen} />}
             {!connection.explorerOpen && !isLauncherOpen && !isSettingsOpen && !relationshipState && !stageShown && <CanvasHistory canvases={history} onSelect={commitCanvas} />}
 
             {isLauncherOpen && <WeaveLauncherOverlay
@@ -1046,6 +1052,8 @@ const App: React.FC = () => {
                 onInspect={figure => handleInspectFigure(figure, true)}
                 mode={popoverState.mode}
             />
+
+            {isSixDegreesInfoOpen && <SixDegreesInfoDialog onClose={closeSixDegreesInfo} />}
 
             <SettingsDialog
                 isOpen={isSettingsOpen}

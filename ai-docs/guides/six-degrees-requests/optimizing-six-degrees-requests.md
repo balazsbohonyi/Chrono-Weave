@@ -128,7 +128,7 @@ Caveats that apply to everything in this section:
 
 - `diagnostics.tasks`, `.pairs`, `.people` describe the **last segment only**. They reset on every call (`let tasks = 0`, `connectionPath.ts:86`). Do not add them up across segments. `elapsedMs` is cumulative.
 - A saved session has no event log. Anything about *order* or *task type* below is **[inferred]** from `rounds[].lastExpanded`, `attempts[].segment` and the counters.
-- Yield numbers describe one model's output. They say nothing about whether the accepted contacts are historically true. `ai-docs/evaluation/six-degrees/progress.md` states that accuracy is still unverified.
+- Yield numbers describe one model's output. They say nothing about whether the accepted contacts are historically true. Accuracy is still unverified.
 
 **All 30 saved explorations [measured]**
 
@@ -174,7 +174,7 @@ Recorded verdicts: 1,913, of which 784 accepted and 1,129 unresolved **[measured
 
 ## 6. Optimization options, ranked
 
-Invariants every option must keep (`AGENTS.md` and `ai-docs/plans/six-degrees-refactor.md`): AI-only assessment, each pair judged independently with discovery claims withheld (plan line 84), one re-ask per promising unresolved pair per segment (line 128), the 21-link bound, cross-model reuse, explicit Continue, and no change to global concurrency policy (line 178).
+Invariants every option must keep (`AGENTS.md` and `ai-docs/plans/six-degrees/six-degrees-refactor.md`): AI-only assessment, each pair judged independently with discovery claims withheld (plan line 84), one re-ask per promising unresolved pair per segment (line 128), the 21-link bound, cross-model reuse, explicit Continue, and no change to global concurrency policy (line 178).
 
 Estimates come from `03-optimization-lab.html`. Its closed-form model is calibrated to the Harriot final segment and reproduces it closely: 12.1 requests, 43.0 pair-asks and 159 s, against 12 tasks, 43 pair-assessments and 158 s measured. It is steady-state per discovery round, so a single segment can differ by a request either way. "Requests" below are the model's totals for that segment.
 
@@ -273,7 +273,7 @@ For long explorations (Chomsky to Sagan: 271 attempt records over 7 segments) as
 
 ## 9. Validation plan
 
-Use the existing harness in `ai-docs/evaluation/six-degrees/` (`run.ts`, `reviewed-cases.ts`, README for cold/warm and fixture runs).
+There is no live benchmark harness in the repository any more; one has to be built again before the live steps below can be run.
 
 1. Land A. Re-run the five priority pairs and the reviewed cases cold and warm. Record requests by kind, HTTP calls, seconds, and segments.
 2. Land B and D. Mocked tests: mixed batches keep one re-ask per pair per segment; a partial reply keeps its valid items; a second malformed reply no longer ends the run.
