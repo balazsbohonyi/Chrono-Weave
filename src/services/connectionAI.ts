@@ -9,6 +9,9 @@ export interface ContactDiscoveryRequest {
   // from both ends, each with its own goal; a source without one aims at `target`.
   sources: Array<{ person: ContactPerson; round: number; previous: ContactPerson[]; goal?: ContactPerson }>;
   target: ContactPerson; references: ContactPerson[]; limit: number;
+  // Set when nobody found so far lived between these two years, though the chain has to cross that stretch of time: the search leans on the model
+  // for contacts whose lives reach into or toward it.
+  gap?: { fromYear: number; toYear: number };
 }
 export interface ContactProposal { sourceId: string; person: Omit<ContactPerson, 'id'>; claim: string }
 export interface ContactPair { first: ContactPerson; second: ContactPerson; focused?: boolean }

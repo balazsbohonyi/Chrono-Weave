@@ -263,19 +263,63 @@ export function mergeResolvedIdentity(knowledge: ContactKnowledge, session: Conn
   alias.id = keep.id;
 }
 
+// Years between two lifespans; overlapping lifespans are 0 apart.
+export const lifespanGapYears = (a: Pick<ContactPerson, 'birthYear' | 'deathYear'>, b: Pick<ContactPerson, 'birthYear' | 'deathYear'>) =>
+  Math.max(0, Math.max(a.birthYear, b.birthYear) - Math.min(a.deathYear, b.deathYear));
+
+// The stretch of time the two sides of a search have not reached yet: the smallest distance, in years, between a person already linked to the
+// first endpoint and one already linked to the second, whose lifespans do not overlap. Nobody found so far lived in `fromYear`..`toYear`, so
+// a chain has to be built across it, and `edges` are the two people (one per side) who stand at its two ends. Null when some pair from the
+// two sides overlaps in time: then the ends are not separated by a stretch of time, and what is missing is a contact, not a period.
+export interface TemporalGap { years: number; fromYear: number; toYear: number; edges: [ContactPerson, ContactPerson] }
+export function temporalGap(first: readonly ContactPerson[], second: readonly ContactPerson[]): TemporalGap | null {
+  let best: { years: number; a: ContactPerson; b: ContactPerson } | null = null;
+  for (const a of first) for (const b of second) {
+    if (a.id === b.id) return null;
+    const years = lifespanGapYears(a, b);
+    if (years === 0) return null;
+    if (!best || years < best.years || (years === best.years && (a.id < best.a.id || (a.id === best.a.id && b.id < best.b.id)))) best = { years, a, b };
+  }
+  return best && { years: best.years, fromYear: Math.min(best.a.deathYear, best.b.deathYear), toYear: Math.max(best.a.birthYear, best.b.birthYear), edges: [best.a, best.b] };
+}
+// A stretch of time shorter than this needs no pointing out to the model: one person's lifetime of contacts bridges it without being told.
+export const GAP_HINT_MIN_YEARS = 40;
+// Sources whose lifespan is within this many years (about a generation) of the best one's distance to the gap are expanded ahead of the rest,
+// as long as they have been expanded fewer than `GAP_BAND_MAX_ROUNDS` times: the frontier rotates among the people nearest the gap.
+const GAP_BAND_YEARS = 30;
+const GAP_BAND_MAX_ROUNDS = 3;
+const reachedPeople = (session: ConnectionSession, reach: Map<string, number>) => session.people.filter(person => reach.has(person.id));
+
 // `people` is the population that decides which names are ambiguous: pass the whole shared store, never the session's people, because a
 // twin record that no session holds still keeps a route from using the name. Sources are always taken from the session.
-export function selectFrontier(session: ConnectionSession, contacts: ContactAssessment[], side: 0 | 1, count: number, people: ContactPerson[]): ContactPerson[] {
+// `gap` is the stretch of time between the two sides (`temporalGap` of the people each endpoint reaches, first endpoint's side first), when the
+// caller has already worked it out; left out, it is worked out here. With a gap, the people nearest to it come first.
+export function selectFrontier(session: ConnectionSession, contacts: ContactAssessment[], side: 0 | 1, count: number, people: ContactPerson[], gap?: TemporalGap | null): ContactPerson[] {
   const distances = routeDistances(session.endpoints[side], people, contacts, session.endpoints);
   const opposite = routeDistances(session.endpoints[1 - side], people, contacts, session.endpoints);
   const target = session.people.find(person => person.id === session.endpoints[1 - side])!;
+  const apart = gap === undefined
+    ? (side === 0 ? temporalGap(reachedPeople(session, distances), reachedPeople(session, opposite)) : temporalGap(reachedPeople(session, opposite), reachedPeople(session, distances)))
+    : gap;
+  // The person at the far end of the gap, on the other side: how far a source's life is from reaching them is how far it is from crossing the gap.
+  const farEdge = apart ? apart.edges[1 - side] : null;
   const candidates = session.people.filter(person => distances.has(person.id) && !opposite.has(person.id))
     .map(person => {
       const round = session.rounds.find(item => item.personId === person.id);
       const temporal = Math.abs((person.birthYear + person.deathYear - target.birthYear - target.deathYear) / 2);
-      return { person, round, score: distances.get(person.id)! * 2 + temporal / 200 + (round?.round ?? 0) * 3 };
+      return { person, round, score: distances.get(person.id)! * 2 + temporal / 200 + (round?.round ?? 0) * 3, toGap: farEdge ? lifespanGapYears(person, farEdge) : 0 };
     }).filter(item => (item.round?.emptyRounds ?? 0) < 2 && distances.get(item.person.id)! < MAX_CONTACT_LINKS);
-  // Rotate by least-expanded rounds first; temporal rank remains a soft preference. No monotonic constraint.
-  candidates.sort((a, b) => (a.round?.round ?? 0) - (b.round?.round ?? 0) || a.score - b.score || a.person.id.localeCompare(b.person.id));
+  const fresh = candidates.filter(item => (item.round?.round ?? 0) < GAP_BAND_MAX_ROUNDS);
+  const nearest = farEdge && fresh.length ? Math.min(...fresh.map(item => item.toGap)) : Infinity;
+  const inBand = (item: typeof candidates[number]) => !!farEdge && (item.round?.round ?? 0) < GAP_BAND_MAX_ROUNDS && item.toGap <= nearest + GAP_BAND_YEARS;
+  // The people nearest the gap first, least-expanded and nearest first among them; everyone else rotates by least-expanded rounds first,
+  // with the temporal rank as a soft preference. No monotonic constraint.
+  candidates.sort((a, b) => {
+    const aBand = inBand(a), bBand = inBand(b);
+    if (aBand !== bBand) return aBand ? -1 : 1;
+    const rounds = (a.round?.round ?? 0) - (b.round?.round ?? 0);
+    if (aBand && bBand) return rounds || a.toGap - b.toGap || a.score - b.score || a.person.id.localeCompare(b.person.id);
+    return rounds || a.score - b.score || a.person.id.localeCompare(b.person.id);
+  });
   return candidates.slice(0, count).map(item => item.person);
 }

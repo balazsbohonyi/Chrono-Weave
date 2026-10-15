@@ -4,7 +4,7 @@ import { canonicalName } from '../utils/names';
 import { getUserErrorMessage } from '../utils/userErrors';
 import { overlaps, pairKey, isNewPerson } from './pathService';
 import {
-  acceptedDistances, ambiguousBridge, blockedContact, canvasPerson, duplicateKeeper, figurePerson, identifyPerson, resolvableDuplicates, routeDistances, samePerson, selectFrontier,
+  acceptedDistances, ambiguousBridge, blockedContact, canvasPerson, duplicateKeeper, figurePerson, GAP_HINT_MIN_YEARS, identifyPerson, resolvableDuplicates, routeDistances, samePerson, selectFrontier, temporalGap,
   sessionKey, shortestContactPath, validAccepted, validPerson, mergeResolvedIdentity, emptyPairAsks, emptyRequestCounts,
   CONNECTION_REQUEST_KINDS, PAIR_ASK_REASONS,
   type AmbiguousBridge, type CandidateContact, type ContactAssessment, type ContactKnowledge, type ContactPerson, type ConnectionSession, type ConnectionRequestKind, type PairAskReason,
@@ -344,7 +344,9 @@ export async function findConnection(options: ConnectionSearchOptions): Promise<
       signal.throwIfAborted();
       const fromReach = reachOf(from.id), toReach = reachOf(to.id);
       // Both ends are expanded together: up to discoveryPeople sources from each, every source aimed at the opposite endpoint.
-      const fromSources = selectFrontier(session, knowledge.contacts, 0, limits.discoveryPeople, knowledge.people), toSources = selectFrontier(session, knowledge.contacts, 1, limits.discoveryPeople, knowledge.people);
+      // The stretch of time nobody found so far lived in, between the two sides: the people nearest to it are expanded first, and the model is told about it.
+      const gap = temporalGap(session.people.filter(p => fromReach.has(p.id)), session.people.filter(p => toReach.has(p.id)));
+      const fromSources = selectFrontier(session, knowledge.contacts, 0, limits.discoveryPeople, knowledge.people, gap), toSources = selectFrontier(session, knowledge.contacts, 1, limits.discoveryPeople, knowledge.people, gap);
       const sources = [...fromSources, ...toSources];
       const pool = pending(fromReach, toReach);
       // Waiting for more pairs pays only when a discovery follows (someone to expand, room for it and for an assessment of what it finds)
@@ -368,6 +370,7 @@ export async function findConnection(options: ConnectionSearchOptions): Promise<
       const discoveries = await task('discover', label, () => options.service.discoverPersonalContacts({
         sources: sources.map((p, i) => ({ person: p, round: rounds[i].round + 1, previous: rounds[i].proposed.flatMap(id => byId().get(id) ?? []), goal: goalOf(p) })),
         target: fromSources.length ? to : from, references, limit: limits.candidates,
+        ...(gap && gap.years >= GAP_HINT_MIN_YEARS ? { gap: { fromYear: gap.fromYear, toYear: gap.toYear } } : {}),
       }, signal), () => { discoverSources.push(sources.length); });
       for (const round of rounds) {
         let added = 0;

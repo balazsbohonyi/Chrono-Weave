@@ -1,4 +1,4 @@
-import type { CandidateContact, ConnectionSession, ContactPerson } from './connectionGraph';
+import { lifespanGapYears, type CandidateContact, type ConnectionSession, type ContactPerson } from './connectionGraph';
 import { pairKey } from './pathService';
 
 // The pure view model behind the Six Degrees network: which people and contacts are drawn for a
@@ -88,8 +88,7 @@ export interface NetworkView {
 export const edgeId = (contact: Pick<CandidateContact, 'from' | 'to'>) => pairKey(contact.from, contact.to);
 
 // Years between two lifespans; overlapping lifespans are 0 apart.
-export const lifespanGap = (a: Pick<ContactPerson, 'birthYear' | 'deathYear'>, b: Pick<ContactPerson, 'birthYear' | 'deathYear'>) =>
-  Math.max(0, Math.max(a.birthYear, b.birthYear) - Math.min(a.deathYear, b.deathYear));
+export const lifespanGap = lifespanGapYears;
 
 function distancesFrom(start: string, adjacency: Map<string, string[]>, parents?: Map<string, string>): Map<string, number> {
   const distance = new Map([[start, 0]]), queue = [start];
