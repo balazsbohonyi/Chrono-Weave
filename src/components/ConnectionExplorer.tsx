@@ -5,6 +5,7 @@ import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useNetworkPortraits } from '../hooks/useNetworkPortraits';
 import { useNetworkSimulation } from '../hooks/useNetworkSimulation';
 import type { LayoutMode } from '../services/connectionNetworkLayout';
+import { readNetworkViewPrefs, saveNetworkViewPrefs } from '../utils/networkViewPrefs';
 import {
   buildNetworkView, corridorSpine, NO_FILTERS, portraitSubjects, years, type NetworkFilters, type NetworkSelection, type UnverifiedFilter,
 } from '../services/connectionNetworkView';
@@ -31,7 +32,8 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
   const reducedMotion = useMediaQuery(REDUCED_MOTION_QUERY);
   const [selection, setSelection] = useState<NetworkSelection>(NO_SELECTION);
   const [filters, setFilters] = useState<NetworkFilters>(NO_FILTERS);
-  const [mode, setMode] = useState<LayoutMode>('time');
+  const [mode, setMode] = useState<LayoutMode>(() => readNetworkViewPrefs().mode);
+  useEffect(() => saveNetworkViewPrefs({ mode }), [mode]);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [pinned, setPinned] = useState<ReadonlySet<string>>(new Set());
   const [size, setSize] = useState({ width: 900, height: 600 });
@@ -41,7 +43,9 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
   const [sheetOpen, setSheetOpen] = useState(false);
   const [query, setQuery] = useState('');
   // The graph takes the whole body and the inspection panel steps aside. Narrow screens already give the graph all the room.
-  const [maximizedChoice, setMaximized] = useState(false);
+  // The choice is remembered, not what shows: a narrow screen never maximizes, but must not forget the choice made on a wide one.
+  const [maximizedChoice, setMaximized] = useState(() => readNetworkViewPrefs().maximized);
+  useEffect(() => saveNetworkViewPrefs({ maximized: maximizedChoice }), [maximizedChoice]);
   const maximized = maximizedChoice && !narrow;
   const [elapsed, setElapsed] = useState(session?.elapsedMs ?? 0);
   const hasSelection = !!selection.person || !!selection.edge;
@@ -123,6 +127,8 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
   const endpointPerson = (index: 0 | 1) => session?.people.find(p => p.id === session.endpoints[index]);
   const legend = view && <NetworkLegend filters={filters} counts={view.counts} onToggle={toggleFilter} narrow={narrow} />;
   const stable = session?.diagnostics.stopReason === 'work-budget' || session?.diagnostics.stopReason === 'time-budget';
+  // A search that stopped on its own limit invites the person to carry on, instead of leaving them to find the footer button.
+  const resume = !busy && !success && session && stable ? { onResume: onContinue, reason: session.diagnostics.stopReason === 'time-budget' ? 'time' as const : 'work' as const } : null;
   const minutes = Math.floor(elapsed / 60000), seconds = Math.floor(elapsed / 1000) % 60;
 
   const endpoint = (index: 0 | 1) => {
@@ -171,7 +177,7 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
         {view
           ? <NetworkGraph view={view} endpointNames={endpointNames} nameOf={name} layout={layout} kick={kick} mode={mode} onModeChange={setMode}
             size={size} onSize={resize} selection={selection} onSelect={select} portraits={portraits} narrow={narrow} reducedMotion={reducedMotion}
-            success={success} onReveal={onReveal} reveal={reveal} onPinsChange={syncPins} onToggleFold={toggleFold} legend={legend}
+            success={success} onReveal={onReveal} resume={resume} reveal={reveal} onPinsChange={syncPins} onToggleFold={toggleFold} legend={legend}
             maximized={maximized} onToggleMaximize={narrow ? undefined : toggleMaximized} />
           : <div className="net-graph"><p className="net-empty">Preparing the contact network…</p></div>}
       </section>

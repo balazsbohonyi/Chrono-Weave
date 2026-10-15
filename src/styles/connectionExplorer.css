@@ -208,6 +208,18 @@
 .connection-explorer button.net-reveal:hover { background: rgb(var(--color-connection)); filter: brightness(1.08); transform: translateY(-1px); box-shadow: 0 8px 24px rgb(0 0 0 / .3); }
 .connection-explorer button.net-reveal:active { transform: translateY(0); }
 
+/* The paused search's invitation: it drops in like the Reveal announcement, then the button breathes until it is pressed. */
+.net-resume-wrap { position: absolute; top: 76px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 12px; pointer-events: none; z-index: 3; width: min(420px, calc(100% - 32px)); }
+.net-resume { background: rgb(var(--color-connection)); color: rgb(var(--color-connection-contrast)); padding: 9px 20px; border-radius: 18px; font-weight: 700; font-size: 15px; text-align: center; box-shadow: 0 6px 20px rgb(0 0 0 / .25); animation: net-resume-drop 520ms cubic-bezier(.2, 1.3, .4, 1) both; }
+.net-resume small { display: block; margin-top: 2px; font-size: 11px; font-weight: 500; line-height: 1.35; opacity: .9; }
+.connection-explorer button.net-continue { pointer-events: auto; display: inline-flex; align-items: center; gap: 8px; background: rgb(var(--color-connection)); color: rgb(var(--color-connection-contrast)); border-color: rgb(var(--color-connection)); border-radius: 999px; padding: 10px 28px; font-size: 15px; font-weight: 800; letter-spacing: .04em; box-shadow: 0 6px 20px rgb(0 0 0 / .25);
+  transition: transform 150ms, filter 150ms; animation: net-resume-rise 520ms 160ms cubic-bezier(.2, 1.3, .4, 1) both, net-resume-breathe 2.4s 900ms ease-in-out infinite; }
+.connection-explorer button.net-continue:hover { background: rgb(var(--color-connection)); filter: brightness(1.08); transform: translateY(-1px); }
+.connection-explorer button.net-continue:active { transform: translateY(0); }
+@keyframes net-resume-drop { from { opacity: 0; transform: translateY(-14px) scale(.94); } to { opacity: 1; transform: none; } }
+@keyframes net-resume-rise { from { opacity: 0; transform: translateY(10px) scale(.9); } to { opacity: 1; transform: none; } }
+@keyframes net-resume-breathe { 0%, 100% { box-shadow: 0 6px 20px rgb(0 0 0 / .25), 0 0 0 0 rgb(var(--color-connection) / .55); } 50% { box-shadow: 0 6px 20px rgb(0 0 0 / .25), 0 0 0 12px rgb(var(--color-connection) / 0); } }
+
 /* Legend / filters */
 .net-legend { display: flex; flex-wrap: wrap; gap: 6px; }
 .connection-explorer .net-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: 11px; backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); background: rgb(var(--color-surface) / .6); color: rgb(var(--color-content-secondary)); border: 1px solid rgb(var(--color-border-strong)); }
@@ -314,6 +326,8 @@
   .connection-explorer-footer { padding: 8px 10px; flex-direction: column; align-items: flex-start; gap: 8px; }
   .net-success-wrap { top: 54px; }
   .net-success { font-size: 13px; }
+  .net-resume-wrap { top: 54px; }
+  .net-resume { font-size: 13px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .connection-explorer *, .connection-explorer *::before { animation: none !important; transition: none !important; }

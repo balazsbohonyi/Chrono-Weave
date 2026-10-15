@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { CATEGORY_BAR_TEXT_COLORS, CATEGORY_COLORS } from '../../constants';
+import { readNetworkViewPrefs, saveNetworkViewPrefs } from '../../utils/networkViewPrefs';
 import { axisTicks, type CategoryGuide, type ColumnGuide, type CorridorGuide, type LayoutMode, type NetworkLayout, type OrbitRing } from '../../services/connectionNetworkLayout';
 import {
   closestApproachLabel, describeSide, initials, STATUS_LABELS, truncateName, type NetworkNode, type NetworkSelection, type NetworkView,
@@ -36,6 +37,8 @@ interface Props {
   reducedMotion: boolean;
   success: { degrees: number } | null;
   onReveal: () => void;
+  // Set when the search stopped on its own limit and can be carried on from where it is.
+  resume?: { onResume: () => void; reason: 'time' | 'work' } | null;
   reveal: RevealRequest | null;
   onPinsChange: () => void;
   onToggleFold: (hostId: string) => void;
@@ -75,7 +78,7 @@ const activate = (action: () => void) => (event: React.KeyboardEvent) => {
 // so the simulation never re-renders the explorer. The camera is a transform over screen-sized content.
 const NetworkGraph: React.FC<Props> = ({
   view, endpointNames, nameOf, layout, kick, mode, onModeChange, size, onSize, selection, onSelect, portraits, narrow, reducedMotion,
-  success, onReveal, reveal, onPinsChange, onToggleFold, legend, maximized, onToggleMaximize,
+  success, onReveal, resume = null, reveal, onPinsChange, onToggleFold, legend, maximized, onToggleMaximize,
 }) => {
   const uid = useId().replace(/:/g, '');
   const svg = useRef<SVGSVGElement>(null);
@@ -85,7 +88,8 @@ const NetworkGraph: React.FC<Props> = ({
   // The guides of the cluster (rings) and columns (bands) layouts, each moved to its endpoint's live position.
   const ringEls = useRef(new Map<string, { anchor: string; el: SVGGElement }>());
   // Connection lines can be switched off to read just the people and their names.
-  const [showLines, setShowLines] = useState(true);
+  const [showLines, setShowLines] = useState(() => readNetworkViewPrefs().showLines);
+  useEffect(() => saveNetworkViewPrefs({ showLines }), [showLines]);
   const [rings, setRings] = useState<readonly OrbitRing[]>(() => layout.rings);
   const [columns, setColumns] = useState<readonly ColumnGuide[]>(() => layout.columns);
   // The pods of the category layout stand still; the corridor's centre line is painted between its two endpoints.
@@ -461,6 +465,14 @@ const NetworkGraph: React.FC<Props> = ({
     {success && <div className="net-success-wrap">
       <div className="net-success" role="status">Connected · {success.degrees} {success.degrees === 1 ? 'degree' : 'degrees'}<small>Look the chain over, then press Reveal to play it</small></div>
       <button type="button" className="net-reveal" onClick={onReveal} autoFocus>Reveal</button>
+    </div>}
+    {resume && !success && <div className="net-resume-wrap">
+      <div className="net-resume" role="status">Search paused<small>{resume.reason === 'time'
+        ? 'The time limit for this round was reached. The network so far is kept: carry on to explore further from here.'
+        : 'This round reached its work limit. The network so far is kept: carry on to explore further from here.'}</small></div>
+      <button type="button" className="net-continue" onClick={resume.onResume}>
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l12-7.5z" /></svg>Continue searching
+      </button>
     </div>}
   </div>;
 };

@@ -183,7 +183,7 @@ const ConnectionStage: React.FC<Props> = ({ connection, chain, links, currentInd
     onExplain(from, to, contact);
   };
 
-  return <section ref={root} className={`connection-stage ${dragging ? 'is-dragging' : ''}`} data-connection-stage hidden={hidden}
+  return <section ref={root} className={`connection-stage ${dragging ? 'is-dragging' : ''}`} data-connection-stage data-sidebar={inset.right > 0 ? 'open' : 'closed'} hidden={hidden}
     aria-label={`The connection between ${first.name} and ${last.name}`} style={{ top: inset.top, right: inset.right }} onPointerDown={onPointerDown}>
     <div className="stage-backdrop" aria-hidden="true" style={{ backgroundPosition: `${camera.x * 0.25}px ${camera.y * 0.25}px` }} />
     <div className="stage-world" style={{ transform: `translate(${camera.x}px, ${camera.y}px) scale(${scale})` }}>

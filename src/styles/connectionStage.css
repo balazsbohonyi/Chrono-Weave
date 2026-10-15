@@ -1,6 +1,9 @@
 /* The connection stage: the chain's people on a snaking path over the blurred canvas, with a glowing thread. */
 .connection-stage { position: absolute; left: 0; bottom: 0; z-index: 30; overflow: hidden; touch-action: none; user-select: none; cursor: grab;
   background: rgb(var(--color-surface) / .58); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); animation: stage-in 650ms ease-out both; }
+.connection-stage[data-sidebar='open'] { transition: right 300ms cubic-bezier(.4, 0, .2, 1); }
+/* Same curves as the sidebar (see #canvas-sidebar in globals.css). Closing runs faster (480ms vs 650ms), so the stage's edge stays ahead of the leaving sidebar and the canvas never shows between them. */
+.connection-stage[data-sidebar='closed'] { transition: right 480ms cubic-bezier(.6, -.3, .3, 1.12); }
 .connection-stage.is-dragging { cursor: grabbing; }
 .connection-stage[hidden] { display: none; }
 @keyframes stage-in { from { opacity: 0; } to { opacity: 1; } }
@@ -53,6 +56,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .connection-stage { animation: none; }
+  .connection-stage[data-sidebar] { transition-duration: 150ms; transition-timing-function: ease-in-out; }
   .stage-tip-core { animation: none; }
   .stage-card, .stage-caption, .stage-degrees, .stage-card .connection-badge { transition: none; }
   .stage-card.is-ghost { transform: none; }

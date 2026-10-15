@@ -141,7 +141,8 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({ connection, currentIn
         <section className="connection-recent" aria-label="Recent connections">
           <h4>Recent connections</h4>
           <ul>
-            {recent.map(entry => {
+            {/* `recent` is newest first and the sort is stable, so connections of the same degree stay in recency order. Which ones are kept is still decided by recency. */}
+            {[...recent].sort((a, b) => b.figures.length - a.figures.length).map(entry => {
               const first = entry.figures[0], last = entry.figures[entry.figures.length - 1];
               const isCurrent = [first.id, last.id].sort().join('|') === activeEnds;
               return (
