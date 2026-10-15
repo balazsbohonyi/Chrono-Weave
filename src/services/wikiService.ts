@@ -4,6 +4,43 @@ import { HistoricalFigure } from "../types";
 // Cache to avoid re-fetching details for the same person within the session
 const detailsCache = new Map<string, { description: string; imageUrl: string | null }>();
 
+// Wikipedia designates no page image for some articles of well-known people. Their Wikidata portrait (P18) is the
+// fallback. Special:FilePath redirects to a rendered thumbnail, so no further lookup is needed.
+const WIKIDATA_CLAIMS_CONCURRENCY = 6;
+
+const fetchWikidataPortrait = async (entityId: string): Promise<string | null> => {
+    try {
+        const params = new URLSearchParams({
+            action: 'wbgetclaims', entity: entityId, property: 'P18', format: 'json', origin: '*'
+        });
+        const response = await fetch(`https://www.wikidata.org/w/api.php?${params.toString()}`);
+        const claims: any[] = (await response.json()).claims?.P18 ?? [];
+        const usable = claims.filter(claim => claim.rank !== 'deprecated' && claim.mainsnak?.datavalue?.value);
+        const best = usable.find(claim => claim.rank === 'preferred') ?? usable[0];
+        const file = best?.mainsnak.datavalue.value;
+        return typeof file === 'string'
+            ? `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(file)}?width=400`
+            : null;
+    } catch (error) {
+        console.warn("Wikidata portrait fetch failed", error);
+        return null;
+    }
+};
+
+// Resolves entity id -> portrait URL with a small worker pool; misses are absent.
+const fetchWikidataPortraits = async (entityIds: string[]): Promise<Map<string, string>> => {
+    const portraits = new Map<string, string>();
+    const queue = [...new Set(entityIds)];
+    const worker = async () => {
+        for (let id = queue.shift(); id; id = queue.shift()) {
+            const url = await fetchWikidataPortrait(id);
+            if (url) portraits.set(id, url);
+        }
+    };
+    await Promise.all(Array.from({ length: Math.min(WIKIDATA_CLAIMS_CONCURRENCY, queue.length) }, worker));
+    return portraits;
+};
+
 // Helper to fetch images from Wikipedia in batch
 const fetchBatchWikipediaImages = async (names: string[]): Promise<Map<string, string>> => {
     const imageMap = new Map<string, string>();
@@ -19,7 +56,8 @@ const fetchBatchWikipediaImages = async (names: string[]): Promise<Map<string, s
         const params = new URLSearchParams({
             action: 'query',
             titles: titlesParam,
-            prop: 'pageimages',
+            prop: 'pageimages|pageprops',
+            ppprop: 'wikibase_item',
             format: 'json',
             pithumbsize: '400',
             origin: '*',
@@ -60,16 +98,24 @@ const fetchBatchWikipediaImages = async (names: string[]): Promise<Map<string, s
             });
 
             // 3. Extract Images using Final Title
+            const withoutThumbnail = new Map<string, string[]>(); // Wikidata entity -> input names
             Object.values(pages).forEach((page: any) => {
+                const inputs = [...nameToTitle.entries()].filter(([, title]) => title === page.title).map(([input]) => input);
                 if (page.thumbnail?.source) {
-                    // Find which input names map to this page title
-                    for (const [input, title] of nameToTitle.entries()) {
-                        if (title === page.title) {
-                            imageMap.set(input, page.thumbnail.source);
-                        }
-                    }
+                    inputs.forEach(input => imageMap.set(input, page.thumbnail.source));
+                } else if (page.pageprops?.wikibase_item && inputs.length) {
+                    withoutThumbnail.set(page.pageprops.wikibase_item, inputs);
                 }
             });
+
+            // 4. Fall back to the Wikidata portrait for articles Wikipedia gives no page image
+            if (withoutThumbnail.size > 0) {
+                const portraits = await fetchWikidataPortraits([...withoutThumbnail.keys()]);
+                for (const [entityId, inputs] of withoutThumbnail) {
+                    const url = portraits.get(entityId);
+                    if (url) inputs.forEach(input => imageMap.set(input, url));
+                }
+            }
 
         } catch (error) {
             console.warn("Batch wiki image fetch failed", error);

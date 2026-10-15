@@ -60,6 +60,9 @@ export interface NetworkViewOptions {
   threshold?: number;
   // The success hand-off: light the chain and keep all of its members unfolded.
   highlightChain?: boolean;
+  // The people of an already known chain, in order (shared identity ids): lit instead of whichever shortest accepted route is found first,
+  // as long as every step is still an accepted contact. Without it the route is the shortest accepted one between the endpoints.
+  chain?: readonly string[];
 }
 
 export interface NetworkView {
@@ -71,6 +74,9 @@ export interface NetworkView {
   // What stays at full strength; everything else dims. Null when nothing is selected.
   focus: { nodes: Set<string>; edges: Set<string> } | null;
   counts: NetworkCounts;
+  // How many accepted-contact people (the endpoints not counted) are nearer to each endpoint, by the same rule as `NetworkNode.side`.
+  // Complete: legend filters and folded "+n" leaves do not change it.
+  sides: { a: number; b: number };
   list: {
     endpoints: ContactPerson[];
     people: ContactPerson[];
@@ -98,7 +104,7 @@ function distancesFrom(start: string, adjacency: Map<string, string[]>, parents?
 
 export function buildNetworkView(session: ConnectionSession, options: NetworkViewOptions = {}): NetworkView {
   const { filters = NO_FILTERS, selection = {}, expanded = new Set<string>(), pinned = new Set<string>(),
-    threshold = NETWORK_FOLD_THRESHOLD, highlightChain = false } = options;
+    threshold = NETWORK_FOLD_THRESHOLD, highlightChain = false, chain: knownChain } = options;
   const byId = new Map(session.people.map(person => [person.id, person]));
   const [first, second] = session.endpoints;
   const known = session.candidates.filter(c => c.from !== c.to && byId.has(c.from) && byId.has(c.to));
@@ -114,6 +120,13 @@ export function buildNetworkView(session: ConnectionSession, options: NetworkVie
   if (byId.has(first) && byId.has(second) && first !== second && fromA.has(second)) {
     const nodeIds = [second];
     while (nodeIds[0] !== first) nodeIds.unshift(parents.get(nodeIds[0])!);
+    chain = { nodeIds, edgeIds: nodeIds.slice(1).map((id, i) => pairKey(nodeIds[i], id)) };
+  }
+  // A chain that is already known (a finished connection reopened) wins over the shortest route, when it still holds end to end.
+  if (knownChain && knownChain.length >= 2 && knownChain.every(id => byId.has(id)) && new Set(knownChain).size === knownChain.length
+    && [knownChain[0], knownChain[knownChain.length - 1]].every(id => id === first || id === second) && knownChain[0] !== knownChain[knownChain.length - 1]
+    && knownChain.slice(1).every((id, i) => (adjacency.get(knownChain[i]) ?? []).includes(id))) {
+    const nodeIds = knownChain[0] === first ? [...knownChain] : [...knownChain].reverse();
     chain = { nodeIds, edgeIds: nodeIds.slice(1).map((id, i) => pairKey(nodeIds[i], id)) };
   }
 
@@ -181,9 +194,15 @@ export function buildNetworkView(session: ConnectionSession, options: NetworkVie
 
   const checking = new Set<string>();
   for (const c of known) if (c.status === 'checking') { checking.add(c.from); checking.add(c.to); }
+  const sideOf = (id: string): Side => {
+    const da = fromA.get(id), db = fromB.get(id);
+    return da !== undefined && (db === undefined || da <= db) ? 'a' : db !== undefined ? 'b' : 'none';
+  };
+  const sides = { a: 0, b: 0 };
+  for (const id of supported) if (id !== first && id !== second) { const side = sideOf(id); if (side !== 'none') sides[side]++; }
   const nodes: NetworkNode[] = [...visible].filter(id => !hidden.has(id)).map(id => {
     const da = fromA.get(id), db = fromB.get(id);
-    const side: Side = da !== undefined && (db === undefined || da <= db) ? 'a' : db !== undefined ? 'b' : 'none';
+    const side = sideOf(id);
     return {
       id, person: byId.get(id)!, endpoint: id === first ? 0 : id === second ? 1 : null, side,
       distance: side === 'a' ? da! : side === 'b' ? db! : null,
@@ -216,7 +235,7 @@ export function buildNetworkView(session: ConnectionSession, options: NetworkVie
   }
   for (const edge of edges) if (filterOf(edge.status)) contacts[filterOf(edge.status)!].push(edge);
   return {
-    nodes, edges, folds, closest, chain, focus,
+    nodes, edges, folds, closest, chain, focus, sides,
     counts: { people: supported.size, contacts: accepted.length, unresolved: count('unresolved'), proposed: count('proposed'), blocked: count('blocked') },
     list: {
       endpoints: [first, second].flatMap(id => byId.get(id) ?? []),

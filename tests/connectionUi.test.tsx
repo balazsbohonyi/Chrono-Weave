@@ -91,6 +91,30 @@ test('recent connections list names and degrees, and mark the one on show', () =
   assert.doesNotMatch(panel({ connection: null, recent }), /connection-chain/);
 });
 
+test('a recent connection plays on the card and reopens its exploration from a bare icon before the degrees badge', () => {
+  const recent = [{ key: 'one', figures: [a, m, b], evidence: ['x', 'y'], createdAt: 2 }];
+  const markup = panel({ recent, onOpenExploration: () => {} });
+  const entry = markup.slice(markup.indexOf('Recent connections'));
+  // The card (its main button) is what plays the connection; the icon is a separate button, not nested in it.
+  assert.match(entry, /<button type="button" class="connection-recent-main"[^>]*>(?:(?!<\/button>).)*Anna Alpha → Bruno Beta<\/span><\/button>/);
+  assert.match(entry, /<button type="button" class="connection-open-exploration" aria-label="Open exploration">/);
+  assert.ok(entry.indexOf('connection-recent-main') < entry.indexOf('connection-open-exploration') && entry.indexOf('connection-open-exploration') < entry.indexOf('connection-recent-degrees'));
+  assert.doesNotMatch(entry, /<button[^>]*>(?:(?!<\/button>).)*<button/);
+  // Without a way to open it, the icon is not drawn.
+  assert.doesNotMatch(panel({ recent }), /connection-open-exploration/);
+});
+
+test('a paused exploration shows the same icon instead of the words Open exploration, and the whole card still opens it', () => {
+  const session = { version: 2, key: 'k', canvasId: 'c', endpoints: ['a', 'b'], candidates: [], rounds: [], attempts: {}, segment: 1, status: 'paused', phase: 'Paused', elapsedMs: 0, updatedAt: 1,
+    diagnostics: { tasks: 0, people: 0, pairs: 0 }, people: [a, b].map(f => ({ ...f, description: '', aliases: [] })) } as unknown as NonNullable<ConnectionPanelProps['checkpoints']>[number];
+  const markup = panel({ connection: null, checkpoints: [session], onOpenCheckpoint: () => {} });
+  const section = markup.slice(markup.indexOf('Paused explorations'));
+  assert.doesNotMatch(text(section), /Open exploration/);
+  assert.match(section, /class="connection-recent-main"/);
+  assert.match(section, /class="connection-open-exploration" aria-label="Open exploration"/);
+  assert.doesNotMatch(section, /connection-recent-degrees/);
+});
+
 test('the picker names the source, explains both ways to choose, and shows why a typed person cannot be chosen', () => {
   const source = person('s', 'Leonardo da Vinci', 1452, 1519);
   const near = person('n', 'Niccolo Near', 1500, 1560);

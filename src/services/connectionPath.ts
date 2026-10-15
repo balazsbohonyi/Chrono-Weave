@@ -12,7 +12,7 @@ import {
 import { formatYear } from '../utils/formatters';
 import { validationRetryCount } from './jsonResponse';
 import { withProvenance } from './connectionAI';
-import { MemoryConnectionRepository, type ConnectionRepository } from '../utils/connectionKnowledge';
+import { MemoryConnectionRepository, sessionExceedsLimits, type ConnectionRepository } from '../utils/connectionKnowledge';
 import { withAbort } from './utils';
 
 export interface ConnectionFeasibility { feasible: boolean; gapYears: number; peopleNeeded: number; message: string | null }
@@ -123,10 +123,13 @@ export async function findConnection(options: ConnectionSearchOptions): Promise<
     options.onSnapshot?.(structuredClone(session));
     options.onProgress?.({ label: session.phase });
   };
+  let savingExpected = false;
   const checkpoint = async () => {
     emit();
     try { session!.persistent = await repo.checkpoint(knowledge, session!); }
     catch { session!.persistent = false; }
+    // Saving that never worked (private browsing, no storage) has its own note; the person is told when progress is lost or cut down.
+    session!.saveIssue = session!.persistent ? (sessionExceedsLimits(session!) ? 'trimmed' : undefined) : savingExpected ? 'failed' : undefined;
     emit();
   };
   // `issued` records what the request carries, and runs only once the request is actually going out.
@@ -170,7 +173,7 @@ export async function findConnection(options: ConnectionSearchOptions): Promise<
     session.endpoints = [from.id, to.id]; // Unordered checkpoint, oriented request.
     session.segment++; session.status = 'searching'; session.error = undefined;
     session.runStartedAt = started;
-    session.persistent = repo.persistent;
+    session.persistent = repo.persistent; savingExpected = repo.persistent; session.saveIssue = undefined;
     for (const p of session.people) if (!knowledge.people.some(k => k.id === p.id)) knowledge.people.push(p);
     for (const c of session.candidates) if (c.assessment && c.status === 'accepted' && validAccepted(c.assessment, new Map(knowledge.people.map(p => [p.id, p])))
       && !knowledge.contacts.some(existing => pairKey(...existing.pair) === pairKey(...c.assessment!.pair) && existing.verdict === 'accepted')) knowledge.contacts.push(c.assessment);

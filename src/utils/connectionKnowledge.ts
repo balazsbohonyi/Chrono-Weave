@@ -6,7 +6,8 @@ import { pairKey } from '../services/pathService';
 
 export const CONNECTION_DATABASE = 'chronoweave-six-degrees-v2';
 const STORE = 'knowledge';
-export const KNOWLEDGE_LIMITS = { people: 5000, contacts: 12000, sessions: 30, sessionPeople: 1024, sessionPairs: 4096, checkpointAgeMs: 30 * 24 * 60 * 60 * 1000 };
+// A saved session may hold as many people and contacts as the shared store does; a longer search is cut down to that (`fitSession`), not refused.
+export const KNOWLEDGE_LIMITS = { people: 5000, contacts: 12000, sessions: 30, sessionPeople: 5000, sessionPairs: 12000, checkpointAgeMs: 30 * 24 * 60 * 60 * 1000 };
 interface State { version: 2; knowledge: ContactKnowledge; sessions: ConnectionSession[] }
 export interface ConnectionRepository {
   readonly persistent: boolean;
@@ -81,6 +82,33 @@ function recoverDiagnostics(d: ConnectionDiagnostics): ConnectionDiagnostics {
       ? { total: { segments: t.segments, requests: totalRequests, pairAsks: totalPairAsks, elapsedMs: t.elapsedMs } } : {}),
   };
 }
+// A checkpoint may carry something that is not a session at all (it then only stores the knowledge); that is left for `recoverSession` to refuse.
+export const sessionExceedsLimits = (session: Pick<ConnectionSession, 'people' | 'candidates'>) =>
+  Array.isArray(session?.people) && Array.isArray(session?.candidates)
+  && (session.people.length > KNOWLEDGE_LIMITS.sessionPeople || session.candidates.length > KNOWLEDGE_LIMITS.sessionPairs);
+
+// What a checkpoint saves of a search that has outgrown the limits: the endpoints, the accepted network and everything that explains it
+// stay; of the rest, blocked pairs are dropped first, then proposals, then undecided ones. When people have to go, those left with no
+// contact and no round of their own leave first, the oldest of them before the newest. Time, rounds and counters are untouched, so
+// a long search is saved smaller instead of not at all. A session within the limits comes back as it is.
+export function fitSession(session: ConnectionSession): ConnectionSession {
+  if (!sessionExceedsLimits(session)) return session;
+  const rank: Record<string, number> = { accepted: 0, checking: 1, unresolved: 2, proposed: 3, blocked: 4 };
+  const kept = new Set(session.candidates.map((candidate, index) => ({ candidate, index }))
+    .sort((a, b) => (rank[a.candidate.status] ?? 3) - (rank[b.candidate.status] ?? 3) || a.index - b.index)
+    .slice(0, KNOWLEDGE_LIMITS.sessionPairs).map(item => item.candidate));
+  const tier = new Map<string, number>();
+  const mark = (id: string, value: number) => { if (value < (tier.get(id) ?? Infinity)) tier.set(id, value); };
+  for (const id of session.endpoints) mark(id, 0);
+  for (const candidate of kept) for (const id of [candidate.from, candidate.to]) mark(id, candidate.status === 'accepted' ? 1 : 2);
+  for (const round of session.rounds) mark(round.personId, 3);
+  const people = new Set([...session.people].map((p, index) => ({ p, index }))
+    .sort((a, b) => (tier.get(a.p.id) ?? 4) - (tier.get(b.p.id) ?? 4) || b.index - a.index)
+    .slice(0, KNOWLEDGE_LIMITS.sessionPeople).map(item => item.p.id));
+  return { ...session, people: session.people.filter(p => people.has(p.id)),
+    candidates: session.candidates.filter(candidate => kept.has(candidate) && people.has(candidate.from) && people.has(candidate.to)) };
+}
+
 export function recoverSession(raw: unknown): ConnectionSession | null {
   try {
     const s = raw as ConnectionSession;
@@ -130,7 +158,7 @@ export class MemoryConnectionRepository implements ConnectionRepository {
     const retainedPeople = [...people.values()].sort((a, b) => Number(important.has(b.id)) - Number(important.has(a.id))).slice(0, KNOWLEDGE_LIMITS.people);
     const retainedIds = new Set(retainedPeople.map(p => p.id));
     this.state.knowledge = { people: retainedPeople, contacts: keep.filter(c => c.pair.every(id => retainedIds.has(id))) };
-    const checkpoint = recoverSession(session);
+    const checkpoint = recoverSession(fitSession(session));
     const newer = this.state.sessions.find(s => s.key === checkpoint?.key && (s.runStartedAt ?? 0) > (checkpoint?.runStartedAt ?? 0));
     if (checkpoint && !newer) this.state.sessions = [checkpoint, ...this.state.sessions.filter(s => s.key !== checkpoint.key && !checkpoint.retiredKeys?.includes(s.key))]
       .filter(s => s.updatedAt >= Date.now() - KNOWLEDGE_LIMITS.checkpointAgeMs).slice(0, KNOWLEDGE_LIMITS.sessions);
@@ -181,7 +209,7 @@ export class IndexedConnectionRepository extends MemoryConnectionRepository {
   async checkpoint(knowledge: ContactKnowledge, session: ConnectionSession): Promise<boolean> {
     await this.ready;
     const write = this.writes.then(async () => {
-      if (!recoverSession(session)) return false;
+      if (!recoverSession(fitSession(session))) return false;
       this.merge(knowledge, session);
       if (!this.available || !this.db) return false;
       try {

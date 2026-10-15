@@ -270,11 +270,9 @@ const Sidebar: React.FC<SidebarProps> = ({
                             className={tabClass(viewMode === 'CONNECTION')}
                         >
                             Connections
-                            {connection?.connection && (
-                                <span className={badgeClass(viewMode === 'CONNECTION')}>
-                                    {connection.connection.chain.length - 1}
-                                </span>
-                            )}
+                            <span className={badgeClass(viewMode === 'CONNECTION')}>
+                                {connection?.recent.length ?? 0}
+                            </span>
                         </button>
                     )}
                 </div>

@@ -14,15 +14,19 @@ import type { Side } from './connectionNetworkView';
 export type LayoutMode = 'time' | 'free' | 'cluster' | 'columns' | 'category' | 'corridor';
 // `side`, `distance` and `parent` come from the view model (accepted links from the nearest endpoint), `category` is the person's field
 // and `spine` their place along the corridor (null when they are not on it); only the arranged layouts read them.
+// `clearance` is how far beyond its disc a person's drawing reaches (the "+n" badge of a folded person), so the free zone around an
+// endpoint keeps that out as well.
 export interface LayoutInput {
-  id: string; year: number; endpoint: 0 | 1 | null; radius: number;
+  id: string; year: number; endpoint: 0 | 1 | null; radius: number; clearance?: number;
   side?: Side; distance?: number | null; parent?: string | null; category?: string; spine?: number | null;
 }
 export interface LayoutLinkInput { a: string; b: string }
 export interface LayoutNode extends SimulationNodeDatum {
-  id: string; year: number; endpoint: 0 | 1 | null; radius: number; side: Side; distance: number | null; parent: string | null;
+  id: string; year: number; endpoint: 0 | 1 | null; radius: number; clearance: number; side: Side; distance: number | null; parent: string | null;
   category: string; spine: number | null;
 }
+// The round space kept free around an endpoint on the time line and in the free layout.
+export interface FreeZone { id: string; x: number; y: number; radius: number }
 type Link = SimulationLinkDatum<LayoutNode>;
 interface Point { x: number; y: number }
 
@@ -30,11 +34,16 @@ const MARGIN = 90;
 const LABEL_ROOM = 28;
 // The time axis has a spacing of its own instead of being squeezed into whatever width the drawing has:
 // a short span gets this much room per year, a long span gets less (down to a floor), and the camera
-// pans and zooms over the result. 2.2 reference widths is roughly 2.4 times the old fit-to-width spacing.
+// pans and zooms over the result. The years are spread twice as far apart as they first were (4.4 reference widths), so a person is
+// placed by their year across a wider band and the picture grows more horizontal than tall; the axis labels keep the same years
+// (`TICK_MIN_SPACING` doubled with it), so their distance doubles too.
 const TIME_REFERENCE_WIDTH = 1000;
-const TIME_SPREAD = 2.2;
-const MIN_PIXELS_PER_YEAR = 2;
-const MAX_PIXELS_PER_YEAR = 14;
+const TIME_SPREAD = 4.4;
+const MIN_PIXELS_PER_YEAR = 4;
+const MAX_PIXELS_PER_YEAR = 28;
+export const TICK_MIN_SPACING = 140;
+// Contacts on the time line pull toward each other; with the years spread twice as far apart the old pull (0.08) would drag people about twice as far off their year, so it is lowered to keep them where they were.
+const TIME_LINK_STRENGTH = 0.03;
 const DEFAULT_SIZE = { width: 900, height: 600 };
 const ALPHA_MIN = 0.02;
 // This many people arriving at once (or the very first people) are seated before they are drawn instead of animating.
@@ -72,6 +81,23 @@ const CORRIDOR_RIB_GAP = 36;
 const CORRIDOR_MIN_LENGTH = 560;
 // The anchor of offsets that are measured from the fixed middle of the layout (it follows nobody).
 const CENTER = '@center';
+// Free zone: nobody but the endpoint stands within this many endpoint radii of an endpoint's middle (and nobody's whole drawing
+// reaches into it), so the two endpoints are easy to find in a crowd. When the endpoints are so close that the two zones would
+// overlap, both shrink equally, down to a floor.
+const ZONE_FACTOR = 3;
+const ZONE_MIN_SCALE = 0.5;
+
+// Pushes a person whose disc (plus `reach`) enters `zone` out to its rim: straight away from the endpoint, or (`vertical`, the time
+// line, where the place along the axis is a year) straight up or down to the rim. Null when the person is already clear.
+// `bias` (1 or -1) picks the side when the person is exactly on the endpoint's middle line.
+export function pushOutOfZone(point: Point, zone: Pick<FreeZone, 'x' | 'y' | 'radius'>, reach: number, vertical: boolean, bias = 1): Point | null {
+  const min = zone.radius + reach, dx = point.x - zone.x, dy = point.y - zone.y, distance = Math.hypot(dx, dy);
+  if (distance >= min) return null;
+  if (vertical) return { x: point.x, y: zone.y + (dy === 0 ? bias : Math.sign(dy)) * Math.sqrt(min * min - dx * dx) };
+  if (distance === 0) return { x: zone.x + bias * min, y: zone.y };
+  return { x: zone.x + dx / distance * min, y: zone.y + dy / distance * min };
+}
+const tieBreak = (id: string) => { let hash = 0; for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) | 0; return hash % 2 === 0 ? 1 : -1; };
 
 // A small seeded generator so a given graph always settles the same way (also what the tests rely on).
 export function seededRandom(seed = 0x2f6e2b1) {
@@ -544,12 +570,13 @@ export class NetworkLayout {
     for (const input of inputs) {
       const existing = this.nodes.get(input.id);
       const side = input.side ?? 'none', distance = input.distance ?? null, parent = input.parent ?? null, category = input.category ?? '', spine = input.spine ?? null;
+      const clearance = input.clearance ?? 0;
       if (existing) {
         regrouped ||= existing.side !== side || existing.distance !== distance || existing.parent !== parent || existing.category !== category || existing.spine !== spine;
-        Object.assign(existing, { year: input.year, radius: input.radius, endpoint: input.endpoint, side, distance, parent, category, spine });
+        Object.assign(existing, { year: input.year, radius: input.radius, clearance, endpoint: input.endpoint, side, distance, parent, category, spine });
         continue;
       }
-      this.nodes.set(input.id, { id: input.id, year: input.year, endpoint: input.endpoint, radius: input.radius, side, distance, parent, category, spine });
+      this.nodes.set(input.id, { id: input.id, year: input.year, endpoint: input.endpoint, radius: input.radius, clearance, side, distance, parent, category, spine });
       fresh.add(input.id);
       added = true;
     }
@@ -573,6 +600,7 @@ export class NetworkLayout {
     this.simulation.nodes([...this.nodes.values()]);
     this.configureForces();
     this.applyEndpoints();
+    this.keepClear();
     if (crowd || (firstPeople && added)) this.seat(fresh);
     else if (added || (regrouped && this.arranged)) this.reheat(this.arranged ? 0.55 : 0.35);
     this.emit();
@@ -585,15 +613,18 @@ export class NetworkLayout {
 
   step(): boolean {
     if (this.dragging === null && this.simulation.alpha() <= ALPHA_MIN) return false;
-    this.simulation.tick();
+    this.tick();
     this.emit();
     return true;
   }
 
+  // One step of the simulation, then everybody is put back out of the endpoints' free zones.
+  private tick() { this.simulation.tick(); this.keepClear(); }
+
   // Runs to rest in one go. Used for reduced motion and by the tests.
   settle(maxTicks = 400) {
     let ticks = 0;
-    while (ticks < maxTicks && this.simulation.alpha() > ALPHA_MIN) { this.simulation.tick(); ticks++; }
+    while (ticks < maxTicks && this.simulation.alpha() > ALPHA_MIN) { this.tick(); ticks++; }
     this.emit();
     return ticks;
   }
@@ -611,8 +642,9 @@ export class NetworkLayout {
   // Only on the time line do the two endpoints slide just vertically (their place on the axis is theirs); in the free layouts they go anywhere.
   dragTo(id: string, x: number, y: number) {
     const node = this.nodes.get(id); if (!node || this.dragging !== id) return;
-    node.fx = this.movesAlongX(node) ? x : this.home(node).x;
-    node.fy = y;
+    const held = this.clampDrag(node, x, y);
+    node.fx = this.movesAlongX(node) ? held.x : this.home(node).x;
+    node.fy = held.y;
   }
   dragEnd(id: string) {
     const node = this.nodes.get(id); if (this.dragging === id) this.dragging = null;
@@ -703,6 +735,63 @@ export class NetworkLayout {
     for (const [node, fx, fy] of held) { node.fx = fx; node.fy = fy; node.vx = 0; node.vy = 0; }
     // Groups can shift a lot when somebody arrives, so the arranged layouts give them a real push toward their new places.
     if (held.length) this.reheat(this.arranged ? 0.6 : 0.1);
+  }
+
+  // The space kept free around each endpoint on the time line and in the free layout (none in the arranged layouts, which have
+  // slots of their own). It is `ZONE_FACTOR` endpoint radii wide, and both zones shrink together, to a floor, when the endpoints
+  // are too close for the two to stand apart.
+  get freeZones(): FreeZone[] {
+    if (this.arranged) return [];
+    const ends = [...this.nodes.values()].filter(node => node.endpoint !== null && (node.fx ?? node.x) !== undefined && (node.fy ?? node.y) !== undefined)
+      .sort((a, b) => a.endpoint! - b.endpoint!);
+    const zones = ends.map(node => ({ id: node.id, x: (node.fx ?? node.x)!, y: (node.fy ?? node.y)!, radius: ZONE_FACTOR * node.radius }));
+    if (zones.length === 2) {
+      const scale = Math.min(1, Math.max(ZONE_MIN_SCALE, Math.hypot(zones[0].x - zones[1].x, zones[0].y - zones[1].y) / (zones[0].radius + zones[1].radius)));
+      for (const zone of zones) zone.radius *= scale;
+    }
+    return zones;
+  }
+
+  // Puts everybody (the held people too) back outside the free zones: straight up or down on the time line, where the place along the
+  // axis is a year, and straight away from the endpoint in the free layout. The person being dragged follows the pointer to the rim instead.
+  private keepClear() {
+    const zones = this.freeZones; if (!zones.length) return;
+    const vertical = this.mode === 'time';
+    for (const node of this.nodes.values()) {
+      if (node.endpoint !== null || this.dragging === node.id) continue;
+      let x = node.fx ?? node.x, y = node.fy ?? node.y; if (x === undefined || y === undefined) continue;
+      let moved = false;
+      // Leaving one zone could, in a tight spot, enter the other, so go round twice.
+      for (let pass = 0; pass < 2; pass++) {
+        let settled = true;
+        for (const zone of zones) {
+          const out = pushOutOfZone({ x, y }, zone, node.radius + node.clearance, vertical, tieBreak(node.id));
+          if (out) { x = out.x; y = out.y; moved = true; settled = false; }
+        }
+        if (settled) break;
+      }
+      if (!moved) continue;
+      if (node.fx != null) node.fx = x;
+      if (node.fy != null) node.fy = y;
+      node.x = x; node.y = y; node.vx = 0; node.vy = 0;
+    }
+  }
+
+  // Where a dragged person may go: not into a free zone (so they stop at the rim), and an endpoint not so near the other that the zones
+  // would meet at their smallest.
+  private clampDrag(node: LayoutNode, x: number, y: number): Point {
+    if (this.arranged) return { x, y };
+    if (node.endpoint === null) {
+      let at = { x, y };
+      for (const zone of this.freeZones) at = pushOutOfZone(at, zone, node.radius + node.clearance, false, tieBreak(node.id)) ?? at;
+      return at;
+    }
+    const other = [...this.nodes.values()].find(candidate => candidate.endpoint !== null && candidate.id !== node.id);
+    const ox = other && (other.fx ?? other.x), oy = other && (other.fy ?? other.y);
+    if (!other || ox === undefined || oy === undefined) return { x, y };
+    const apart = ZONE_MIN_SCALE * ZONE_FACTOR * (node.radius + other.radius);
+    const time = this.mode === 'time';
+    return pushOutOfZone({ x: time ? this.home(node).x : x, y }, { x: ox, y: oy, radius: apart }, 0, time, tieBreak(node.id)) ?? { x, y };
   }
 
   // Whether dragging may change a node's place along the axis: always, except for the endpoints on the time line.
@@ -804,7 +893,7 @@ export class NetworkLayout {
     sim.force('plan', arranged ? this.planForce : null);
     sim.force('collide', forceCollide<LayoutNode>(node => node.radius + LABEL_ROOM).strength(0.9));
     sim.force('charge', time || arranged ? null : forceManyBody<LayoutNode>().strength(-320).distanceMax(500));
-    sim.force('link', forceLink<LayoutNode, Link>(this.links).id(node => node.id).distance(time ? 70 : 120).strength(time ? 0.08 : arranged ? 0.005 : 0.5));
+    sim.force('link', forceLink<LayoutNode, Link>(this.links).id(node => node.id).distance(time ? 70 : 120).strength(time ? TIME_LINK_STRENGTH : arranged ? 0.005 : 0.5));
     sim.velocityDecay(0.45);
   }
 }

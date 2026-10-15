@@ -16,7 +16,7 @@ type Drag = { pointerId: number; start: Point; moved: boolean };
 const SIDEBAR_WIDTH = 544; // Sidebar's w-[34rem] at the application's 16px base size.
 
 const GalleryCanvas: React.FC<CanvasProps> = ({ figures, modalActive, highlightedFigureIds, focusedFigureId,
-  isSearchFocusActive = false, newlyDiscoveredIds, onDiscover, onTrace, onInspect, onRelationship,
+  isSearchFocusActive = false, onDiscover, onTrace, onInspect, onRelationship,
   isFollowingFigure = false,
   isDiscovering = false, onCanvasInteraction, isBusy = false, selectedCategories,
   isLegendCollapsed, seedFigureId, isSidebarOpen = false, relationshipSourceId, initialCamera, onCameraChange, onToggleLayout,
@@ -310,7 +310,7 @@ const GalleryCanvas: React.FC<CanvasProps> = ({ figures, modalActive, highlighte
             isSource={figure.id === seedFigureId || isPickingSource} data-figure-id={figure.id}
             aria-label={pickingSource ? `Connect ${pickingSource.name} to ${figure.name}` : `Actions for ${figure.name}`}
             aria-disabled={pickingSource ? isDimmed || isPickingSource : undefined}
-            className={`gallery-card ${isFocused ? 'gallery-focused' : ''} ${newlyDiscoveredIds?.has(figure.id) ? 'gallery-new' : ''} ${isChained ? 'gallery-connected' : ''} ${isChained && connectionCurrentId === figure.id ? 'gallery-current' : ''}`}
+            className={`gallery-card ${isFocused ? 'gallery-focused' : ''} ${isChained ? 'gallery-connected' : ''} ${isChained && connectionCurrentId === figure.id ? 'gallery-current' : ''}`}
             style={{ left: x, top: y, width: GALLERY_CARD_WIDTH, height: GALLERY_CARD_HEIGHT,
               opacity: isGhosted ? 0.07 : isDimmed ? 0.15 : 1, filter: isDimmed ? 'grayscale(1)' : undefined }}
             badge={isChained && connection ? { number: chainIndex + 1, scale: Math.min(2.5, Math.max(1, 1 / camera.scale)) } : undefined}

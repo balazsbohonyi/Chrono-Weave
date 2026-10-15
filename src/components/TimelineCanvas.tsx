@@ -40,7 +40,6 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
   highlightedFigureIds,
   focusedFigureId,
   isSearchFocusActive = false,
-  newlyDiscoveredIds = new Set<string>(),
   onDiscover,
   onTrace,
   onInspect,
@@ -721,7 +720,6 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
           const left = (figure.birthYear - startYear) * BASE_PIXELS_PER_YEAR;
           const top = level * ROW_HEIGHT + 60; 
 
-          const isNew = newlyDiscoveredIds.has(figure.id);
           const isFocused = focusedFigureId === figure.id;
           const isHighlighted = highlightedFigureIds.includes(figure.id);
           const isEvent = figure.category === 'EVENTS';
@@ -780,9 +778,6 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
 
               if (relationshipSourceId === figure.id) {
                   shadowClass = "shadow-xl z-50 ring-4 ring-accent-border";
-
-              } else if (isNew && !(connectionIds.has(figure.id) && !pickingSource)) {
-                  shadowClass = "shadow-md z-30";
               }
           }
 

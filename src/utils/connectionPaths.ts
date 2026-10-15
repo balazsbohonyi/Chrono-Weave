@@ -31,6 +31,10 @@ export interface ConnectionPathEntry {
   evidence: string[];
   createdAt: number;
   contacts?: import('../services/connectionGraph').ContactAssessment[];
+  // The shared identities of the people on the chain, in the same order as `figures`, and their records: what the exploration of this
+  // connection is rebuilt from when the saved search itself is gone.
+  identityIds?: string[];
+  people?: ContactPerson[];
 }
 
 // One entry per unordered pair of endpoints, so a reversed request replays the same chain.
@@ -94,8 +98,9 @@ function resolve(key: string, saved: SavedPath, figures: Map<string, HistoricalF
   const identities = new Map(saved.people.map(p => [p.id, p]));
   if (!chain.every((p, i) => samePerson(p, identities.get(saved.identityIds[i])!))) return null;
   return reverse
-    ? { key, figures: [...chain].reverse(), evidence: [...saved.evidence].reverse(), createdAt: saved.createdAt, contacts: saved.contacts ? [...saved.contacts].reverse() : undefined }
-    : { key, figures: chain, evidence: saved.evidence, createdAt: saved.createdAt, contacts: saved.contacts };
+    ? { key, figures: [...chain].reverse(), evidence: [...saved.evidence].reverse(), createdAt: saved.createdAt, contacts: saved.contacts ? [...saved.contacts].reverse() : undefined,
+      identityIds: [...saved.identityIds].reverse(), people: saved.people }
+    : { key, figures: chain, evidence: saved.evidence, createdAt: saved.createdAt, contacts: saved.contacts, identityIds: saved.identityIds, people: saved.people };
 }
 
 // The saved chain between two people, oriented so it starts at `first` (reversed when it was found the other way round).

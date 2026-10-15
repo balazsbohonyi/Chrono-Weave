@@ -36,6 +36,16 @@ test('the dialog explains the original idea, the twist across centuries, how lin
   assert.match(markup, /aria-label="Close"/);
 });
 
+test('the two pictures sit inside the twist, between its two paragraphs, and not above the first section', () => {
+  const markup = renderToStaticMarkup(<SixDegreesInfoDialog onClose={() => {}} />);
+  const at = (needle: string) => markup.indexOf(needle);
+  assert.equal(markup.match(/class="sdi-diagrams"/g)?.length, 1);
+  // The original idea comes straight after the title, then the twist: its first paragraph, the pictures, then the paragraph on overlapping lives.
+  assert.ok(at('sdi-title') < at('The original idea') && at('The original idea') < at('The twist here'));
+  assert.ok(at('The twist here') < at('The two ends do not have to belong') && at('The two ends do not have to belong') < at('sdi-diagrams'));
+  assert.ok(at('sdi-diagrams') < at('Time is crossed by a chain of overlapping lives') && at('Time is crossed by a chain of overlapping lives') < at('sdi-example'));
+});
+
 test('every example link overlaps in time, as the twist says', () => {
   const { people } = SIX_DEGREES_INFO.example;
   assert.equal(SIX_DEGREES_INFO.example.links.length, people.length - 1);

@@ -1,4 +1,5 @@
 import { canvasPerson, figurePerson, identifyPerson, sessionKey, samePerson, validAccepted, validPerson, type ConnectionSession } from './connectionGraph';
+import { pairKey } from './pathService';
 import type { ConnectionRepository } from '../utils/connectionKnowledge';
 import type {
   CanvasConfig, ClusterPlacement, DiscoveryClusterState, FigureCategory, HistoricalFigure, IAIService,
@@ -70,6 +71,31 @@ export interface ConnectionFlowEffects {
   // Back to choosing the other end, with a message and the typed text kept.
   failPicking: (message: string) => void;
   notify: (message: string, type: 'success' | 'info' | 'error') => void;
+}
+
+// The exploration of a connection that was already made, to look it over again. It is the saved search of that pair when the shared store
+// still has it and it still holds every link of the chain; otherwise a small one is rebuilt from what the saved connection itself carries
+// (the people of the chain and the accepted evidence of each link). Either way it is a finished exploration: `chain` names the lit people.
+export async function finishedExploration({ repository, canvasId, entry }: {
+  repository: ConnectionRepository; canvasId: string; entry: ConnectionPathEntry;
+}): Promise<{ session: ConnectionSession; chain: string[] } | null> {
+  const ids = entry.identityIds, contacts = entry.contacts, people = entry.people;
+  if (!ids || ids.length < 2 || !contacts || contacts.length !== ids.length - 1 || !people) return null;
+  const endpoints: [string, string] = [ids[0], ids[ids.length - 1]];
+  const key = sessionKey(canvasId, endpoints[0], endpoints[1]);
+  const finished = { status: 'connected' as const, phase: 'Accepted chain found', endpoints };
+  const stored = await repository.loadSession(key);
+  const holdsChain = (session: ConnectionSession) => contacts.every(contact => session.candidates.some(candidate => candidate.status === 'accepted' && pairKey(candidate.from, candidate.to) === pairKey(...contact.pair)))
+    && ids.every(id => session.people.some(person => person.id === id));
+  if (stored && holdsChain(stored)) return { session: { ...stored, ...finished }, chain: ids };
+  const chainPeople = ids.flatMap(id => people.find(person => person.id === id) ?? []);
+  if (chainPeople.length !== ids.length) return null;
+  return {
+    session: { version: 2, key, canvasId, endpoints, people: chainPeople,
+      candidates: contacts.map(contact => ({ from: contact.pair[0], to: contact.pair[1], claim: '', status: 'accepted' as const, assessment: contact })),
+      rounds: [], attempts: {}, segment: 1, ...finished, elapsedMs: 0, updatedAt: entry.createdAt, persistent: repository.persistent, diagnostics: { tasks: 0, people: 0, pairs: 0 } },
+    chain: ids,
+  };
 }
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;

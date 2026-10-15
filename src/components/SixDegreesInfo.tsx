@@ -126,11 +126,14 @@ export const SixDegreesInfoDialog: React.FC<{ onClose: () => void }> = ({ onClos
         <div className="sdi-scroll no-scrollbar">
           <p className="sdi-kicker">How it works</p>
           <h2 id={titleId} className="sdi-title">{SIX_DEGREES_INFO.title}</h2>
-          <Diagrams />
           {SIX_DEGREES_INFO.sections.map(section => (
             <section key={section.title} className="sdi-section">
               <h3>{section.title}</h3>
-              {section.body.map(paragraph => <p key={paragraph}>{paragraph}</p>)}
+              {section.body.map((paragraph, index) => <React.Fragment key={paragraph}>
+                {/* The two pictures belong to the twist: they come before the paragraph that says time is crossed by a chain of overlapping lives. */}
+                {section.title === 'The twist here' && index === 1 && <Diagrams />}
+                <p>{paragraph}</p>
+              </React.Fragment>)}
               {section.title === 'The twist here' && (
                 <div className="sdi-example">
                   <p>{example.caption}</p>

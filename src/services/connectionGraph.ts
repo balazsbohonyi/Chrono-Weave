@@ -59,6 +59,9 @@ export interface ConnectionSession {
   persistent?: boolean;
   retiredKeys?: string[];
   runStartedAt?: number;
+  // Set by a running search (never saved): 'trimmed' when the saved copy had to leave out the least useful unverified contacts to fit,
+  // 'failed' when the latest progress could not be saved although saving worked before.
+  saveIssue?: 'trimmed' | 'failed';
 }
 
 export function validPerson(person: Pick<HistoricalFigure, 'name' | 'birthYear' | 'deathYear' | 'category'>): boolean {

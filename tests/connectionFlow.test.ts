@@ -1,7 +1,7 @@
 import { saveTestConnectionPath as saveConnectionPath } from './connectionFixtures';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { decideConnectionStart, runConnectionSearch, settleConnection, savedConnectionView, type CanvasState, type ConnectionFlowEffects } from '../src/services/connectionFlow';
+import { decideConnectionStart, finishedExploration, runConnectionSearch, settleConnection, savedConnectionView, type CanvasState, type ConnectionFlowEffects } from '../src/services/connectionFlow';
 import { findConnection } from '../src/services/connectionPath';
 import { MemoryConnectionRepository } from '../src/utils/connectionKnowledge';
 import { listConnectionPaths, readConnectionPath,  wovenFigureIds } from '../src/utils/connectionPaths';
@@ -72,4 +72,45 @@ test('cancelled or stale search has no canvas side effects or error toast', asyn
 test('events and invalid identities are refused, distant real people remain eligible', () => {
   const storage = new MemoryStorage(); assert.equal(decideConnectionStart(A, { figure: { ...B, category: 'EVENTS' } }, [A, B], storage).kind, 'refuse');
   assert.equal(decideConnectionStart(A, { figure: person('Ancient', -1000, -900) }, [A, B], storage).kind, 'search');
+});
+
+// A connection that was made can be reopened as an exploration: the saved search when the store still has it, otherwise one rebuilt from the saved path.
+async function madeConnection() {
+  const repository = new MemoryConnectionRepository(), storage = new MemoryStorage(), r = recorder();
+  const result = await findConnection({ service: fakeContacts([[A, M], [M, N], [N, B]]).service, from: A, to: B, figures: [A, B], signal: new AbortController().signal, repository, canvasId: 'one' });
+  settleConnection({ result, request: { from: A, to: B }, storage, effects: r.effects });
+  return { repository, storage, figures: r.canvas.figures };
+}
+test('a finished connection reopens as its saved exploration, with the chain it was made of lit', async () => {
+  const { repository, storage, figures } = await madeConnection();
+  const entry = readConnectionPath(storage, figures, A.id, B.id)!;
+  const opened = (await finishedExploration({ repository, canvasId: 'one', entry }))!;
+  assert.ok(opened);
+  assert.equal(opened.session.status, 'connected');
+  assert.deepEqual(opened.session.endpoints, [opened.chain[0], opened.chain[3]]);
+  assert.equal(opened.chain.length, 4);
+  const names = opened.chain.map(id => opened.session.people.find(p => p.id === id)!.name);
+  assert.deepEqual(names, [A.name, M.name, N.name, B.name]);
+  assert.equal(opened.session.candidates.filter(c => c.status === 'accepted').length, 3);
+  // The other way round: the same exploration, its chain and endpoints turned the same way.
+  const reversed = (await finishedExploration({ repository, canvasId: 'one', entry: readConnectionPath(storage, figures, B.id, A.id)! }))!;
+  assert.deepEqual(reversed.chain, [...opened.chain].reverse());
+  assert.deepEqual(reversed.session.endpoints, [opened.chain[3], opened.chain[0]]);
+});
+test('when the saved search is gone, or no longer holds the chain, the exploration is rebuilt from the saved connection', async () => {
+  const { storage, figures } = await madeConnection();
+  const entry = readConnectionPath(storage, figures, A.id, B.id)!;
+  const rebuilt = (await finishedExploration({ repository: new MemoryConnectionRepository(), canvasId: 'one', entry }))!;
+  assert.ok(rebuilt);
+  assert.equal(rebuilt.session.status, 'connected'); assert.equal(rebuilt.session.people.length, 4);
+  assert.deepEqual(rebuilt.session.candidates.map(c => c.status), ['accepted', 'accepted', 'accepted']);
+  assert.ok(rebuilt.session.candidates.every(c => c.assessment?.verdict === 'accepted'));
+  assert.deepEqual(rebuilt.chain, entry.identityIds);
+  // A later search of the same pair that holds none of the links does not pass for the connection.
+  const other = new MemoryConnectionRepository(), stray = { ...rebuilt.session, candidates: [], status: 'paused' as const };
+  await other.checkpoint({ people: stray.people, contacts: [] }, stray);
+  const fallback = (await finishedExploration({ repository: other, canvasId: 'one', entry }))!;
+  assert.equal(fallback.session.status, 'connected'); assert.equal(fallback.session.candidates.length, 3);
+  // Without the identities a connection was saved with there is nothing to open.
+  assert.equal(await finishedExploration({ repository: other, canvasId: 'one', entry: { ...entry, identityIds: undefined } }), null);
 });

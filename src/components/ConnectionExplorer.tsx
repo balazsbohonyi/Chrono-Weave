@@ -13,24 +13,34 @@ import NetworkGraph, { type RevealRequest } from './connectionNetwork/NetworkGra
 import NetworkInspector from './connectionNetwork/NetworkInspector';
 import NetworkLegend from './connectionNetwork/NetworkLegend';
 import NetworkPortrait from './connectionNetwork/NetworkPortrait';
+import Tooltip from './Tooltip';
 import { SixDegreesInfoButton } from './SixDegreesInfo';
-import { NARROW_QUERY, nodeRadius, REDUCED_MOTION_QUERY } from './connectionNetwork/metrics';
+import { foldBadgeReach, NARROW_QUERY, nodeRadius, REDUCED_MOTION_QUERY } from './connectionNetwork/metrics';
 import '../styles/connectionExplorer.css';
 
 interface Props {
   session: ConnectionSession | null; phase?: string; busy: boolean; onStop: () => void; onContinue: () => void; onFresh: () => void; onClose: () => void;
   // A verified chain stays lit, and the graph stays explorable, until the user presses Reveal to play it on the canvas.
   success?: { degrees: number } | null;
+  // The people of the connection when a finished one is reopened, in order: that chain is the one lit (instead of the shortest accepted route).
+  chain?: readonly string[] | null;
+  // Set when a connection that was already made is reopened to explore: the degrees take the arrow's place between the endpoints, the chain is lime
+  // in the graph (nothing else changes), Reveal takes the place of the phase text in the header, and the search buttons are gone.
+  solved?: { degrees: number } | null;
   onReveal?: () => void;
   // Opens the explanation of Six Degrees of Separation. While it is open the overlay stands back: it is inert and its Escape is the dialog's.
   onOpenInfo?: () => void;
   suspended?: boolean;
 }
 const NO_SELECTION: NetworkSelection = {};
+const SAVE_ISSUE_TEXT = {
+  failed: 'The latest progress of this search could not be saved. Reopening it later may show an older copy, with less time and fewer people.',
+  trimmed: 'This search is larger than a saved copy can hold in full. The saved copy keeps the endpoints, the accepted network, and as many of the other contacts as fit; the least useful unverified ones are left out.',
+};
 const midpoint = (person: { birthYear: number; deathYear: number }) => (person.birthYear + person.deathYear) / 2;
 
 // HERO: two endpoint anchors frame the growing contact network, separate from the timeline.
-const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onContinue, onFresh, onClose, success = null, onReveal = () => {}, onOpenInfo, suspended = false }) => {
+const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onContinue, onFresh, onClose, success = null, chain = null, solved = null, onReveal = () => {}, onOpenInfo, suspended = false }) => {
   const dialog = useRef<HTMLDivElement>(null);
   const narrow = useMediaQuery(NARROW_QUERY);
   const reducedMotion = useMediaQuery(REDUCED_MOTION_QUERY);
@@ -69,18 +79,22 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
   const resetKey = session?.key ?? '';
   useEffect(() => { setSelection(NO_SELECTION); setExpanded(new Set()); setPinned(new Set()); setReveal(null); setSheetOpen(false); setQuery(''); }, [resetKey]);
 
-  const view = useMemo(() => session ? buildNetworkView(session, { filters, selection, expanded, pinned, highlightChain: !!success }) : null,
-    [session, filters, selection, expanded, pinned, success]);
+  const view = useMemo(() => session ? buildNetworkView(session, { filters, selection, expanded, pinned, highlightChain: !!success, chain: chain ?? undefined }) : null,
+    [session, filters, selection, expanded, pinned, success, chain]);
 
   const endpoints = useMemo(() => view?.nodes.filter(node => node.endpoint !== null).map(node => node.person) ?? [], [view]);
   const bounds = useMemo<[number, number]>(() => endpoints.length
     ? [Math.min(...endpoints.map(person => person.birthYear)), Math.max(...endpoints.map(person => person.deathYear))] : [1500, 1600], [endpoints]);
   const inputs = useMemo(() => {
     const spine = new Map((view ? corridorSpine(view) : []).map((id, index) => [id, index]));
-    return view?.nodes.map(node => ({
-      id: node.id, year: midpoint(node.person), endpoint: node.endpoint, radius: nodeRadius(node.endpoint !== null, narrow),
-      side: node.side, distance: node.distance, parent: node.parent, category: node.person.category, spine: spine.get(node.id) ?? null,
-    })) ?? [];
+    const folded = new Set(view?.folds.map(fold => fold.hostId));
+    return view?.nodes.map(node => {
+      const radius = nodeRadius(node.endpoint !== null, narrow);
+      return {
+        id: node.id, year: midpoint(node.person), endpoint: node.endpoint, radius, clearance: folded.has(node.id) ? foldBadgeReach(radius) : 0,
+        side: node.side, distance: node.distance, parent: node.parent, category: node.person.category, spine: spine.get(node.id) ?? null,
+      };
+    }) ?? [];
   }, [view, narrow]);
   const links = useMemo(() => view?.edges.map(edge => ({ a: edge.from, b: edge.to })) ?? [], [view]);
   const { layout, kick } = useNetworkSimulation({ resetKey, inputs, links, bounds, mode, size, ready: measured, reducedMotion });
@@ -132,7 +146,7 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
   const legend = view && <NetworkLegend filters={filters} counts={view.counts} onToggle={toggleFilter} narrow={narrow} />;
   const stable = session?.diagnostics.stopReason === 'work-budget' || session?.diagnostics.stopReason === 'time-budget';
   // A search that stopped on its own limit invites the person to carry on, instead of leaving them to find the footer button.
-  const resume = !busy && !success && session && stable ? { onResume: onContinue, reason: session.diagnostics.stopReason === 'time-budget' ? 'time' as const : 'work' as const } : null;
+  const resume = !busy && !success && !solved && session && stable ? { onResume: onContinue, reason: session.diagnostics.stopReason === 'time-budget' ? 'time' as const : 'work' as const } : null;
   const minutes = Math.floor(elapsed / 60000), seconds = Math.floor(elapsed / 1000) % 60;
 
   const endpoint = (index: 0 | 1) => {
@@ -147,6 +161,21 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
     </div>;
   };
 
+  // How many people each endpoint has gathered (the endpoints themselves not counted), with the endpoint's portrait, in the footer.
+  const sideCount = (index: 0 | 1) => {
+    const person = endpointPerson(index);
+    if (!person || !view) return null;
+    const count = index === 0 ? view.sides.a : view.sides.b;
+    const other = endpointNames[index === 0 ? 1 : 0];
+    const text = `${count} ${count === 1 ? 'person' : 'people'} closer to ${person.name} than to ${other}, through accepted contacts. The two endpoints are not counted.`;
+    return <Tooltip key={index} text={text} multiline>
+      <span className={`ce-side is-${index === 0 ? 'a' : 'b'}`} role="img" tabIndex={0} aria-label={text}>
+        <span className="ce-side-portrait"><NetworkPortrait person={person} size={32} url={portraits.get(person.id)} /><b className="net-end-badge" aria-hidden="true">{index === 0 ? 'A' : 'B'}</b></span>
+        <strong className="ce-side-count" aria-hidden="true">{count}</strong>
+      </span>
+    </Tooltip>;
+  };
+
   return <div ref={dialog} role="dialog" aria-modal="true" aria-label={session ? `Contact exploration: ${endpointNames[0]} to ${endpointNames[1]}` : 'Opening contact exploration'}
     className="connection-explorer" tabIndex={-1} inert={suspended}>
     <button type="button" className="close-button relationship-close" aria-label="Close contact exploration" onClick={onClose}>
@@ -159,10 +188,19 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
       </div>
       <div className="ce-heading">
         <div className="connection-explorer-status" role="status" aria-live="polite">
-          <strong>{busy ? session?.phase ?? phase ?? 'Identifying endpoint' : session?.phase ?? 'Paused'}</strong>
-          {!busy && !success && <span>No background search</span>}
+          {solved
+            ? <button type="button" className="net-reveal net-reveal-header" onClick={onReveal}>
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l12-7.5z" /></svg>Reveal</button>
+            : <strong>{busy ? session?.phase ?? phase ?? 'Identifying endpoint' : session?.phase ?? 'Paused'}</strong>}
+          {!busy && !success && !solved && <span>No background search</span>}
+          {session?.saveIssue && <Tooltip text={SAVE_ISSUE_TEXT[session.saveIssue]} multiline>
+            <span className="ce-save-warning" role="status" tabIndex={0} aria-label={SAVE_ISSUE_TEXT[session.saveIssue]}>
+              {session.saveIssue === 'failed' ? 'Latest progress not saved' : 'Saved copy is trimmed'}</span>
+          </Tooltip>}
         </div>
-        {session ? <div className="ce-endpoints">{endpoint(0)}<span className="ce-arrow" aria-hidden="true">→</span>{endpoint(1)}</div>
+        {session ? <div className="ce-endpoints">{endpoint(0)}{solved
+          ? <span className="ce-degrees" aria-label={`${solved.degrees} ${solved.degrees === 1 ? 'degree' : 'degrees'} of separation`}><b>{solved.degrees}</b> {solved.degrees === 1 ? 'degree' : 'degrees'}</span>
+          : <span className="ce-arrow" aria-hidden="true">→</span>}{endpoint(1)}</div>
           : <p className="ce-opening">Opening contact exploration</p>}
         <div className="ce-clock">
           <span className={`ce-working ${busy ? 'is-working' : ''}`} aria-hidden="true">
@@ -184,7 +222,7 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
         {view
           ? <NetworkGraph view={view} endpointNames={endpointNames} nameOf={name} layout={layout} kick={kick} mode={mode} onModeChange={setMode}
             size={size} onSize={resize} selection={selection} onSelect={select} portraits={portraits} narrow={narrow} reducedMotion={reducedMotion}
-            success={success} onReveal={onReveal} resume={resume} reveal={reveal} onPinsChange={syncPins} onToggleFold={toggleFold} legend={legend}
+            success={success} solved={solved} onReveal={onReveal} resume={resume} reveal={reveal} onPinsChange={syncPins} onToggleFold={toggleFold} legend={legend}
             maximized={maximized} onToggleMaximize={narrow ? undefined : toggleMaximized} />
           : <div className="net-graph"><p className="net-empty">Preparing the contact network…</p></div>}
       </section>
@@ -192,10 +230,11 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
         open={sheetOpen || hasSelection} onSelect={selectFromPanel} onUnpin={unpin} onDismiss={dismissSheet} onBackToList={backToList} query={query} onQueryChange={setQuery} />
     </div>
     <footer className="connection-explorer-footer">
+      <div className="ce-footer-info" role="group" aria-label="People found on each side">{view && session && <>{sideCount(0)}{sideCount(1)}</>}</div>
       <p>{!narrow && 'Drag or two-finger scroll to pan · wheel or pinch to zoom · drag people to pin · '}Only accepted contacts can form a chain. Up to 20 intermediate people.</p>
       <div>
         {narrow && <button type="button" onClick={() => setSheetOpen(open => !open)} aria-expanded={sheetOpen}>Overview</button>}
-        {success ? null : busy ? <button type="button" className="connection-explorer-primary" onClick={onStop}>Stop search</button>
+        {success || solved ? null : busy ? <button type="button" className="connection-explorer-primary" onClick={onStop}>Stop search</button>
           : session && <><button type="button" className="connection-explorer-primary" onClick={onContinue}>{stable ? 'Continue searching' : 'Resume search'}</button><button type="button" onClick={onFresh}>Start a new search</button></>}
         <button type="button" onClick={onClose}>Back to canvas</button>
       </div>

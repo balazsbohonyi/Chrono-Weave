@@ -147,8 +147,8 @@ test('years keep their own spacing: wider than a fit to the drawing, and not cha
 test('the spacing eases off for very long spans but never collapses, and caps for very short ones', () => {
   const long = new NetworkLayout(), short = new NetworkLayout();
   long.setBounds(-400, 1950); short.setBounds(1900, 1910);
-  assert.equal(long.pixelsPerYear, 2);
-  assert.equal(short.pixelsPerYear, 14);
+  assert.equal(long.pixelsPerYear, 4);
+  assert.equal(short.pixelsPerYear, 28);
 });
 
 test('axis steps follow the zoom: centuries far out, decades up close', () => {

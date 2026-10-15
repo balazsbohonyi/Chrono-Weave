@@ -12,8 +12,12 @@
 .connection-explorer-status { display: flex; flex-direction: column; gap: 2px; justify-self: start; min-width: 0; font-size: 14px; }
 .connection-explorer-status strong { overflow-wrap: anywhere; }
 .connection-explorer-status span { font-size: 12px; color: rgb(var(--color-content-secondary)); }
+.connection-explorer-status .ce-save-warning { color: rgb(var(--color-danger-text)); font-weight: 700; cursor: help; }
 .ce-endpoints { display: flex; align-items: center; justify-content: center; gap: 22px; min-width: 0; }
 .ce-arrow { font-size: 24px; color: rgb(var(--color-content-secondary)); }
+/* The degrees of a solved connection stand between the two endpoints where the arrow would be, as on the sidebar's connection cards. */
+.ce-degrees { display: inline-flex; align-items: baseline; gap: 4px; padding: 3px 14px; border-radius: 9999px; font-size: 13px; font-weight: 700; white-space: nowrap; color: rgb(var(--color-connection)); background: rgb(var(--color-connection) / 12%); border: 1px solid rgb(var(--color-connection) / 40%); }
+.ce-degrees b { font-size: 18px; font-weight: 800; line-height: 1.2; }
 .ce-endpoint { display: flex; align-items: center; gap: 14px; min-width: 0; }
 .ce-endpoint-portrait { position: relative; display: inline-flex; flex: none; }
 .ce-endpoint-portrait .net-portrait { border: 3px solid rgb(var(--color-connection)); box-shadow: 0 6px 18px rgb(var(--color-shadow) / .22); }
@@ -167,7 +171,7 @@
 .net-node:focus-visible .net-select-ring { opacity: 1; stroke-dasharray: 5 4; }
 .net-pulse { fill: none; stroke: rgb(var(--color-connection)); stroke-width: 2; stroke-dasharray: 2 3; opacity: .8; transform-box: fill-box; transform-origin: center; animation: net-pulse 1.4s ease-out infinite; }
 @keyframes net-pulse { from { transform: scale(.85); opacity: .9; } to { transform: scale(1.25); opacity: 0; } }
-.net-node.is-chain .net-ring { stroke: rgb(var(--color-connection)); stroke-width: 5.5; }
+.net-node.is-chain .net-ring { stroke: rgb(var(--color-chain-path)); stroke-width: 5.5; }
 .net-fold rect { fill: rgb(var(--color-surface)); stroke: rgb(var(--color-border-strong)); stroke-width: 1.5; }
 .net-fold text { fill: rgb(var(--color-content-primary)); font-size: 11px; font-weight: 700; pointer-events: none; }
 .net-fold:hover rect, .net-fold:focus-visible rect { stroke: rgb(var(--color-selection)); }
@@ -185,7 +189,11 @@
 .net-edge.is-selected .net-edge-line { stroke-width: 4; }
 .net-edge.is-selected .net-edge-halo { opacity: .25; }
 .net-edge:focus-visible .net-edge-line { stroke: rgb(var(--color-selection)); stroke-width: 4; stroke-dasharray: 6 4; }
-.net-edge.is-chain .net-edge-line { stroke: rgb(var(--color-connection)); stroke-width: 5; stroke-dasharray: none; }
+.net-edge.is-chain .net-edge-line { stroke: rgb(var(--color-chain-path)); stroke-width: 5; stroke-dasharray: none; }
+/* A solved connection reopened to explore: every other line recedes (accepted ones go neutral, all at 30% strength), so the lime chain is what the eye finds.
+   A line the person is looking at (selected, or touching the selected person) keeps its own colour. */
+.net-graph.is-solved .net-edge:not(.is-chain) .net-edge-line { opacity: .3; }
+.net-graph.is-solved .net-edge.is-accepted:not(.is-chain):not(.is-selected):not(.is-incident) .net-edge-line { stroke: rgb(var(--color-content-muted)); }
 .net-gap-line { stroke: rgb(var(--color-content-muted)); stroke-width: 2; stroke-dasharray: 1 7; stroke-linecap: round; }
 .net-gap-hit { stroke: transparent; stroke-width: 14; pointer-events: stroke; }
 
@@ -207,6 +215,8 @@
 .connection-explorer button.net-reveal { pointer-events: auto; background: rgb(var(--color-connection)); color: rgb(var(--color-connection-contrast)); border-color: rgb(var(--color-connection)); border-radius: 999px; padding: 10px 34px; font-size: 15px; font-weight: 800; letter-spacing: .04em; box-shadow: 0 6px 20px rgb(0 0 0 / .25); transition: transform 150ms, box-shadow 150ms, filter 150ms; }
 .connection-explorer button.net-reveal:hover { background: rgb(var(--color-connection)); filter: brightness(1.08); transform: translateY(-1px); box-shadow: 0 8px 24px rgb(0 0 0 / .3); }
 .connection-explorer button.net-reveal:active { transform: translateY(0); }
+/* A solved connection's Reveal stands in the header, where the phase text is for any other exploration. */
+.connection-explorer button.net-reveal-header { display: inline-flex; align-items: center; gap: 8px; padding: 8px 22px; font-size: 14px; }
 
 /* The paused search's invitation: it drops in like the Reveal announcement, then the button breathes until it is pressed. */
 .net-resume-wrap { position: absolute; top: 76px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 12px; pointer-events: none; z-index: 3; width: min(420px, calc(100% - 32px)); }
@@ -290,8 +300,18 @@
 .net-sheet-close { display: none; }
 
 .connection-explorer-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 14px; border-radius: 14px; background: rgb(var(--color-surface) / .42); border: 1px solid rgb(var(--color-border) / .8); }
-.connection-explorer-footer p { font-size: 12px; color: rgb(var(--color-content-secondary)); }
+.connection-explorer-footer p { flex: 1 1 0; min-width: 0; text-align: center; font-size: 12px; color: rgb(var(--color-content-secondary)); }
 .connection-explorer-footer > div { display: flex; flex-wrap: wrap; gap: 8px; }
+/* The left of the footer: how many people each endpoint has gathered. Hovering one explains the number (the shared Tooltip). */
+.connection-explorer-footer > .ce-footer-info { flex-wrap: nowrap; align-items: center; gap: 18px; flex: none; }
+.ce-side { display: inline-flex; align-items: center; gap: 8px; cursor: help; border-radius: 10px; }
+.ce-side-portrait { position: relative; display: inline-flex; flex: none; }
+.ce-side-portrait .net-portrait { border: 2px solid rgb(var(--color-side-a)); }
+.ce-side.is-b .ce-side-portrait .net-portrait { border-color: rgb(var(--color-side-b)); }
+.ce-side-portrait .net-end-badge { position: absolute; right: -5px; bottom: -5px; width: 14px; height: 14px; font-size: 9px; }
+.ce-side.is-b .net-end-badge { background: rgb(var(--color-side-b)); }
+.ce-side-count { font-size: 18px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; color: rgb(var(--color-content-primary)); }
+.ce-side:focus-visible { outline: 2px solid rgb(var(--color-accent-focus)); outline-offset: 4px; }
 .connection-explorer button.connection-explorer-primary { background: rgb(var(--color-content-primary)); color: rgb(var(--color-surface)); border-color: rgb(var(--color-content-primary)); font-weight: 700; }
 
 @media (max-width: 1100px) {
@@ -324,6 +344,7 @@
   .connection-explorer-inspection.is-sheet .net-inspect-head { padding-right: 36px; margin-bottom: 8px; }
   .connection-explorer .net-sheet-close { display: block; position: absolute; top: 6px; right: 10px; padding: 0 10px; font-size: 20px; }
   .connection-explorer-footer { padding: 8px 10px; flex-direction: column; align-items: flex-start; gap: 8px; }
+  .connection-explorer-footer p { flex: none; text-align: left; }
   .net-success-wrap { top: 54px; }
   .net-success { font-size: 13px; }
   .net-resume-wrap { top: 54px; }

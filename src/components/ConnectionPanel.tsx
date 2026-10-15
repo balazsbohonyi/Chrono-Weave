@@ -9,6 +9,7 @@ import { prefersReducedMotion } from '../utils/canvasCamera';
 import SidebarFigureCard, { type FigureDetail } from './SidebarFigureCard';
 import NetworkPortrait from './connectionNetwork/NetworkPortrait';
 import MarkdownContent from './MarkdownContent';
+import Tooltip from './Tooltip';
 import { SixDegreesInfoButton, SixDegreesInfoLink } from './SixDegreesInfo';
 import { useNetworkPortraits } from '../hooks/useNetworkPortraits';
 import type { ContactAssessment, ConnectionSession } from '../services/connectionGraph';
@@ -25,11 +26,24 @@ export interface ConnectionPanelProps {
   onExplain: (from: HistoricalFigure, to: HistoricalFigure, contact?: ContactAssessment) => void;
   checkpoints?: ConnectionSession[];
   onOpenCheckpoint?: (session: ConnectionSession) => void;
+  // Reopens the exploration graph of a connection that was already made (its chain lit, with Reveal to play it).
+  onOpenExploration?: (entry: ConnectionPathEntry) => void;
   // Opens the explanation of Six Degrees of Separation.
   onOpenInfo?: () => void;
   // The same hover actions as every other card in the sidebar.
   renderActions: (figure: HistoricalFigure) => React.ReactNode;
 }
+
+// A bare icon, no chrome: the same on a paused exploration (where the whole card opens it too) and on a finished connection (where only the icon does).
+const OpenExplorationButton: React.FC<{ onOpen: () => void; disabled?: boolean }> = ({ onOpen, disabled }) =>
+  <Tooltip text="Open exploration">
+    <button type="button" className="connection-open-exploration" aria-label="Open exploration" disabled={disabled} onClick={onOpen}>
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <circle cx="5" cy="6" r="2.4" /><circle cx="19" cy="6" r="2.4" /><circle cx="12" cy="18" r="2.4" />
+        <path d="M7.2 7l3.6 9M16.8 7l-3.6 9M7.6 6h8.8" />
+      </svg>
+    </button>
+  </Tooltip>;
 
 // Line width of the sidebar thread, as on the canvas at 100% zoom; dashes are proportional, as there.
 const THREAD_WIDTH = 3;
@@ -76,7 +90,7 @@ export const ConnectionHeader: React.FC<{ connection: ActiveConnection; onClose:
 // The Connection tab: the chain from one person to the other with the verified evidence for every
 // link, and the connections already made on this canvas.
 const ConnectionPanel: React.FC<ConnectionPanelProps> = ({ connection, currentIndex, recent, canvasIds, isBusy, onClose,
-  onReplay, onFocusPerson, onExplain, renderActions, checkpoints = [], onOpenCheckpoint, onOpenInfo }) => {
+  onReplay, onFocusPerson, onExplain, renderActions, checkpoints = [], onOpenCheckpoint, onOpenExploration, onOpenInfo }) => {
   const [details, setDetails] = useState<Map<string, FigureDetail>>(new Map());
   const chainRef = useRef<HTMLOListElement>(null);
   const known = connection?.chain ?? [];
@@ -137,11 +151,14 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({ connection, currentIn
       )}
 
       {checkpoints.length > 0 && <section className="connection-recent" aria-label="Paused contact explorations"><h4>Paused explorations</h4><ul>{checkpoints.map(session => <li key={session.key}>
-        <button type="button" className="connection-recent-entry" disabled={isBusy} onClick={() => onOpenCheckpoint?.(session)}>
-          {pair(ends(session))}
-          <span className="connection-recent-names">{ends(session).map(person => person.name).join(' → ')}</span>
-          <span className="connection-recent-open">Open exploration</span>
-        </button></li>)}</ul></section>}
+        {/* The whole card opens the exploration (the main button's overlay), and so does the icon. */}
+        <div className={`connection-recent-entry ${isBusy ? 'is-busy' : ''}`}>
+          <button type="button" className="connection-recent-main" disabled={isBusy} onClick={() => onOpenCheckpoint?.(session)}>
+            {pair(ends(session))}
+            <span className="connection-recent-names">{ends(session).map(person => person.name).join(' → ')}</span>
+          </button>
+          <OpenExplorationButton disabled={isBusy} onOpen={() => onOpenCheckpoint?.(session)} />
+        </div></li>)}</ul></section>}
       {recent.length > 0 && (
         <section className="connection-recent" aria-label="Recent connections">
           <h4>Recent connections</h4>
@@ -152,12 +169,15 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({ connection, currentIn
               const isCurrent = [first.id, last.id].sort().join('|') === activeEnds;
               return (
                 <li key={entry.key}>
-                  <button type="button" className={`connection-recent-entry ${isCurrent ? 'is-current' : ''}`}
-                    aria-current={isCurrent || undefined} disabled={isBusy} onClick={() => onReplay(entry)}>
-                    {pair([first, last])}
-                    <span className="connection-recent-names">{first.name} → {last.name}</span>
+                  {/* The card plays the connection; the icon opens the exploration it came from. */}
+                  <div className={`connection-recent-entry ${isCurrent ? 'is-current' : ''} ${isBusy ? 'is-busy' : ''}`}>
+                    <button type="button" className="connection-recent-main" aria-current={isCurrent || undefined} disabled={isBusy} onClick={() => onReplay(entry)}>
+                      {pair([first, last])}
+                      <span className="connection-recent-names">{first.name} → {last.name}</span>
+                    </button>
+                    {onOpenExploration && <OpenExplorationButton disabled={isBusy} onOpen={() => onOpenExploration(entry)} />}
                     <span className="connection-recent-degrees"><b>{entry.figures.length - 1}</b> {entry.figures.length - 1 === 1 ? 'degree' : 'degrees'}</span>
-                  </button>
+                  </div>
                 </li>
               );
             })}

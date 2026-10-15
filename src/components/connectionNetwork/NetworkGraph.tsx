@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { CATEGORY_BAR_TEXT_COLORS, CATEGORY_COLORS } from '../../constants';
 import { readNetworkViewPrefs, saveNetworkViewPrefs } from '../../utils/networkViewPrefs';
-import { axisTicks, type CategoryGuide, type ColumnGuide, type CorridorGuide, type LayoutMode, type NetworkLayout, type OrbitRing } from '../../services/connectionNetworkLayout';
+import { axisTicks, TICK_MIN_SPACING, type CategoryGuide, type ColumnGuide, type CorridorGuide, type LayoutMode, type NetworkLayout, type OrbitRing } from '../../services/connectionNetworkLayout';
 import {
-  closestApproachLabel, describeSide, initials, STATUS_LABELS, truncateName, type NetworkNode, type NetworkSelection, type NetworkView,
+  closestApproachLabel, describeSide, initials, STATUS_LABELS, truncateName, type NetworkEdge, type NetworkNode, type NetworkSelection, type NetworkView,
 } from '../../services/connectionNetworkView';
 import { formatYear } from '../../utils/formatters';
 import { createWheelClassifier } from '../../utils/wheelGesture';
@@ -36,6 +36,8 @@ interface Props {
   narrow: boolean;
   reducedMotion: boolean;
   success: { degrees: number } | null;
+  // A connection that was already made, reopened to explore: nothing is dimmed or framed and its chain is lime, lines on or off (Reveal is in the header).
+  solved?: { degrees: number } | null;
   onReveal: () => void;
   // Set when the search stopped on its own limit and can be carried on from where it is.
   resume?: { onResume: () => void; reason: 'time' | 'work' } | null;
@@ -78,7 +80,7 @@ const activate = (action: () => void) => (event: React.KeyboardEvent) => {
 // so the simulation never re-renders the explorer. The camera is a transform over screen-sized content.
 const NetworkGraph: React.FC<Props> = ({
   view, endpointNames, nameOf, layout, kick, mode, onModeChange, size, onSize, selection, onSelect, portraits, narrow, reducedMotion,
-  success, onReveal, resume = null, reveal, onPinsChange, onToggleFold, legend, maximized, onToggleMaximize,
+  success, solved = null, onReveal, resume = null, reveal, onPinsChange, onToggleFold, legend, maximized, onToggleMaximize,
 }) => {
   const uid = useId().replace(/:/g, '');
   const svg = useRef<SVGSVGElement>(null);
@@ -324,14 +326,19 @@ const NetworkGraph: React.FC<Props> = ({
   };
 
   const successChain = success && view.chain;
+  // The chain of a solved connection stays drawn, lime, even with the lines off (only the chain's own lines are kept then, like the lit chain of a search that just succeeded).
+  const coloredChain = successChain || (solved ? view.chain : null);
   const dimmed = (nodeId?: string, edgeKey?: string) => !!view.focus && (nodeId ? !view.focus.nodes.has(nodeId) : !view.focus.edges.has(edgeKey!));
   const [bandA, bandB] = [0, 1].map(index => view.nodes.find(node => node.endpoint === index)?.person);
   const sx = (year: number) => camera.x + layout.xOf(year) * camera.k;
   const ticksForAxis = mode === 'time'
-    ? axisTicks(domain[0], domain[1], layout.pixelsPerYear * camera.k).filter(year => sx(year) > -40 && sx(year) < size.width + 40) : [];
+    ? axisTicks(domain[0], domain[1], layout.pixelsPerYear * camera.k, TICK_MIN_SPACING).filter(year => sx(year) > -40 && sx(year) < size.width + 40) : [];
   const closest = view.closest;
-  // With the lines off, only what the user is looking at or the lit chain keeps its line, so selecting a contact still shows it.
-  const drawnEdges = showLines ? view.edges : view.edges.filter(edge => edge.id === selection.edge || (successChain && view.chain!.edgeIds.includes(edge.id)));
+  // With the lines off, only what the user is looking at or the lit chain (of a search that just succeeded, or a solved connection) keeps its line, so selecting a contact still shows it.
+  const chainEdge = (edge: NetworkEdge) => !!view.chain?.edgeIds.includes(edge.id);
+  const shownEdges = showLines ? view.edges : view.edges.filter(edge => edge.id === selection.edge || (coloredChain && chainEdge(edge)));
+  // A colored chain is drawn last, over the crowd of other lines.
+  const drawnEdges = coloredChain ? [...shownEdges.filter(edge => !chainEdge(edge)), ...shownEdges.filter(chainEdge)] : shownEdges;
   // The endpoints are drawn last, on top of everybody else, so a crowd never covers them.
   const drawnNodes = [...view.nodes].sort((x, y) => Number(x.endpoint !== null) - Number(y.endpoint !== null));
   const pinnedCount = layout.pinned.size;
@@ -340,7 +347,8 @@ const NetworkGraph: React.FC<Props> = ({
   const chooseLayout = (next: LayoutMode) => { onModeChange(next); if (next !== 'time' && next !== 'free') fit(); };
   const closestVisible = showLines && closest && layout.nodes.has(closest.a) && layout.nodes.has(closest.b) && view.nodes.some(n => n.id === closest.a) && view.nodes.some(n => n.id === closest.b);
 
-  return <div className={`net-graph ${success ? 'is-success' : ''}`}>
+  // With a solved connection's lines on, every other line steps back (see the stylesheet) so the lime chain stands out.
+  return <div className={`net-graph ${success ? 'is-success' : ''} ${solved && showLines && view.chain ? 'is-solved' : ''}`}>
     <div className="net-stage">
     <svg ref={svg} className="net-svg" role="group" aria-label="Live contact graph"
       onPointerDown={onBackgroundDown} onPointerMove={onBackgroundMove} onPointerUp={onBackgroundUp} onPointerCancel={onBackgroundUp}>
@@ -383,7 +391,7 @@ const NetworkGraph: React.FC<Props> = ({
           const select = () => onSelect({ edge: edge.id });
           return <g key={edge.id} data-net-interactive ref={el => { if (el) edgeEls.current.set(edge.id, { from: edge.from, to: edge.to, el }); else edgeEls.current.delete(edge.id); }}
             role="button" tabIndex={0} aria-label={label} aria-pressed={selection.edge === edge.id}
-            className={`net-edge is-${edge.status} ${edge.contextual ? 'is-contextual' : ''} ${selection.edge === edge.id ? 'is-selected' : ''} ${selection.person && (edge.from === selection.person || edge.to === selection.person) ? 'is-incident' : ''} ${dimmed(undefined, edge.id) ? 'is-dim' : ''} ${successChain && view.chain!.edgeIds.includes(edge.id) ? 'is-chain' : ''}`}
+            className={`net-edge is-${edge.status} ${edge.contextual ? 'is-contextual' : ''} ${selection.edge === edge.id ? 'is-selected' : ''} ${selection.person && (edge.from === selection.person || edge.to === selection.person) ? 'is-incident' : ''} ${dimmed(undefined, edge.id) ? 'is-dim' : ''} ${coloredChain && view.chain!.edgeIds.includes(edge.id) ? 'is-chain' : ''}`}
             onClick={select} onKeyDown={activate(select)}>
             <title>{label}</title>
             <line className="net-edge-halo" /><line className="net-edge-line" /><line className="net-edge-hit" />
@@ -405,7 +413,7 @@ const NetworkGraph: React.FC<Props> = ({
           const shownName = isEndpoint ? truncateName(name, ENDPOINT_NAME_LIMIT) : truncateName(name, labelLimit(narrow));
           return <g key={node.id} data-net-interactive ref={el => { if (el) nodeEls.current.set(node.id, el); else nodeEls.current.delete(node.id); }}
             role="button" tabIndex={0} aria-label={label} aria-pressed={selected}
-            className={`net-node ${sideClass(node)} ${node.supported ? 'is-supported' : 'is-tentative'} ${selected ? 'is-selected' : ''} ${onEdge ? 'is-edge-end' : ''} ${dimmed(node.id) ? 'is-dim' : ''} ${successChain && view.chain!.nodeIds.includes(node.id) ? 'is-chain' : ''} ${node.active ? 'is-active' : ''}`}
+            className={`net-node ${sideClass(node)} ${node.supported ? 'is-supported' : 'is-tentative'} ${selected ? 'is-selected' : ''} ${onEdge ? 'is-edge-end' : ''} ${dimmed(node.id) ? 'is-dim' : ''} ${coloredChain && view.chain!.nodeIds.includes(node.id) ? 'is-chain' : ''} ${node.active ? 'is-active' : ''}`}
             onPointerDown={event => onNodeDown(event, node.id)} onPointerMove={onNodeMove} onPointerUp={event => onNodeUp(event, node.id)} onPointerCancel={event => onNodeUp(event, node.id)}
             onDoubleClick={() => { if (layout.pinned.has(node.id)) { layout.unpin(node.id); kick(); onPinsChange(); } }} onKeyDown={activate(select)}>
             <title>{`${name} (${node.person.birthYear}–${node.person.deathYear})`}</title>

@@ -73,6 +73,40 @@ test('sides, distances and unattached people', () => {
   assert.equal(describeSide(by.b, ['A', 'B']), 'Endpoint B');
 });
 
+test('side counts: accepted people by the nearer endpoint, endpoints and unattached people left out, filters and folds ignored', () => {
+  const far = human('f', 1700, 1760), near = human('n', 1710, 1770), lone1 = human('l1', 1650, 1700), lone2 = human('l2', 1660, 1710);
+  const people = [A, B, X, Y, far, near, lone1, lone2], accepted = [link('a', 'x'), link('x', 'y'), link('b', 'n'), link('n', 'f'), link('l1', 'l2')];
+  assert.deepEqual(buildNetworkView(session(people, accepted)).sides, { a: 2, b: 2 });
+  // Unverified contacts do not count, wherever the chips are.
+  const withDoubt = session([...people, U, Z], [...accepted, link('a', 'u', 'unresolved'), link('b', 'z', 'proposed')]);
+  assert.deepEqual(buildNetworkView(withDoubt, { filters: { ...NO_FILTERS, unresolved: true, proposed: true } }).sides, { a: 2, b: 2 });
+  // Equally near both endpoints: the same rule as the node colours (A).
+  const bridged = buildNetworkView(session([A, B, X], [link('a', 'x'), link('x', 'b')]));
+  assert.deepEqual(bridged.sides, { a: 1, b: 0 });
+  assert.equal(bridged.nodes.find(node => node.id === 'x')!.side, 'a');
+  // A crowd folds its dead ends behind "+n" badges, yet every one of them is counted.
+  const leaves = Array.from({ length: NETWORK_FOLD_THRESHOLD + 10 }, (_, index) => human(`leaf${index}`, 1620, 1700));
+  const crowded = buildNetworkView(session([A, B, X, ...leaves], [link('a', 'x'), ...leaves.map(leaf => link('x', leaf.id))]));
+  assert.ok(crowded.folds.length > 0 && crowded.nodes.length < leaves.length);
+  assert.deepEqual(crowded.sides, { a: leaves.length + 1, b: 0 });
+});
+
+test('a known chain is the one that is lit, in the endpoints order, as long as every step is still an accepted contact', () => {
+  const s = session([A, B, X, Y], [link('a', 'x'), link('x', 'b'), link('a', 'y'), link('y', 'b')]);
+  const route = (chain?: string[]) => buildNetworkView(s, { chain, highlightChain: true }).chain!.nodeIds;
+  // Two routes of the same length: the shortest-route search settles on one of them, but the connection that was made names its own.
+  const first = route();
+  assert.equal(first.length, 3);
+  assert.deepEqual(route(['a', 'x', 'b']), ['a', 'x', 'b']);
+  assert.deepEqual(route(['a', 'y', 'b']), ['a', 'y', 'b']);
+  assert.deepEqual(route(['b', 'y', 'a']), ['a', 'y', 'b']);
+  assert.equal(buildNetworkView(s, { chain: ['a', 'y', 'b'] }).chain!.edgeIds.length, 2);
+  // A chain that no longer holds (a step that is not accepted, or not from one endpoint to the other) falls back to the shortest route.
+  const broken = session([A, B, X, Y], [link('a', 'x'), link('x', 'b'), link('a', 'y'), link('y', 'b', 'unresolved')]);
+  assert.deepEqual(buildNetworkView(broken, { chain: ['a', 'y', 'b'] }).chain!.nodeIds, ['a', 'x', 'b']);
+  assert.deepEqual(buildNetworkView(s, { chain: ['x', 'a'] }).chain!.nodeIds, first);
+});
+
 test('closest approach: smallest gap, overlap is zero, deterministic ties, gone once connected', () => {
   assert.equal(lifespanGap(A, X), 0);
   assert.equal(lifespanGap(A, B), 150);

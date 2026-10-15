@@ -42,6 +42,84 @@ test('the overlay names both endpoints with their details, and shows the clock w
   assert.doesNotMatch(markup, /role="status"[^>]*>(?:(?!<\/div>).)*0:12/);
 });
 
+test('the footer counts the people on each endpoint\'s side with the endpoint portraits, explains them in the shared tooltip, and keeps the hint in the middle', () => {
+  const session = build(people => [
+    { from: people[0].id, to: people[2].id, status: 'accepted', claim: '', assessment: { pair: [people[0].id, people[2].id], verdict: 'accepted', interactionType: 'meeting', evidence: 'They met.', provenance } },
+    { from: people[1].id, to: people[3].id, status: 'unresolved', claim: 'maybe', assessment: { pair: [people[1].id, people[3].id], verdict: 'unresolved', evidence: '', uncertainty: 'Unclear.', provenance } },
+  ], true);
+  const markup = render(session);
+  const footer = markup.slice(markup.indexOf('<footer'), markup.indexOf('</footer>'));
+  assert.match(footer, /class="ce-footer-info" role="group" aria-label="People found on each side"/);
+  // One accepted contact on A's side; the unresolved contact on B's side is not counted. Each count explains itself on hover (and to screen readers).
+  const tip = (count: string, name: string, other: string) => `${count} closer to ${name} than to ${other}, through accepted contacts. The two endpoints are not counted.`;
+  assert.match(footer, new RegExp(`class="ce-side is-a" role="img" tabindex="0" aria-label="${tip('1 person', 'Alpha', 'Beta')}"`));
+  assert.match(footer, new RegExp(`class="ce-side is-b" role="img" tabindex="0" aria-label="${tip('0 people', 'Beta', 'Alpha')}"`));
+  assert.match(footer, /<strong class="ce-side-count" aria-hidden="true">1<\/strong>/);
+  assert.match(footer, /<strong class="ce-side-count" aria-hidden="true">0<\/strong>/);
+  // No caption under the counts; the hint is the middle column, between the counts and the buttons.
+  assert.doesNotMatch(footer, /counted by the nearer endpoint|ce-sides-caption/);
+  assert.ok(footer.indexOf('ce-footer-info') < footer.indexOf('Drag or two-finger scroll to pan') && footer.indexOf('Only accepted contacts can form a chain') < footer.indexOf('Continue searching'));
+});
+
+test('the status area warns when the latest progress was not saved or the saved copy had to be trimmed, and says nothing otherwise', () => {
+  const session = build(() => [], true);
+  assert.doesNotMatch(render(session), /ce-save-warning/);
+  const failed = render({ ...session, saveIssue: 'failed' });
+  assert.match(failed, /class="ce-save-warning" role="status"[^>]*aria-label="The latest progress of this search could not be saved[^"]*"[^>]*>Latest progress not saved</);
+  const trimmed = render({ ...session, saveIssue: 'trimmed' });
+  assert.match(trimmed, /class="ce-save-warning" role="status"[^>]*aria-label="This search is larger than a saved copy can hold in full[^"]*"[^>]*>Saved copy is trimmed</);
+});
+
+test('a solved connection reopens as a plain exploration: degrees between the endpoints, Reveal in the graph, no search buttons, the chain lime and nothing dimmed', () => {
+  const accepted = (people: ContactPerson[], from: number, to: number) => ({ from: people[from].id, to: people[to].id, status: 'accepted' as const, claim: '',
+    assessment: { pair: [people[from].id, people[to].id] as [string, string], verdict: 'accepted' as const, interactionType: 'meeting' as const, evidence: 'They met.', provenance } });
+  const session = build(people => [accepted(people, 0, 2), accepted(people, 2, 1), accepted(people, 0, 3)], true);
+  const chain = [session.people[0].id, session.people[2].id, session.people[1].id];
+  const markup = render(session, { solved: { degrees: 2 }, chain, onReveal: () => {} });
+  // The degrees stand where the arrow was, as a badge.
+  assert.match(markup, /<span class="ce-degrees" aria-label="2 degrees of separation"><b>2<\/b> degrees<\/span>/);
+  assert.doesNotMatch(markup, /ce-arrow/);
+  // Reveal is a prominent button in the header, in place of the phase text; the old centred banner is not shown, and nothing is lit or dimmed as in the just-found state.
+  const header = markup.slice(markup.indexOf('<header'), markup.indexOf('</header>'));
+  assert.match(header, /<button type="button" class="net-reveal net-reveal-header"[^>]*>.*?Reveal<\/button>/);
+  assert.doesNotMatch(header, /Accepted chain found|Search budget reached|Paused/);
+  assert.equal(markup.match(/net-reveal/g)?.length, 2, 'one Reveal button (its class appears twice), none inside the graph');
+  assert.doesNotMatch(markup, /net-success|is-success|Connected ·|is-dim/);
+  // The other lines step back through the stylesheet while the lines are shown.
+  assert.match(markup, /class="net-graph  ?is-solved"/);
+  // No way to search from here, and no invitation to resume.
+  assert.doesNotMatch(markup, /Continue searching|Resume search|Start a new search|Stop search|net-resume/);
+  assert.match(markup, /Back to canvas/);
+  // The two edges of the chain are lime (the third accepted contact is not), the whole network is still drawn.
+  assert.equal(markup.match(/class="net-edge[^"]*is-chain/g)?.length, 2);
+  assert.equal(markup.match(/class="net-edge /g)?.length, 3);
+  assert.equal(markup.match(/class="net-node[^"]*is-chain/g)?.length, 3);
+  // An ordinary exploration, and a search that has just found its chain, are unchanged.
+  const plain = render(session);
+  assert.match(plain, /ce-arrow/); assert.doesNotMatch(plain, /ce-degrees|net-reveal-header|is-chain|is-solved/);
+  assert.match(render(session, { success: { degrees: 2 }, onReveal: () => {} }), /net-success-wrap/);
+});
+
+test('with the lines hidden, a solved connection still shows its lime chain between the endpoints and nothing else', () => {
+  const accepted = (people: ContactPerson[], from: number, to: number) => ({ from: people[from].id, to: people[to].id, status: 'accepted' as const, claim: '',
+    assessment: { pair: [people[from].id, people[to].id] as [string, string], verdict: 'accepted' as const, interactionType: 'meeting' as const, evidence: 'They met.', provenance } });
+  const session = build(people => [accepted(people, 0, 2), accepted(people, 2, 1), accepted(people, 0, 3)], true);
+  const chain = [session.people[0].id, session.people[2].id, session.people[1].id];
+  const stored = new Map([['chrono_sd2_network_view', JSON.stringify({ mode: 'time', showLines: false, maximized: false })]]);
+  const storage = { getItem: (key: string) => stored.get(key) ?? null, setItem: () => {} };
+  (globalThis as { localStorage?: unknown }).localStorage = storage;
+  try {
+    const solved = render(session, { solved: { degrees: 2 }, chain, onReveal: () => {} });
+    // Only the two lines of the chain are drawn, lime; the other accepted contact is hidden with the rest.
+    assert.equal(solved.match(/class="net-edge /g)?.length, 2);
+    assert.equal(solved.match(/class="net-edge[^"]*is-chain/g)?.length, 2);
+    assert.equal(solved.match(/class="net-node[^"]*is-chain/g)?.length, 3);
+    assert.doesNotMatch(solved, /is-solved/);
+    // An ordinary exploration draws no line at all with the lines hidden.
+    assert.equal(render(session).match(/class="net-edge /g)?.length ?? 0, 0);
+  } finally { delete (globalThis as { localStorage?: unknown }).localStorage; }
+});
+
 test('the lists pin the endpoints above People and Contacts tabs, each with a search', () => {
   const session = build(people => [{ from: people[0].id, to: people[2].id, status: 'accepted', claim: '', assessment: { pair: [people[0].id, people[2].id], verdict: 'accepted', interactionType: 'meeting', evidence: 'They met in Paris.', provenance } }], true);
   const markup = render(session);

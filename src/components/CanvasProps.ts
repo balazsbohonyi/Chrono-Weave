@@ -23,7 +23,6 @@ export interface CanvasProps {
   highlightedFigureIds: string[];
   focusedFigureId?: string | null;
   isSearchFocusActive?: boolean;
-  newlyDiscoveredIds?: Set<string>;
   onDiscover?: (figure: HistoricalFigure) => void;
   onTrace?: (figure: HistoricalFigure) => void;
   onInspect?: (figure: HistoricalFigure) => void;

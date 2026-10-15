@@ -56,7 +56,7 @@ Stop leaves a paused network. Closing/Escape, another relationship action, canva
 
 Guarded settlement validates the current request, exact identities, chronology, accepted contacts and chain bound immediately before mutation. It maps shared identities to current canvas IDs, weaves missing people with full lifespans/occupations/categories/descriptions, and saves a new path. The existing amber thread, camera flight, gallery/timeline drawing, skip and reduced-motion behavior remain. The 21-link reveal stays within the existing eight-second cap.
 
-- New people are added to `figures` and `newlyDiscoveredIds`, as with Expand Timeline. They are permanent canvas members: closing the connection does not remove them, and there is no special undo for weaving.
+- New people are added to `figures`, as with Expand Timeline, and look like every other figure. They are permanent canvas members: closing the connection does not remove them, and there is no special undo for weaving.
 - **Timeline layout:** each consecutive run of new people becomes an `addDiscoveryCluster` anchored on the existing chain node just before the run.
 - **Gallery layout:** new people are appended without discovery clusters.
 - The canvas range (`config.start` / `config.end`) extends with small padding when new people fall outside it. Active category filters widen to show the added categories; a themed canvas also widens `activeCategories` for categories it gains.

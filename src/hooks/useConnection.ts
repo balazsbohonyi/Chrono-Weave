@@ -6,7 +6,7 @@ import type {
 } from '../types';
 import { classifyConnectionTarget, type ConnectionProgress, type ConnectionTargetStatus } from '../services/connectionPath';
 import {
-  decideConnectionStart, degreeLabel, runConnectionSearch, savedConnectionView,
+  decideConnectionStart, degreeLabel, finishedExploration, runConnectionSearch, savedConnectionView,
   type ConnectionTarget, type ConnectionView,
 } from '../services/connectionFlow';
 import { listConnectionPaths, type ConnectionPathEntry } from '../utils/connectionPaths';
@@ -76,6 +76,10 @@ export function useConnection(dependencies: Dependencies) {
   const nextId = useRef(0);
   const generation = useRef(0);
   const [exploration, setExploration] = useState<ConnectionSession | null>(null);
+  // The people of the connection on show when a finished one is reopened (so its chain is the one that is lit); null for a search.
+  const [explorationChain, setExplorationChain] = useState<string[] | null>(null);
+  // The connection that was reopened to explore (null for a search); Reveal plays it on the canvas.
+  const [solvedEntry, setSolvedEntry] = useState<ConnectionPathEntry | null>(null);
   const [explorerOpen, setExplorerOpen] = useState(false);
   const [checkpoints, setCheckpoints] = useState<ConnectionSession[]>([]);
   const [checkpointRevision, setCheckpointRevision] = useState(0);
@@ -103,6 +107,8 @@ export function useConnection(dependencies: Dependencies) {
     search.current = null;
     setIsConnecting(false);
     setProgress(null);
+    setExplorationChain(null);
+    setSolvedEntry(null);
     setExplorerOpen(false);
     requestAnimationFrame(() => {
       const invoker = explorerInvoker.current;
@@ -164,6 +170,8 @@ export function useConnection(dependencies: Dependencies) {
     setPicking(null);
     setIsConnecting(true);
     setExplorerOpen(true);
+    setExplorationChain(null);
+    setSolvedEntry(null);
     if (!session) setExploration(null);
     setProgress({ label: 'name' in target ? `Identifying ${target.name}…` : 'Checking for a direct link…' });
     try {
@@ -226,6 +234,28 @@ export function useConnection(dependencies: Dependencies) {
     cancelSearch(); setExploration(session); setExplorerOpen(true);
   }, [cancelSearch]);
 
+  // A connection that was already made, reopened as an exploration to look around: the whole network is shown as in any exploration (its chain is
+  // only a colour of its lines), nothing can be searched, and Reveal plays the connection on the canvas. Closing it leaves without playing.
+  const openSavedExploration = useCallback(async (entry: ConnectionPathEntry) => {
+    explorerInvoker.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    cancelSearch();
+    const requestGeneration = ++generation.current;
+    const opened = await finishedExploration({ repository, canvasId: latest.current.canvasId, entry });
+    if (!opened || generation.current !== requestGeneration) {
+      if (!opened) latest.current.notify('This connection has no saved exploration to open.', 'info');
+      return;
+    }
+    setExploration(opened.session); setExplorationChain(opened.chain);
+    setSolvedEntry(entry);
+    setExplorerOpen(true);
+  }, [cancelSearch, repository]);
+  const revealSolved = useCallback(() => {
+    if (!solvedEntry) return;
+    setSolvedEntry(null); setExplorationChain(null); setExplorerOpen(false);
+    show(savedConnectionView(solvedEntry));
+  }, [solvedEntry, show]);
+  const solved = useMemo(() => solvedEntry ? { degrees: solvedEntry.figures.length - 1 } : null, [solvedEntry]);
+
   const beginPicking = useCallback((from: HistoricalFigure) => {
     explorerInvoker.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     cancelSearch();
@@ -264,7 +294,7 @@ export function useConnection(dependencies: Dependencies) {
   const endReveal = useCallback(() => setReveal(previous => previous.animate ? { ...previous, animate: false } : previous), []);
 
   return {
-    picking, isConnecting, progress, active, recent, currentIndex, tabRequest, exploration, explorerOpen, success, revealConnection, checkpoints, stop, continueSearch, openCheckpoint,
+    picking, isConnecting, progress, active, recent, currentIndex, tabRequest, exploration, explorationChain, explorerOpen, openSavedExploration, solved, revealSolved, success, revealConnection, checkpoints, stop, continueSearch, openCheckpoint,
     focusRequest, canvasConnection, isTabVisible: !!active || recent.length > 0 || checkpoints.length > 0,
     isPickable, statusFor,
     beginPicking, exitPicking, pickFigure, submitName, cancelSearch, reset, replay, replayActive, close, focusPerson,

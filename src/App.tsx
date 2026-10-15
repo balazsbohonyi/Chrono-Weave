@@ -97,7 +97,6 @@ const App: React.FC = () => {
         });
     }, []);
 
-    const [newlyDiscoveredIds, setNewlyDiscoveredIds] = useState<Set<string>>(new Set());
     const [isDiscovering, setIsDiscovering] = useState(false);
     const [isTracing, setIsTracing] = useState(false);
     // Six Degrees lives in useConnection; earlier callbacks reach it through this ref.
@@ -198,7 +197,6 @@ const App: React.FC = () => {
         setIsDiscovering(false);
         setRelationshipState(null);
         setPopoverState(previous => ({ ...previous, isOpen: false }));
-        setNewlyDiscoveredIds(new Set());
         if (!KEEP_DISCOVERY_CLUSTERS) setClusterState(emptyClusters());
     }, []);
 
@@ -212,7 +210,6 @@ const App: React.FC = () => {
             setConfig(woven.config);
             setClusterState(woven.clusters);
             setSelectedCategories(woven.selectedCategories);
-            setNewlyDiscoveredIds(new Set(woven.newIds));
         },
         hideSidebar: () => setIsSidebarCollapsed(true),
         notify: (message, type) => setToast({ message, type }),
@@ -295,7 +292,6 @@ const App: React.FC = () => {
         setHighlightedFigureIds(highlights);
         setCurrentSearchIndex(Math.max(0, Math.min(canvas.view.currentSearchIndex, highlights.length - 1)));
         setIsSearchFocusActive(false);
-        setNewlyDiscoveredIds(new Set());
         setKnownRelationships(new Map());
         setRelationshipState(null);
         setPopoverState(previous => ({ ...previous, isOpen: false, loading: false }));
@@ -515,7 +511,6 @@ const App: React.FC = () => {
                     setClusterState(previous => addDiscoveryCluster(previous, sourceFigure.id, newIds, currentPlacements.current));
                 }
                 setFigures(updatedFigures);
-                setNewlyDiscoveredIds(new Set(newIds));
                 setToast({ message: `Discovered ${newFigures.length} new figures: ${newFigures.map(figure => figure.name).join(', ')}`, type: 'success' });
             }
             update({ relatedIds, status: relatedIds.length ? 'results' : 'empty', message: relatedIds.length ? undefined : `No new verified connections for ${sourceFigure.name} in this period.` });
@@ -941,7 +936,6 @@ const App: React.FC = () => {
                     highlightedFigureIds={highlightedFigureIds}
                     focusedFigureId={focusedFigureId}
                     isSearchFocusActive={isSearchFocusActive}
-                    newlyDiscoveredIds={newlyDiscoveredIds}
                     onDiscover={handleDiscover}
                     onTrace={handleTraceRelationships}
                     onInspect={handleInspectFigure}
@@ -1000,7 +994,7 @@ const App: React.FC = () => {
                     connection: connection.active, currentIndex: connection.canvasConnection?.animate ? null : connection.currentIndex, recent: connection.recent,
                     canvasIds, isBusy, onClose: connection.close, onReplay: connection.replay,
                     onFocusPerson: connection.focusPerson, onExplain: openConnectionExplanation,
-                    checkpoints: connection.checkpoints, onOpenCheckpoint: connection.openCheckpoint, onOpenInfo: openSixDegreesInfo,
+                    checkpoints: connection.checkpoints, onOpenCheckpoint: connection.openCheckpoint, onOpenExploration: connection.openSavedExploration, onOpenInfo: openSixDegreesInfo,
                 }}
                 activeTracingFigureId={relationshipState?.sourceFigure.id}
                 focusFigureId={focusFigure?.id}
@@ -1016,7 +1010,7 @@ const App: React.FC = () => {
             </div>
 
             {connection.explorerOpen && <ConnectionExplorer session={connection.exploration} phase={connection.progress?.label} busy={connection.isConnecting}
-                onStop={connection.stop} onContinue={() => connection.continueSearch()} onFresh={() => connection.continueSearch(true)} onClose={connection.cancelSearch} onReveal={connection.revealConnection} success={connection.success}
+                onStop={connection.stop} onContinue={() => connection.continueSearch()} onFresh={() => connection.continueSearch(true)} onClose={connection.cancelSearch} onReveal={connection.solved ? connection.revealSolved : connection.revealConnection} success={connection.success} chain={connection.explorationChain} solved={connection.solved}
                 onOpenInfo={openSixDegreesInfo} suspended={isSixDegreesInfoOpen} />}
             {!connection.explorerOpen && !isLauncherOpen && !isSettingsOpen && !relationshipState && !stageShown && <CanvasHistory canvases={history} onSelect={commitCanvas} />}
 
