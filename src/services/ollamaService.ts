@@ -15,7 +15,7 @@ import type { ConnectionPathOptions, ConnectionPathProposal, DeepDiveData, Figur
 import { requestConnectionPath, requestResolveFigure } from './pathService';
 import { validateLocalUrl, type AppConfig } from '../utils/providerConfig';
 import { generateWeaveTimeline, getWeaveGenerationRange, parseWeaveFigures, suggestWeaveTopic, validateWeaveQuery } from './weaveService';
-import { parseJsonResponse } from './jsonResponse';
+import { noteValidationRetry, parseJsonResponse } from './jsonResponse';
 import { isWeaveCategoryAllowed } from '../utils/weave';
 import { withAbort } from './utils';
 
@@ -185,6 +185,7 @@ export class OllamaService implements IAIService {
             }
             throw new Error(`Model ${this.config.model} returned unusable data after a retry: ${validationError}`);
           }
+          noteValidationRetry();
         }
       }
       throw new Error('Ollama generation failed.');

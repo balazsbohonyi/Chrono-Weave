@@ -6,7 +6,7 @@ import { useNetworkPortraits } from '../hooks/useNetworkPortraits';
 import { useNetworkSimulation } from '../hooks/useNetworkSimulation';
 import type { LayoutMode } from '../services/connectionNetworkLayout';
 import {
-  buildNetworkView, NO_FILTERS, portraitSubjects, years, type NetworkFilters, type NetworkSelection, type UnverifiedFilter,
+  buildNetworkView, corridorSpine, NO_FILTERS, portraitSubjects, years, type NetworkFilters, type NetworkSelection, type UnverifiedFilter,
 } from '../services/connectionNetworkView';
 import NetworkGraph, { type RevealRequest } from './connectionNetwork/NetworkGraph';
 import NetworkInspector from './connectionNetwork/NetworkInspector';
@@ -40,6 +40,9 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
   const [reveal, setReveal] = useState<RevealRequest | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [query, setQuery] = useState('');
+  // The graph takes the whole body and the inspection panel steps aside. Narrow screens already give the graph all the room.
+  const [maximizedChoice, setMaximized] = useState(false);
+  const maximized = maximizedChoice && !narrow;
   const [elapsed, setElapsed] = useState(session?.elapsedMs ?? 0);
   const hasSelection = !!selection.person || !!selection.edge;
 
@@ -64,13 +67,21 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
   const endpoints = useMemo(() => view?.nodes.filter(node => node.endpoint !== null).map(node => node.person) ?? [], [view]);
   const bounds = useMemo<[number, number]>(() => endpoints.length
     ? [Math.min(...endpoints.map(person => person.birthYear)), Math.max(...endpoints.map(person => person.deathYear))] : [1500, 1600], [endpoints]);
-  const inputs = useMemo(() => view?.nodes.map(node => ({ id: node.id, year: midpoint(node.person), endpoint: node.endpoint, radius: nodeRadius(node.endpoint !== null, narrow) })) ?? [], [view, narrow]);
+  const inputs = useMemo(() => {
+    const spine = new Map((view ? corridorSpine(view) : []).map((id, index) => [id, index]));
+    return view?.nodes.map(node => ({
+      id: node.id, year: midpoint(node.person), endpoint: node.endpoint, radius: nodeRadius(node.endpoint !== null, narrow),
+      side: node.side, distance: node.distance, parent: node.parent, category: node.person.category, spine: spine.get(node.id) ?? null,
+    })) ?? [];
+  }, [view, narrow]);
   const links = useMemo(() => view?.edges.map(edge => ({ a: edge.from, b: edge.to })) ?? [], [view]);
   const { layout, kick } = useNetworkSimulation({ resetKey, inputs, links, bounds, mode, size, ready: measured, reducedMotion });
   // Everyone the lists show gets a portrait, not only the people currently drawn.
   const portraits = useNetworkPortraits(useMemo(() => view ? portraitSubjects(view) : [], [view]));
 
   const syncPins = useCallback(() => setPinned(new Set(layout.pinned)), [layout]);
+  // Entering the cluster or columns layout lets go of pins that held only a height; the pin list follows.
+  useEffect(() => { if (layout.pinned.size !== pinned.size) syncPins(); }, [mode, layout, pinned, syncPins]);
   const unpin = useCallback((id: string) => { layout.unpin(id); kick(); syncPins(); }, [layout, kick, syncPins]);
   const toggleFold = useCallback((hostId: string) => setExpanded(previous => { const next = new Set(previous); if (!next.delete(hostId)) next.add(hostId); return next; }), []);
   const toggleFilter = useCallback((filter: UnverifiedFilter) => setFilters(previous => ({ ...previous, [filter]: !previous[filter] })), []);
@@ -82,11 +93,12 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
   const dismissSheet = useCallback(() => { setSheetOpen(false); select(NO_SELECTION); }, [select]);
   // From a person or contact back to the lists. Unlike clearing by tapping the graph, this keeps the sheet open on narrow screens.
   const backToList = useCallback(() => { setSelection(NO_SELECTION); setExpanded(previous => previous.size ? new Set() : previous); setSheetOpen(narrow); }, [narrow]);
-  // Esc peels back one layer at a time: selection -> clear, a search -> clear, otherwise close.
+  // Esc peels back one layer at a time: selection -> clear, a search -> clear, a maximized graph -> restore, otherwise close.
   const escape = useRef<() => void>(() => {});
   escape.current = () => {
-    if (hasSelection || sheetOpen) dismissSheet(); else if (query) setQuery(''); else onClose();
+    if (hasSelection || sheetOpen) dismissSheet(); else if (query) setQuery(''); else if (maximized) setMaximized(false); else onClose();
   };
+  const toggleMaximized = useCallback(() => setMaximized(on => !on), []);
   const onEscape = useCallback(() => escape.current(), []);
   useModalFocus(dialog, true, onEscape);
 
@@ -154,12 +166,13 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
         </div>
       </div>
     </header>
-    <div className="connection-explorer-body">
+    <div className={`connection-explorer-body ${maximized ? 'is-maximized' : ''}`}>
       <section className="connection-explorer-network" aria-label="Explored contact network">
         {view
           ? <NetworkGraph view={view} endpointNames={endpointNames} nameOf={name} layout={layout} kick={kick} mode={mode} onModeChange={setMode}
             size={size} onSize={resize} selection={selection} onSelect={select} portraits={portraits} narrow={narrow} reducedMotion={reducedMotion}
-            success={success} onReveal={onReveal} reveal={reveal} onPinsChange={syncPins} onToggleFold={toggleFold} legend={legend} />
+            success={success} onReveal={onReveal} reveal={reveal} onPinsChange={syncPins} onToggleFold={toggleFold} legend={legend}
+            maximized={maximized} onToggleMaximize={narrow ? undefined : toggleMaximized} />
           : <div className="net-graph"><p className="net-empty">Preparing the contact network…</p></div>}
       </section>
       <NetworkInspector session={session} view={view} selection={selection} portraits={portraits} pinned={pinned} narrow={narrow}

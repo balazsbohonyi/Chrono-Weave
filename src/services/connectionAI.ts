@@ -5,7 +5,9 @@ import { blockedContact, CONTACT_VERSION, type ContactAssessment, type ContactPe
 import { buildContactAssessmentPrompt, buildContactDiscoveryPrompt, buildContactExplanationPrompt } from './prompts';
 
 export interface ContactDiscoveryRequest {
-  sources: Array<{ person: ContactPerson; round: number; previous: ContactPerson[] }>;
+  // `goal` is the person on the opposite side of the search for that source (the other endpoint). One request can carry sources
+  // from both ends, each with its own goal; a source without one aims at `target`.
+  sources: Array<{ person: ContactPerson; round: number; previous: ContactPerson[]; goal?: ContactPerson }>;
   target: ContactPerson; references: ContactPerson[]; limit: number;
 }
 export interface ContactProposal { sourceId: string; person: Omit<ContactPerson, 'id'>; claim: string }
@@ -21,6 +23,49 @@ const string = (value: unknown, field: string): string => {
 };
 const interactionTypes: InteractionType[] = ['meeting', 'correspondence', 'collaboration', 'family-interaction', 'service', 'teaching', 'wartime-opposition', 'other'];
 
+function parseAssessmentItem(item: Record<string, unknown>, pair: ContactPair): ContactAssessmentResult {
+  if (item.verdict !== 'accepted' && item.verdict !== 'unresolved') throw new Error('Verdict must be accepted or unresolved.');
+  const result: ContactAssessmentResult = { pair: [pair.first.id, pair.second.id], verdict: item.verdict, evidence: '' };
+  if (result.verdict === 'unresolved') { result.uncertainty = string(item.uncertainty, 'uncertainty reason'); return result; }
+  const blocked = blockedContact(pair.first, pair.second);
+  if (blocked) throw new Error(blocked);
+  if (!interactionTypes.includes(item.interactionType as InteractionType)) throw new Error('Accepted contacts need an interaction type.');
+  result.interactionType = item.interactionType as InteractionType;
+  result.evidence = string(item.evidence, 'concrete interaction evidence');
+  if (result.interactionType === 'wartime-opposition') result.episode = string(item.episode, 'named battle or campaign involving these exact opponents');
+  if (item.year !== undefined && item.year !== null) {
+    if (!Number.isSafeInteger(item.year) || item.year === 0 || (item.year as number) < Math.max(pair.first.birthYear, pair.second.birthYear)
+      || (item.year as number) > Math.min(pair.first.deathYear, pair.second.deathYear)) throw new Error('Interaction year contradicts supplied lifespans.');
+    result.year = item.year as number;
+  }
+  return result;
+}
+
+// Judges every item of a reply on its own. Items that are valid are kept; the pairs whose item was invalid, duplicated or
+// missing come back as `failed` (indexes into `pairs`) so a bad item costs one small follow-up instead of the whole batch.
+// A reply that is not an array, or has no valid item at all, still throws.
+export function parseContactAssessmentsPartial(value: unknown, pairs: ContactPair[]): { results: ContactAssessmentResult[]; failed: number[] } {
+  if (!Array.isArray(value)) throw new Error('Return one independent assessment per requested pair.');
+  const good = new Map<number, ContactAssessmentResult>(), bad = new Set<number>();
+  let firstError: Error | undefined;
+  for (const raw of value) {
+    let index = -1;
+    try {
+      const item = object(raw);
+      index = typeof item.ref === 'string' && /^p\d+$/.test(item.ref) ? Number(item.ref.slice(1)) - 1 : -1;
+      if (!pairs[index]) throw new Error('Unknown or duplicate pair reference.');
+      if (good.has(index) || bad.has(index)) { good.delete(index); bad.add(index); throw new Error('Unknown or duplicate pair reference.'); }
+      good.set(index, parseAssessmentItem(item, pairs[index]));
+    } catch (error) {
+      if (index >= 0 && pairs[index]) { good.delete(index); bad.add(index); }
+      firstError ??= error instanceof Error ? error : new Error('Invalid assessment item.');
+    }
+  }
+  if (!good.size) throw firstError ?? new Error('Return one independent assessment per requested pair.');
+  return { results: [...good.entries()].sort(([a], [b]) => a - b).map(([, result]) => result), failed: pairs.map((_, i) => i).filter(i => !good.has(i)) };
+}
+
+// Strict form: every requested pair answered validly, or an error.
 export function parseContactAssessments(value: unknown, pairs: ContactPair[]): ContactAssessmentResult[] {
   if (!Array.isArray(value) || value.length !== pairs.length) throw new Error('Return one independent assessment per requested pair.');
   const seen = new Set<number>();
@@ -30,21 +75,7 @@ export function parseContactAssessments(value: unknown, pairs: ContactPair[]): C
     const pair = pairs[index];
     if (!pair || seen.has(index)) throw new Error('Unknown or duplicate pair reference.');
     seen.add(index);
-    if (item.verdict !== 'accepted' && item.verdict !== 'unresolved') throw new Error('Verdict must be accepted or unresolved.');
-    const result: ContactAssessmentResult = { pair: [pair.first.id, pair.second.id], verdict: item.verdict, evidence: '' };
-    if (result.verdict === 'unresolved') { result.uncertainty = string(item.uncertainty, 'uncertainty reason'); return result; }
-    const blocked = blockedContact(pair.first, pair.second);
-    if (blocked) throw new Error(blocked);
-    if (!interactionTypes.includes(item.interactionType as InteractionType)) throw new Error('Accepted contacts need an interaction type.');
-    result.interactionType = item.interactionType as InteractionType;
-    result.evidence = string(item.evidence, 'concrete interaction evidence');
-    if (result.interactionType === 'wartime-opposition') result.episode = string(item.episode, 'named battle or campaign involving these exact opponents');
-    if (item.year !== undefined && item.year !== null) {
-      if (!Number.isSafeInteger(item.year) || item.year === 0 || (item.year as number) < Math.max(pair.first.birthYear, pair.second.birthYear)
-        || (item.year as number) > Math.min(pair.first.deathYear, pair.second.deathYear)) throw new Error('Interaction year contradicts supplied lifespans.');
-      result.year = item.year as number;
-    }
-    return result;
+    return parseAssessmentItem(item, pair);
   });
 }
 
@@ -73,8 +104,20 @@ export function requestContactDiscovery(generate: JsonGenerator, request: Contac
     });
   }, signal, 'contacts-discover');
 }
-export const requestContactAssessment = (generate: JsonGenerator, pairs: ContactPair[], signal?: AbortSignal) =>
-  generate(buildContactAssessmentPrompt(pairs), value => parseContactAssessments(value, pairs), signal, 'contacts-assess');
+// Returns the pairs it could assess, in any order; a pair the model never answered validly is simply absent ("not assessed"),
+// which is not evidence either way. Those pairs get at most one targeted follow-up request, and only they are re-asked.
+export async function requestContactAssessment(generate: JsonGenerator, pairs: ContactPair[], signal?: AbortSignal): Promise<ContactAssessmentResult[]> {
+  const ask = (subset: ContactPair[]) => generate(buildContactAssessmentPrompt(subset), value => parseContactAssessmentsPartial(value, subset), signal, 'contacts-assess');
+  const first = await ask(pairs);
+  if (!first.failed.length) return first.results;
+  try {
+    return [...first.results, ...(await ask(first.failed.map(index => pairs[index]))).results];
+  } catch (error) {
+    // The follow-up produced nothing usable: keep what the first reply gave. Cancellation and transport errors still end the task.
+    if (signal?.aborted || !(error instanceof Error) || !/unusable data|valid JSON/i.test(error.message)) throw error;
+    return first.results;
+  }
+}
 
 const INTERACTION_LABELS: Record<InteractionType, string> = {
   meeting: 'meeting', correspondence: 'correspondence', collaboration: 'collaboration', 'family-interaction': 'family interaction',

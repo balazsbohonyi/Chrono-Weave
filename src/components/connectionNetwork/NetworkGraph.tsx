@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { CATEGORY_BAR_TEXT_COLORS, CATEGORY_COLORS } from '../../constants';
-import { axisTicks, type LayoutMode, type NetworkLayout } from '../../services/connectionNetworkLayout';
+import { axisTicks, type CategoryGuide, type ColumnGuide, type CorridorGuide, type LayoutMode, type NetworkLayout, type OrbitRing } from '../../services/connectionNetworkLayout';
 import {
   closestApproachLabel, describeSide, initials, STATUS_LABELS, truncateName, type NetworkNode, type NetworkSelection, type NetworkView,
 } from '../../services/connectionNetworkView';
@@ -8,6 +8,7 @@ import { formatYear } from '../../utils/formatters';
 import { createWheelClassifier } from '../../utils/wheelGesture';
 import Tooltip from '../Tooltip';
 import { fitCamera as fitPoints, type Camera, type CameraPoint } from './camera';
+import LayoutMenu from './LayoutMenu';
 import { labelLimit, nodeRadius } from './metrics';
 
 interface Point { x: number; y: number }
@@ -39,9 +40,31 @@ interface Props {
   onPinsChange: () => void;
   onToggleFold: (hostId: string) => void;
   legend: React.ReactNode;
+  // Whether the graph has the whole body to itself, and the way to toggle that (absent when there is no side panel to hide).
+  maximized: boolean;
+  onToggleMaximize?: () => void;
 }
 
-const sideClass = (node: NetworkNode) => node.endpoint !== null ? 'is-endpoint' : `is-side-${node.side}`;
+const sideClass = (node: NetworkNode) => node.endpoint !== null ? `is-endpoint is-end-${node.endpoint === 0 ? 'a' : 'b'}` : `is-side-${node.side}`;
+// Endpoint names are shown whole, on a pill, so they stay readable among a crowd.
+const ENDPOINT_NAME_LIMIT = 28;
+const pillWidth = (text: string) => text.length * 7.6 + 20;
+// 'LEADERS & BADDIES' -> 'Leaders & Baddies'
+const titleCase = (text: string) => text.toLowerCase().replace(/(^|[\s&-])([a-z])/g, (_, before: string, letter: string) => before + letter.toUpperCase());
+// Column headers are drawn at a constant size on screen, so when zoomed out they share the room of the narrowest band: all of them
+// say "n links" while that fits, then just the number, then only every fifth.
+const columnLabel = (guide: ColumnGuide, guides: readonly ColumnGuide[], zoom: number) => {
+  const room = Math.min(...guides.map(item => item.half * 2 + 40)) * zoom;
+  if (room >= 64) return `${guide.hops} ${guide.hops === 1 ? 'link' : 'links'}`;
+  return room >= 18 || guide.hops % 5 === 0 ? String(guide.hops) : '';
+};
+
+// One icon button of the view controls. A state is shown with `pressed`, an action with just its label.
+const ToolButton: React.FC<{ tip: string; label?: string; pressed?: boolean; disabled?: boolean; onClick: () => void; children: React.ReactNode }> = ({ tip, label, pressed, disabled, onClick, children }) =>
+  <Tooltip text={tip}><button type="button" className="canvas-floating-button" aria-label={label ?? tip} aria-pressed={pressed} disabled={disabled}
+    onClick={event => { if (event.detail > 0) event.currentTarget.blur(); onClick(); }}>
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{children}</svg>
+  </button></Tooltip>;
 // Keeps receiving a drag that leaves the element; a pointer that is already gone is not an error.
 const capture = (element: Element, pointerId: number) => { try { element.setPointerCapture(pointerId); } catch { /* released */ } };
 const activate = (action: () => void) => (event: React.KeyboardEvent) => {
@@ -52,13 +75,25 @@ const activate = (action: () => void) => (event: React.KeyboardEvent) => {
 // so the simulation never re-renders the explorer. The camera is a transform over screen-sized content.
 const NetworkGraph: React.FC<Props> = ({
   view, endpointNames, nameOf, layout, kick, mode, onModeChange, size, onSize, selection, onSelect, portraits, narrow, reducedMotion,
-  success, onReveal, reveal, onPinsChange, onToggleFold, legend,
+  success, onReveal, reveal, onPinsChange, onToggleFold, legend, maximized, onToggleMaximize,
 }) => {
   const uid = useId().replace(/:/g, '');
   const svg = useRef<SVGSVGElement>(null);
   const nodeEls = useRef(new Map<string, SVGGElement>());
   const edgeEls = useRef(new Map<string, { from: string; to: string; el: SVGGElement }>());
   const gapEl = useRef<SVGGElement | null>(null);
+  // The guides of the cluster (rings) and columns (bands) layouts, each moved to its endpoint's live position.
+  const ringEls = useRef(new Map<string, { anchor: string; el: SVGGElement }>());
+  // Connection lines can be switched off to read just the people and their names.
+  const [showLines, setShowLines] = useState(true);
+  const [rings, setRings] = useState<readonly OrbitRing[]>(() => layout.rings);
+  const [columns, setColumns] = useState<readonly ColumnGuide[]>(() => layout.columns);
+  // The pods of the category layout stand still; the corridor's centre line is painted between its two endpoints.
+  const [categories, setCategories] = useState<readonly CategoryGuide[]>(() => layout.categories);
+  const [corridor, setCorridor] = useState<CorridorGuide | null>(() => layout.corridor);
+  const corridorEl = useRef<SVGGElement | null>(null);
+  // The layer over the graph the layout menu is drawn in (see LayoutMenu).
+  const [menuHost, setMenuHost] = useState<HTMLDivElement | null>(null);
   const [camera, setCamera] = useState<Camera>({ x: 0, y: 0, k: 1 });
   const cameraRef = useRef(camera);
   cameraRef.current = camera;
@@ -86,6 +121,18 @@ const NetworkGraph: React.FC<Props> = ({
       const a = layout.position(from), b = layout.position(to);
       if (!a || !b) continue;
       for (const line of el.querySelectorAll('line')) {
+        line.setAttribute('x1', a.x.toFixed(1)); line.setAttribute('y1', a.y.toFixed(1));
+        line.setAttribute('x2', b.x.toFixed(1)); line.setAttribute('y2', b.y.toFixed(1));
+      }
+    }
+    for (const { anchor, el } of ringEls.current.values()) {
+      const at = layout.position(anchor);
+      if (at) el.setAttribute('transform', `translate(${at.x.toFixed(1)} ${at.y.toFixed(1)})`);
+    }
+    const band = corridorEl.current;
+    if (band) {
+      const a = layout.position(band.dataset.a ?? ''), b = layout.position(band.dataset.b ?? '');
+      if (a && b) for (const line of band.querySelectorAll('line')) {
         line.setAttribute('x1', a.x.toFixed(1)); line.setAttribute('y1', a.y.toFixed(1));
         line.setAttribute('x2', b.x.toFixed(1)); line.setAttribute('y2', b.y.toFixed(1));
       }
@@ -133,12 +180,16 @@ const NetworkGraph: React.FC<Props> = ({
 
   // Positions painted by the layout, plus follow-the-graph camera until the user takes over.
   const ticks = useRef(0);
-  useEffect(() => layout.subscribe(() => {
+  useEffect(() => { setRings(layout.rings); setColumns(layout.columns); setCategories(layout.categories); setCorridor(layout.corridor); return layout.subscribe(() => {
     paint();
+    setRings(layout.rings);
+    setColumns(layout.columns);
+    setCategories(layout.categories);
+    setCorridor(layout.corridor);
     const current = layout.yearDomain;
     setDomain(previous => previous[0] === current[0] && previous[1] === current[1] ? previous : current);
     if (!userMoved.current && (ticks.current++ % 3 === 0 || !layout.active)) { const next = fitCamera(followAll.current, litChain.current ?? undefined); if (next) apply(next); }
-  }), [layout, paint, fitCamera, apply]);
+  }); }, [layout, paint, fitCamera, apply]);
   useLayoutEffect(() => { paint(); });
 
   // Measure the available area. Layout and drawing work in real screen pixels.
@@ -274,9 +325,16 @@ const NetworkGraph: React.FC<Props> = ({
   const sx = (year: number) => camera.x + layout.xOf(year) * camera.k;
   const ticksForAxis = mode === 'time'
     ? axisTicks(domain[0], domain[1], layout.pixelsPerYear * camera.k).filter(year => sx(year) > -40 && sx(year) < size.width + 40) : [];
-  const freeLabel = mode === 'time' ? 'Switch to free layout' : 'Switch to year-based timeline';
   const closest = view.closest;
-  const closestVisible = closest && layout.nodes.has(closest.a) && layout.nodes.has(closest.b) && view.nodes.some(n => n.id === closest.a) && view.nodes.some(n => n.id === closest.b);
+  // With the lines off, only what the user is looking at or the lit chain keeps its line, so selecting a contact still shows it.
+  const drawnEdges = showLines ? view.edges : view.edges.filter(edge => edge.id === selection.edge || (successChain && view.chain!.edgeIds.includes(edge.id)));
+  // The endpoints are drawn last, on top of everybody else, so a crowd never covers them.
+  const drawnNodes = [...view.nodes].sort((x, y) => Number(x.endpoint !== null) - Number(y.endpoint !== null));
+  const pinnedCount = layout.pinned.size;
+  const clustered = mode === 'cluster', columnar = mode === 'columns', podded = mode === 'category', corridored = mode === 'corridor';
+  // Choosing an arrangement also frames the whole picture, which is about to move; the timeline and the free layout keep the camera.
+  const chooseLayout = (next: LayoutMode) => { onModeChange(next); if (next !== 'time' && next !== 'free') fit(); };
+  const closestVisible = showLines && closest && layout.nodes.has(closest.a) && layout.nodes.has(closest.b) && view.nodes.some(n => n.id === closest.a) && view.nodes.some(n => n.id === closest.b);
 
   return <div className={`net-graph ${success ? 'is-success' : ''}`}>
     <div className="net-stage">
@@ -288,7 +346,35 @@ const NetworkGraph: React.FC<Props> = ({
         {ticksForAxis.map(year => <line key={year} x1={sx(year)} x2={sx(year)} y1={0} y2={size.height} />)}
       </g>}
       <g className="net-content" transform={`translate(${camera.x} ${camera.y}) scale(${camera.k})`}>
-        {view.edges.map(edge => {
+        {clustered && <g className="net-orbits" aria-hidden="true">
+          {rings.map(ring => <g key={`${ring.anchor}-${ring.hops}`} className={`net-orbit is-side-${ring.side}`}
+            ref={el => { const key = `${ring.anchor}-${ring.hops}`; if (el) ringEls.current.set(key, { anchor: ring.anchor, el }); else ringEls.current.delete(key); }}>
+            <circle r={ring.radius} />
+            <text x={(ring.side === 'a' ? 1 : -1) * (ring.radius + 6)} y={-5} textAnchor={ring.side === 'a' ? 'start' : 'end'}>{ring.hops} {ring.hops === 1 ? 'link' : 'links'}</text>
+          </g>)}
+        </g>}
+        {columnar && <g className="net-columns" aria-hidden="true">
+          {columns.map(guide => {
+            const key = `col-${guide.anchor}-${guide.hops}`, label = columnLabel(guide, columns, camera.k);
+            return <g key={key} className={`net-column is-side-${guide.side}`} ref={el => { if (el) ringEls.current.set(key, { anchor: guide.anchor, el }); else ringEls.current.delete(key); }}>
+              <rect x={guide.dx - guide.half} y={guide.top} width={guide.half * 2} height={guide.bottom - guide.top} rx={14} />
+              {label && <text x={guide.dx} y={guide.top - 8 / camera.k} textAnchor="middle" style={{ fontSize: 12 / camera.k, strokeWidth: 3 / camera.k }}>{label}</text>}
+            </g>;
+          })}
+        </g>}
+        {podded && <g className="net-pods" aria-hidden="true">
+          {categories.map(guide => {
+            // The title keeps a readable size on screen, up to the height of the pod's header.
+            const size = Math.min(34, Math.max(14, 15 / camera.k));
+            return <g key={guide.category} className="net-pod" style={{ '--cat': (CATEGORY_COLORS as Record<string, string>)[guide.category] ?? 'rgb(var(--color-content-muted))' } as React.CSSProperties}>
+              <rect x={guide.x} y={guide.y} width={guide.width} height={guide.height} rx={20} />
+              <circle cx={guide.x + 18 + size * 0.32} cy={guide.y + Math.min(46, 14 + size) - size * 0.33} r={size * 0.32} />
+              <text x={guide.x + 18 + size * 0.95} y={guide.y + Math.min(46, 14 + size)} style={{ fontSize: size, strokeWidth: size / 5 }}>{titleCase(guide.category)} · {guide.count}</text>
+            </g>;
+          })}
+        </g>}
+        {corridored && corridor && <g className="net-corridor" aria-hidden="true" ref={el => { corridorEl.current = el; }} data-a={corridor.from} data-b={corridor.to}><line /></g>}
+        {drawnEdges.map(edge => {
           const label = `${nameOf(edge.from)} and ${nameOf(edge.to)}: ${STATUS_LABELS[edge.status]}`;
           const select = () => onSelect({ edge: edge.id });
           return <g key={edge.id} data-net-interactive ref={el => { if (el) edgeEls.current.set(edge.id, { from: edge.from, to: edge.to, el }); else edgeEls.current.delete(edge.id); }}
@@ -303,14 +389,16 @@ const NetworkGraph: React.FC<Props> = ({
           <title>{closestApproachLabel(closest, nameOf)}</title>
           <line className="net-gap-line" /><line className="net-gap-hit" />
         </g>}
-        {view.nodes.map((node, index) => {
-          const r = nodeRadius(node.endpoint !== null, narrow), url = node.supported && !failed.has(node.id) ? portraits.get(node.id) : undefined;
+        {drawnNodes.map((node, index) => {
+          const isEndpoint = node.endpoint !== null;
+          const r = nodeRadius(isEndpoint, narrow), url = node.supported && !failed.has(node.id) ? portraits.get(node.id) : undefined;
           const fold = view.folds.find(item => item.hostId === node.id);
           const selected = selection.person === node.id, onEdge = !!selection.edge && !!view.focus?.nodes.has(node.id);
           const name = node.person.name;
           const label = `${name}, ${describeSide(node, endpointNames)}${layout.pinned.has(node.id) ? ', pinned' : ''}`;
           const select = () => onSelect({ person: node.id });
           const clip = `${uid}-clip-${index}`;
+          const shownName = isEndpoint ? truncateName(name, ENDPOINT_NAME_LIMIT) : truncateName(name, labelLimit(narrow));
           return <g key={node.id} data-net-interactive ref={el => { if (el) nodeEls.current.set(node.id, el); else nodeEls.current.delete(node.id); }}
             role="button" tabIndex={0} aria-label={label} aria-pressed={selected}
             className={`net-node ${sideClass(node)} ${node.supported ? 'is-supported' : 'is-tentative'} ${selected ? 'is-selected' : ''} ${onEdge ? 'is-edge-end' : ''} ${dimmed(node.id) ? 'is-dim' : ''} ${successChain && view.chain!.nodeIds.includes(node.id) ? 'is-chain' : ''} ${node.active ? 'is-active' : ''}`}
@@ -318,6 +406,7 @@ const NetworkGraph: React.FC<Props> = ({
             onDoubleClick={() => { if (layout.pinned.has(node.id)) { layout.unpin(node.id); kick(); onPinsChange(); } }} onKeyDown={activate(select)}>
             <title>{`${name} (${node.person.birthYear}–${node.person.deathYear})`}</title>
             <g className="net-node-body">
+              {isEndpoint && <g className="net-beacon" aria-hidden="true"><circle className="net-halo" r={r + 28} /><circle className="net-halo-ring" r={r + 14} /></g>}
               {node.active && <circle className="net-pulse" r={r + 9} />}
               <circle className="net-select-ring" r={r + 8} />
               <circle className="net-ring" r={r + 3} />
@@ -326,10 +415,11 @@ const NetworkGraph: React.FC<Props> = ({
               {url
                 ? <image href={url} x={-r} y={-r} width={r * 2} height={r * 2} clipPath={`url(#${clip})`} preserveAspectRatio="xMidYMid slice" onError={() => setFailed(previous => new Set(previous).add(node.id))} />
                 : <text className="net-initials" textAnchor="middle" dy="0.35em" style={{ fontSize: r * 0.8, fill: CATEGORY_BAR_TEXT_COLORS[node.person.category] }}>{initials(name)}</text>}
-              {node.endpoint !== null && <g className="net-badge-ab"><circle cx={r * 0.78} cy={-r * 0.78} r={r * 0.34} /><text x={r * 0.78} y={-r * 0.78} textAnchor="middle" dy="0.35em">{node.endpoint === 0 ? 'A' : 'B'}</text></g>}
+              {node.endpoint !== null && <g className="net-badge-ab"><circle cx={r * 0.78} cy={-r * 0.78} r={r * 0.4} /><text x={r * 0.78} y={-r * 0.78} textAnchor="middle" dy="0.35em">{node.endpoint === 0 ? 'A' : 'B'}</text></g>}
               {layout.pinned.has(node.id) && <g className="net-pin"><title>Pinned · double-click to release</title><circle cx={-r * 0.78} cy={-r * 0.78} r={6} /><path d={`M ${-r * 0.78 - 2.5} ${-r * 0.78 + 2.5} L ${-r * 0.78 + 2.5} ${-r * 0.78 - 2.5}`} /></g>}
             </g>
-            <text className="net-name" textAnchor="middle" y={r + 15}>{truncateName(name, labelLimit(narrow))}</text>
+            {isEndpoint && <rect className="net-pill" x={-pillWidth(shownName) / 2} y={r + 5} width={pillWidth(shownName)} height={22} rx={11} />}
+            <text className="net-name" textAnchor="middle" y={isEndpoint ? r + 20.5 : r + 15}>{shownName}</text>
             {fold && <g data-net-interactive role="button" tabIndex={0} className="net-fold" aria-label={fold.expanded ? `Hide ${fold.ids.length} more ${fold.ids.length === 1 ? 'contact' : 'contacts'} of ${name}` : `Show ${fold.ids.length} more ${fold.ids.length === 1 ? 'contact' : 'contacts'} of ${name}`}
               transform={`translate(${r * 0.8} ${r * 0.8})`} onPointerDown={event => event.stopPropagation()}
               onClick={event => { event.stopPropagation(); onToggleFold(node.id); }} onKeyDown={activate(() => onToggleFold(node.id))}>
@@ -342,37 +432,31 @@ const NetworkGraph: React.FC<Props> = ({
     {mode === 'time' && ['top', 'bottom'].map(edge => <div key={edge} className={`net-strip is-${edge}`} aria-hidden="true">
       {ticksForAxis.map(year => <span key={year} className="net-tick" style={{ left: sx(year) }}>{formatYear(year)}</span>)}
     </div>)}
+    {onToggleMaximize && <div className="net-maximize">
+      <ToolButton tip={maximized ? 'Show the side panel again' : 'Maximize the graph (hides the side panel)'} label={maximized ? 'Restore the side panel' : 'Maximize the graph'} onClick={onToggleMaximize}>
+        {maximized ? <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7" /> : <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />}
+      </ToolButton>
+    </div>}
     <div className="net-overlay-row">
       <div data-net-controls className="canvas-view-toolbar net-view-toolbar" role="toolbar" aria-label="Network view controls">
-        <Tooltip text={freeLabel}><button type="button" className="canvas-floating-button" aria-label={freeLabel} onClick={event => {
-          if (event.detail > 0) event.currentTarget.blur();
-          onModeChange(mode === 'time' ? 'free' : 'time');
-        }}>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            {mode === 'free' ? <>
-              <path d="M3 20h18M6 18v3M12 18v3M18 18v3" />
-              <rect x="3" y="3" width="11" height="3" rx="1" fill="currentColor" stroke="none" />
-              <rect x="8" y="8" width="13" height="3" rx="1" fill="currentColor" stroke="none" />
-              <rect x="5" y="13" width="10" height="3" rx="1" fill="currentColor" stroke="none" />
-            </> : <>
-              <circle cx="6" cy="7" r="2.6" /><circle cx="18" cy="6" r="2.6" /><circle cx="12" cy="18" r="2.6" />
-              <path d="M8.5 7h7M7.4 9.3l3.3 6.4M16.7 8.4l-3.4 7.2" />
-            </>}
-          </svg>
-        </button></Tooltip>
+        <LayoutMenu mode={mode} onSelect={chooseLayout} host={menuHost} />
+        <ToolButton tip={pinnedCount ? `Unpin all ${pinnedCount} pinned ${pinnedCount === 1 ? 'person' : 'people'}` : 'Nobody is pinned'} label="Unpin all people" disabled={!pinnedCount}
+          onClick={() => { layout.unpinAll(); kick(); onPinsChange(); }}>
+          <path d="M12 17v5" /><path d="M15 9.3V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H7.9" /><path d="m2 2 20 20" />
+          <path d="M9 9v1.8a2 2 0 0 1-1.1 1.8l-1.8.9A2 2 0 0 0 5 15.2V16a1 1 0 0 0 1 1h11" />
+        </ToolButton>
         <span className="canvas-toolbar-divider" aria-hidden="true" />
-        <Tooltip text="Zoom in"><button type="button" className="canvas-floating-button" aria-label="Zoom network in" onClick={event => { if (event.detail > 0) event.currentTarget.blur(); zoomBy(1.25); }}>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.5 15.5 5 5M10.5 7.8v5.4M7.8 10.5h5.4" /></svg>
-        </button></Tooltip>
-        <Tooltip text="Zoom out"><button type="button" className="canvas-floating-button" aria-label="Zoom network out" onClick={event => { if (event.detail > 0) event.currentTarget.blur(); zoomBy(0.8); }}>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.5 15.5 5 5M7.8 10.5h5.4" /></svg>
-        </button></Tooltip>
-        <Tooltip text="Fit the whole network"><button type="button" className="canvas-floating-button" aria-label="Fit network" onClick={event => { if (event.detail > 0) event.currentTarget.blur(); fit(); }}>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /><rect x="9" y="9" width="6" height="6" rx="1" /></svg>
-        </button></Tooltip>
+        <ToolButton tip={showLines ? 'Hide connection lines' : 'Show connection lines'} label="Hide connection lines" pressed={!showLines} onClick={() => setShowLines(on => !on)}>
+          <circle cx="5.5" cy="12" r="2.6" /><circle cx="18.5" cy="12" r="2.6" /><path d="M8.1 12h7.8" />
+          {!showLines && <path d="M4 20 20 4" />}
+        </ToolButton>
+        <ToolButton tip="Zoom in" label="Zoom network in" onClick={() => zoomBy(1.25)}><circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.5 15.5 5 5M10.5 7.8v5.4M7.8 10.5h5.4" /></ToolButton>
+        <ToolButton tip="Zoom out" label="Zoom network out" onClick={() => zoomBy(0.8)}><circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.5 15.5 5 5M7.8 10.5h5.4" /></ToolButton>
+        <ToolButton tip="Fit the whole network" label="Fit network" onClick={fit}><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /><rect x="9" y="9" width="6" height="6" rx="1" /></ToolButton>
       </div>
       {legend}
     </div>
+    <div className="net-menu-host" ref={setMenuHost} />
     </div>
     {success && <div className="net-success-wrap">
       <div className="net-success" role="status">Connected · {success.degrees} {success.degrees === 1 ? 'degree' : 'degrees'}<small>Look the chain over, then press Reveal to play it</small></div>

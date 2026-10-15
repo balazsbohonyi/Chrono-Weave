@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { CandidateContact, ConnectionSession, ContactPerson } from '../src/services/connectionGraph';
 import {
-  buildNetworkView, closestApproachLabel, portraitSubjects, describeSide, lifespanGap, NO_FILTERS, NETWORK_FOLD_THRESHOLD,
+  buildNetworkView, closestApproachLabel, corridorSpine, portraitSubjects, describeSide, lifespanGap, NO_FILTERS, NETWORK_FOLD_THRESHOLD,
 } from '../src/services/connectionNetworkView';
 
 const provenance = { provider: 'synthetic', model: 'synthetic', version: 2, assessedAt: 1 };
@@ -66,6 +66,8 @@ test('sides, distances and unattached people', () => {
   assert.equal(by.y.side, 'a'); assert.equal(by.y.distance, 2);
   assert.equal(by.n.side, 'b'); assert.equal(by.f.distance, 2);
   assert.equal(by.l1.side, 'none'); assert.equal(by.l1.distance, null);
+  // Each person remembers the contact they were reached through on their own side; endpoints and unattached people have none.
+  assert.deepEqual(['a', 'x', 'y', 'b', 'n', 'f', 'l1'].map(id => by[id].parent), [null, 'a', 'x', null, 'b', 'n', null]);
   assert.equal(describeSide(by.y, ['A', 'B']), 'Reached from A · 2 links');
   assert.equal(describeSide(by.l1, ['A', 'B']), 'Not yet attached to either endpoint');
   assert.equal(describeSide(by.b, ['A', 'B']), 'Endpoint B');
@@ -168,4 +170,21 @@ test('only AI-supported people are ever offered for portraits', () => {
   const everything = buildNetworkView(s, { filters: { unresolved: true, proposed: true, blocked: true }, selection: { person: 'x' } });
   assert.ok(everything.nodes.some(node => node.id === 'u') && everything.nodes.some(node => node.id === 'z'));
   assert.deepEqual(portraitSubjects(everything).map(subject => subject.id).sort(), ['a', 'b', 'x']);
+});
+
+test('the corridor spine runs from A to B: the chain when there is one, else each endpoint to the closest approach, else just the two', () => {
+  // Nothing known yet: only the two endpoints.
+  assert.deepEqual(corridorSpine(buildNetworkView(session([A, B], []))), ['a', 'b']);
+  // Two sides that have not met: a - x - y on one, b - n on the other. The spine is the way from a to the closest pair, then on to b.
+  const n = human('n', 1760, 1830), far = human('f', 1700, 1760);
+  const apart = buildNetworkView(session([A, B, X, Y, n, far], [link('a', 'x'), link('x', 'y'), link('b', 'n'), link('n', 'f')]));
+  const spine = corridorSpine(apart);
+  assert.ok(apart.closest && !apart.chain);
+  assert.equal(spine[0], 'a'); assert.equal(spine[spine.length - 1], 'b');
+  assert.equal(spine.indexOf(apart.closest!.b), spine.indexOf(apart.closest!.a) + 1, 'the gap is between the closest pair');
+  assert.equal(new Set(spine).size, spine.length, 'nobody twice');
+  // Connected: the chain itself.
+  const joined = buildNetworkView(session([A, B, X, Y], [link('a', 'x'), link('x', 'y'), link('y', 'b')]));
+  assert.deepEqual(corridorSpine(joined), joined.chain!.nodeIds);
+  assert.deepEqual(corridorSpine(joined), ['a', 'x', 'y', 'b']);
 });

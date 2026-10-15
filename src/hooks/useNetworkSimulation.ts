@@ -32,7 +32,7 @@ export function useNetworkSimulation({ resetKey, inputs, links, bounds, mode, si
     frame.current = requestAnimationFrame(run);
   }, [layout]);
 
-  const signature = JSON.stringify([inputs.map(input => [input.id, input.year, input.endpoint, input.radius]), links.map(link => [link.a, link.b]), bounds, mode, size.width, size.height, ready]);
+  const signature = JSON.stringify([inputs.map(input => [input.id, input.year, input.endpoint, input.radius, input.side, input.distance, input.parent, input.category, input.spine]), links.map(link => [link.a, link.b]), bounds, mode, size.width, size.height, ready]);
   useLayoutEffect(() => {
     if (!ready) return;
     layout.setBounds(bounds[0], bounds[1]);

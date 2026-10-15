@@ -58,3 +58,26 @@ test('a late checkpoint from a cancelled run cannot overwrite a newer explicit s
   await repo.checkpoint({ people: session.people, contacts: [] }, { ...session, runStartedAt: 100, phase: 'Late cancellation' });
   assert.equal((await repo.loadSession(session.key))?.runStartedAt, 200);
 });
+
+test('request counters are whitelisted on recovery: valid ones are kept, old or malformed ones read as absent', async () => {
+  const base = fixture(), fields = ['requests', 'assessBatches', 'discoverSources', 'pairAsks', 'validationRetries', 'total'] as const;
+  const old = recoverSession(base)!; assert.equal(old.version, 2);
+  for (const field of fields) assert.equal(field in old.diagnostics, false, `a session saved before instrumentation has no ${field}`);
+  const requests = { seed: 1, direct: 0, assess: 2, discover: 3, identity: 0 }, pairAsks = { fresh: 7, focused: 1, contextChange: 2 };
+  const valid = { requests, assessBatches: [1, 8], discoverSources: [1, 2, 4], pairAsks, validationRetries: 1,
+    total: { segments: 2, requests, pairAsks, elapsedMs: 1234 }, authorization: 'secret' };
+  const kept = recoverSession({ ...base, diagnostics: { ...base.diagnostics, ...valid } })!;
+  for (const field of fields) assert.deepEqual(kept.diagnostics[field], valid[field], field);
+  assert.equal(JSON.stringify(kept).includes('secret'), false);
+  // Anything malformed is dropped on its own; the rest of the diagnostics and the session survive.
+  const broken = recoverSession({ ...base, diagnostics: { ...base.diagnostics, requests: 'many', assessBatches: [1, -2], discoverSources: Array(300).fill(1), pairAsks: { fresh: 1 },
+    validationRetries: 1.5, total: { segments: 1, requests: { seed: 1 }, pairAsks, elapsedMs: 0 } } })!;
+  for (const field of fields) assert.equal(field in broken.diagnostics, false, `malformed ${field} is dropped`);
+  assert.equal(broken.diagnostics.tasks, 1);
+  assert.deepEqual(recoverSession({ ...base, diagnostics: { ...base.diagnostics, requests: { seed: 2, assess: -1, bogus: 4, discover: 'x' } } })!.diagnostics.requests, { seed: 2 });
+  assert.equal('total' in recoverSession({ ...base, diagnostics: { ...base.diagnostics, total: { ...valid.total, elapsedMs: -1 } } })!.diagnostics, false);
+  // Counters survive a checkpoint and reload, which is what lets a continued search keep adding to its total.
+  const repo = new MemoryConnectionRepository(), session = { ...base, diagnostics: { ...base.diagnostics, ...valid } };
+  await repo.checkpoint({ people: session.people, contacts: [] }, session);
+  assert.deepEqual((await repo.loadSession(session.key))?.diagnostics.total, valid.total);
+});

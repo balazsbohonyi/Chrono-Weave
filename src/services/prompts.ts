@@ -205,11 +205,15 @@ const contactIdentity = (person: import('./connectionGraph').ContactPerson) => (
   name: person.name, aliases: person.aliases, birthYear: person.birthYear, deathYear: person.deathYear, occupation: person.occupation,
 });
 export function buildContactDiscoveryPrompt(request: import('./connectionAI').ContactDiscoveryRequest): string {
+  const goals = request.sources.map(source => source.goal ?? request.target);
+  // One shared goal keeps the original wording; sources from both ends of the search each carry their own.
+  const perSource = new Set(goals.map(goal => `${goal.name}|${goal.birthYear}|${goal.deathYear}`)).size > 1;
   return `Six Degrees: discover additional distinct personal-contact candidates, at most ${request.limit} per supplied source.
 ${SIX_DEGREES_CONTACT_RULES}
-Goal on the opposite side: ${JSON.stringify(contactIdentity(request.target))}.
-Sources: ${JSON.stringify(request.sources.map((source, i) => ({ ref: `s${i + 1}`, ...contactIdentity(source.person), round: source.round,
-    previouslyProposedPairsWith: source.previous.map(contactIdentity) })))}
+${perSource ? 'Each source has its own goal on the opposite side (the "goal" field); aim every source at its own goal, never at another source\'s.'
+    : `Goal on the opposite side: ${JSON.stringify(contactIdentity(goals[0] ?? request.target))}.`}
+Sources: ${JSON.stringify(request.sources.map((source, i) => ({ ref: `s${i + 1}`, ...contactIdentity(source.person), ...(perSource ? { goal: contactIdentity(goals[i]) } : {}),
+    round: source.round, previouslyProposedPairsWith: source.previous.map(contactIdentity) })))}
 Existing references, including canvas people and the opposite frontier: ${JSON.stringify(request.references.map((person, i) => ({ reference: `r${i + 1}`, ...contactIdentity(person) })))}
 Exclude previously proposed source-person PAIRS, never all known people. Existing references and opposite-frontier people remain eligible: use them to join networks. Each round should supply additional contacts across diverse networks: family/service, collaborators, teachers/students, correspondents, patrons and specific wartime opponents.
 For non-overlapping endpoints, propose people who carry contact toward the other period; do not ask whether the endpoints met. Historical progress is a preference, not a requirement; useful temporal detours are allowed. Match explicit canonical aliases with compatible dates; do not conflate surnames, titles, regnal numbers or partial names.

@@ -29,6 +29,8 @@ export interface NetworkNode {
   side: Side;
   // Accepted links from the endpoint on its side; null when it is reachable from neither.
   distance: number | null;
+  // The contact this person was reached through on the way from that endpoint (null for endpoints and for people attached to neither).
+  parent: string | null;
   // An endpoint or someone with at least one accepted contact. Everyone else is tentative.
   supported: boolean;
   // Pairs involving this person are being assessed right now.
@@ -105,7 +107,8 @@ export function buildNetworkView(session: ConnectionSession, options: NetworkVie
   const adjacency = new Map<string, string[]>();
   for (const c of accepted) for (const [x, y] of [[c.from, c.to], [c.to, c.from]]) adjacency.set(x, [...(adjacency.get(x) ?? []), y]);
   const parents = new Map<string, string>();
-  const fromA = distancesFrom(first, adjacency, parents), fromB = distancesFrom(second, adjacency);
+  const parentsB = new Map<string, string>();
+  const fromA = distancesFrom(first, adjacency, parents), fromB = distancesFrom(second, adjacency, parentsB);
 
   let chain: NetworkChain | null = null;
   if (byId.has(first) && byId.has(second) && first !== second && fromA.has(second)) {
@@ -184,6 +187,7 @@ export function buildNetworkView(session: ConnectionSession, options: NetworkVie
     return {
       id, person: byId.get(id)!, endpoint: id === first ? 0 : id === second ? 1 : null, side,
       distance: side === 'a' ? da! : side === 'b' ? db! : null,
+      parent: (side === 'a' ? parents : side === 'b' ? parentsB : undefined)?.get(id) ?? null,
       supported: supported.has(id), active: checking.has(id), contextual: !supported.has(id) && !chipPeople.has(id),
     };
   });
@@ -221,6 +225,29 @@ export function buildNetworkView(session: ConnectionSession, options: NetworkVie
       contacts,
     },
   };
+}
+
+// The people along the corridor layout's centre line, from endpoint A to endpoint B: the chain when one exists, otherwise the
+// shortest known way from each endpoint to the closest approach between the two sides (the gap between them stays open), and just
+// the two endpoints when neither side has reached anywhere yet. Only people who are drawn count.
+export function corridorSpine(view: Pick<NetworkView, 'nodes' | 'chain' | 'closest'>): string[] {
+  const drawn = new Map(view.nodes.map(node => [node.id, node]));
+  const first = view.nodes.find(node => node.endpoint === 0), second = view.nodes.find(node => node.endpoint === 1);
+  if (!first || !second) return [];
+  if (view.chain) {
+    const ids = view.chain.nodeIds.filter(id => drawn.has(id));
+    if (ids[0] === first.id && ids[ids.length - 1] === second.id) return ids;
+  }
+  const upToEndpoint = (id: string) => {
+    const path: string[] = [];
+    for (let node = drawn.get(id); node && path.length < 64; node = node.parent ? drawn.get(node.parent) : undefined) path.push(node.id);
+    return path;
+  };
+  if (view.closest && drawn.has(view.closest.a) && drawn.has(view.closest.b)) {
+    const left = upToEndpoint(view.closest.a).reverse(), right = upToEndpoint(view.closest.b);
+    if (left[0] === first.id && right[right.length - 1] === second.id) return [...left, ...right];
+  }
+  return [first.id, second.id];
 }
 
 // Who may get a Wikipedia portrait: only AI-supported people. A name shared with someone else could

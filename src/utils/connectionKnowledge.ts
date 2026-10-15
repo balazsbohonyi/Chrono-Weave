@@ -1,5 +1,6 @@
 import {
-  CONTACT_VERSION, validAccepted, validPerson, sessionKey, type ContactAssessment, type ContactKnowledge, type ContactPerson, type ConnectionSession,
+  CONTACT_VERSION, CONNECTION_REQUEST_KINDS, PAIR_ASK_REASONS, migrateAttemptContext, validAccepted, validPerson, sessionKey,
+  type ContactAssessment, type ContactKnowledge, type ContactPerson, type ConnectionDiagnostics, type ConnectionSession,
 } from '../services/connectionGraph';
 import { pairKey } from '../services/pathService';
 
@@ -56,6 +57,30 @@ export function recoverKnowledge(raw: unknown): ContactKnowledge {
   });
   return { people: [...people.values()], contacts };
 }
+// Request counters arrive from storage and are whitelisted field by field. Anything missing or malformed is
+// simply absent: sessions saved before instrumentation have none of these fields.
+const counter = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+const sizes = (value: unknown): number[] | undefined => Array.isArray(value) && value.length <= 256 && value.every(item => counter(item) && item <= 100_000) ? [...value] : undefined;
+function counts<K extends string>(value: unknown, keys: readonly K[], complete: boolean): Record<K, number> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const found = keys.filter(key => counter((value as Record<string, unknown>)[key]));
+  return found.length && (!complete || found.length === keys.length) ? Object.fromEntries(found.map(key => [key, (value as Record<string, number>)[key]])) as Record<K, number> : undefined;
+}
+function recoverDiagnostics(d: ConnectionDiagnostics): ConnectionDiagnostics {
+  const requests = counts(d.requests, CONNECTION_REQUEST_KINDS, false), pairAsks = counts(d.pairAsks, PAIR_ASK_REASONS, true);
+  const assessBatches = sizes(d.assessBatches), discoverSources = sizes(d.discoverSources);
+  const t = d.total, totalRequests = counts(t?.requests, CONNECTION_REQUEST_KINDS, true), totalPairAsks = counts(t?.pairAsks, PAIR_ASK_REASONS, true);
+  return {
+    tasks: Number.isSafeInteger(d.tasks) ? d.tasks : 0,
+    people: Number.isSafeInteger(d.people) ? d.people : 0,
+    pairs: Number.isSafeInteger(d.pairs) ? d.pairs : 0,
+    stopReason: typeof d.stopReason === 'string' ? d.stopReason : undefined,
+    ...(requests ? { requests } : {}), ...(assessBatches ? { assessBatches } : {}), ...(discoverSources ? { discoverSources } : {}),
+    ...(pairAsks ? { pairAsks } : {}), ...(counter(d.validationRetries) ? { validationRetries: d.validationRetries } : {}),
+    ...(t && counter(t.segments) && totalRequests && totalPairAsks && Number.isFinite(t.elapsedMs) && t.elapsedMs >= 0
+      ? { total: { segments: t.segments, requests: totalRequests, pairAsks: totalPairAsks, elapsedMs: t.elapsedMs } } : {}),
+  };
+}
 export function recoverSession(raw: unknown): ConnectionSession | null {
   try {
     const s = raw as ConnectionSession;
@@ -72,6 +97,7 @@ export function recoverSession(raw: unknown): ConnectionSession | null {
         status: c.status === 'checking' ? (c.assessment && assessment(c.assessment, byId)?.verdict === 'unresolved' ? 'unresolved' as const : 'proposed' as const)
           : (c.status === 'accepted' && (!c.assessment || !assessment(c.assessment, byId) || c.assessment.verdict !== 'accepted')) ? 'proposed' as const : ['proposed', 'accepted', 'unresolved', 'blocked'].includes(c.status) ? c.status : 'proposed' as const,
         pendingFocused: c.pendingFocused === true,
+        ...(counter(c.failures) && c.failures > 0 ? { failures: c.failures } : {}), ...(c.seed === true ? { seed: true } : {}),
         ...(c.assessment && assessment(c.assessment, byId) ? { assessment: assessment(c.assessment, byId)! } : {}),
         ...(typeof c.blockedReason === 'string' ? { blockedReason: c.blockedReason } : {}),
       }));
@@ -79,16 +105,11 @@ export function recoverSession(raw: unknown): ConnectionSession | null {
       rounds: s.rounds.filter(r => byId.has(r.personId) && Number.isSafeInteger(r.round) && Array.isArray(r.proposed)).map(r => ({
         personId: r.personId, round: r.round, proposed: r.proposed.filter(id => typeof id === 'string'), emptyRounds: r.emptyRounds || 0, lastExpanded: r.lastExpanded || 0,
       })), attempts: Object.fromEntries(Object.entries(s.attempts).filter(([, a]) => a && typeof a.context === 'string' && Number.isSafeInteger(a.segment) && Number.isSafeInteger(a.count))
-        .map(([key, a]) => [key, { context: a.context, segment: a.segment, count: a.count, focusedSegment: Number.isSafeInteger(a.focusedSegment) ? a.focusedSegment : undefined }])),
+        .map(([key, a]) => [key, { context: migrateAttemptContext(a.context), segment: a.segment, count: a.count, focusedSegment: Number.isSafeInteger(a.focusedSegment) ? a.focusedSegment : undefined }])),
       segment: s.segment, seedContext: typeof s.seedContext === 'string' ? s.seedContext : undefined,
       status: s.status === 'connected' ? 'connected' : s.status === 'explored' ? 'explored' : s.status === 'error' ? 'error' : 'paused',
       phase: typeof s.phase === 'string' ? s.phase : 'Paused', error: typeof s.error === 'string' ? s.error : undefined,
-      elapsedMs: s.elapsedMs, updatedAt: s.updatedAt, diagnostics: {
-        tasks: Number.isSafeInteger(s.diagnostics.tasks) ? s.diagnostics.tasks : 0,
-        people: Number.isSafeInteger(s.diagnostics.people) ? s.diagnostics.people : 0,
-        pairs: Number.isSafeInteger(s.diagnostics.pairs) ? s.diagnostics.pairs : 0,
-        stopReason: typeof s.diagnostics.stopReason === 'string' ? s.diagnostics.stopReason : undefined,
-      }, persistent: s.persistent === true, runStartedAt: Number.isFinite(s.runStartedAt) ? s.runStartedAt : 0, retiredKeys: Array.isArray(s.retiredKeys) ? s.retiredKeys.filter(k => typeof k === 'string').slice(-10) : [],
+      elapsedMs: s.elapsedMs, updatedAt: s.updatedAt, diagnostics: recoverDiagnostics(s.diagnostics), persistent: s.persistent === true, runStartedAt: Number.isFinite(s.runStartedAt) ? s.runStartedAt : 0, retiredKeys: Array.isArray(s.retiredKeys) ? s.retiredKeys.filter(k => typeof k === 'string').slice(-10) : [],
     };
   } catch { return null; }
 }

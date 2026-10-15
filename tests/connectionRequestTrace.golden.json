@@ -1,0 +1,92 @@
+{
+  "three-hop chain": [
+    "seed 1",
+    "discover 2",
+    "assess 2",
+    "discover 4",
+    "assess 1"
+  ],
+  "direct contact between overlapping endpoints": [
+    "assess 1"
+  ],
+  "unsupported direct contact exhausts the frontier": [
+    "assess 1",
+    "seed 1",
+    "assess 1",
+    "discover 2",
+    "discover 2"
+  ],
+  "work budget pauses and a reversed explicit continuation finishes": [
+    "seed 1",
+    "discover 2",
+    "assess 2",
+    "discover 4",
+    "assess 1"
+  ],
+  "seed route with a chronological detour": [
+    "seed 1",
+    "assess 3",
+    "assess 2",
+    "discover 3",
+    "assess 2",
+    "discover 5",
+    "assess 2"
+  ],
+  "cross-frontier alias needs two canonical resolutions": [
+    "seed 1",
+    "discover 2",
+    "assess 2",
+    "discover 4",
+    "identity 1",
+    "identity 1",
+    "assess 1"
+  ],
+  "wide discovery fills and overflows an assessment batch": [
+    "seed 1",
+    "discover 2",
+    "assess 8",
+    "assess 8",
+    "assess 8",
+    "assess 8",
+    "assess 8",
+    "discover 4",
+    "assess 7"
+  ],
+  "uncertain promising pairs get one focused reassessment, then resume": [
+    "assess 1",
+    "seed 1",
+    "assess 1",
+    "discover 2",
+    "discover 2"
+  ],
+  "a changed model re-asks every earlier pair inside the direct check": [
+    "assess 1",
+    "seed 1",
+    "assess 1",
+    "discover 2",
+    "assess 3",
+    "assess 1",
+    "seed 1",
+    "assess 4",
+    "assess 3",
+    "discover 2",
+    "discover 1"
+  ],
+  "a chain through a person with conflicting date records is not a route, so both ends keep expanding until a clean bridge is found": [
+    "identity 1",
+    "seed 1",
+    "discover 4",
+    "assess 3"
+  ],
+  "one identity request settles which dates are right for the name on the only accepted bridge, and that finishes the search": [
+    "identity 1"
+  ],
+  "a chain only through conflicting date records ends explored once both ends are exhausted, and resuming repeats it without requests": [
+    "identity 1",
+    "seed 1",
+    "discover 4",
+    "assess 1",
+    "assess 1",
+    "discover 4"
+  ]
+}

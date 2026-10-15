@@ -2,7 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { readFileSync } from 'node:fs';
 import ConnectionExplorer from '../src/components/ConnectionExplorer';
+import { LAYOUT_OPTIONS, LayoutIcon } from '../src/components/connectionNetwork/layoutOptions';
 import { figurePerson, identifyPerson, sessionKey, type ContactPerson, type ConnectionSession } from '../src/services/connectionGraph';
 import { A, B, M, N } from './connectionFixtures';
 
@@ -85,4 +87,28 @@ test('a verified chain is announced in the graph and waits for the Reveal button
   assert.doesNotMatch(markup, /Closest approach/);
   // Without a lit chain there is nothing to reveal.
   assert.doesNotMatch(render(session), /net-reveal/);
+});
+
+test('every layout hangs under one button of the view controls: the menu lists them all with an icon, and starts closed on the current one', () => {
+  const markup = render(build(() => [], true));
+  assert.match(markup, /aria-haspopup="menu"[^>]*aria-expanded="false"[^>]*aria-label="Layout: Timeline"|aria-label="Layout: Timeline"[^>]*aria-haspopup="menu"/);
+  assert.doesNotMatch(markup, /role="menu"/);
+  assert.doesNotMatch(markup, /Group contacts around the endpoints|Line contacts up in columns|Switch to free layout|Switch to year-based timeline/);
+  // The toolbar keeps unpin, hide-lines and the zoom controls beside it.
+  for (const label of ['Unpin all people', 'Hide connection lines', 'Zoom network in', 'Zoom network out', 'Fit network']) assert.match(markup, new RegExp(`aria-label="${label}"`));
+  // The menu itself: one option per layout, each with an icon of its own.
+  assert.deepEqual(LAYOUT_OPTIONS.map(option => option.mode), ['time', 'free', 'cluster', 'columns', 'category', 'corridor']);
+  assert.equal(new Set(LAYOUT_OPTIONS.map(option => option.label)).size, LAYOUT_OPTIONS.length);
+  for (const option of LAYOUT_OPTIONS) assert.match(renderToStaticMarkup(<LayoutIcon>{option.icon}</LayoutIcon>), /<svg[^>]*aria-hidden="true"><(path|circle|rect)/, `${option.label} has an icon`);
+});
+
+test('the graph offers a bare maximize icon that hides the side panel, and starts un-maximized', () => {
+  const markup = render(build(() => [], true));
+  assert.match(markup, /class="net-maximize"[^>]*>(?:(?!<\/div>).)*aria-label="Maximize the graph"/);
+  assert.match(markup, /class="connection-explorer-body "/);
+  assert.doesNotMatch(markup, /is-maximized/);
+  // Maximizing is a class on the body: the panel is hidden (not unmounted, so its tab and search survive) and the graph takes its column.
+  const css = readFileSync('src/styles/connectionExplorer.css', 'utf8');
+  assert.match(css, /\.connection-explorer-body\.is-maximized\s*\{\s*grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+  assert.match(css, /\.connection-explorer-body\.is-maximized\s*>\s*\.connection-explorer-inspection\s*\{\s*display:\s*none/);
 });

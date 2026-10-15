@@ -7,18 +7,25 @@ import { MemoryConnectionRepository } from '../src/utils/connectionKnowledge';
 import { listConnectionPaths, readConnectionPath,  wovenFigureIds } from '../src/utils/connectionPaths';
 import { emptyClusters } from '../src/utils/discoveryClusters';
 import { MemoryStorage } from './helpers';
-import { A, B, M, N, fakeContacts, person } from './connectionFixtures';
+import { A, B, M, N, assertRequestAccounting, fakeContacts, person } from './connectionFixtures';
 import type { IAIService } from '../src/types';
 
+// Every session handed to the exploration effect (live snapshots and restored checkpoints) must have consistent request
+// accounting. runConnectionSearch passes that effect in as onSnapshot, where a throw would become an error status, so the
+// failure is kept and thrown by verify() once the search is over.
 function recorder(current = true) {
+  let failure: unknown;
   const log: string[] = [], canvas: CanvasState = { figures: [A, B], config: { start: 1400, end: 1800, layoutMode: 'timeline', layoutVersion: 3, layoutSelection: 'manual' },
     clusters: emptyClusters(), placements: {}, selectedCategories: new Set() };
   const effects: ConnectionFlowEffects = { isCurrent: () => current, progress: () => {}, canvas: () => canvas,
     applyWoven: woven => { log.push('weave'); canvas.figures = woven.figures; }, pathsChanged: () => log.push('paths'), show: () => log.push('show'),
-    exploration: session => log.push(session.status), failPicking: () => log.push('picker'), notify: (_message, type) => log.push(type) };
-  return { effects, log, canvas };
+    exploration: session => { try { assertRequestAccounting(session.diagnostics); } catch (error) { failure ??= error; } log.push(session.status); }, failPicking: () => log.push('picker'), notify: (_message, type) => log.push(type) };
+  return { effects, log, canvas, verify: () => { if (failure) throw failure; } };
 }
-const search = async () => findConnection({ service: fakeContacts([[A, M], [M, N], [N, B]]).service, from: A, to: B, figures: [A, B], signal: new AbortController().signal });
+const search = async () => {
+  const result = await findConnection({ service: fakeContacts([[A, M], [M, N], [N, B]]).service, from: A, to: B, figures: [A, B], signal: new AbortController().signal });
+  assertRequestAccounting(result.session!.diagnostics); return result;
+};
 test('settlement validates accepted contacts, uses the current canvas and persists replay evidence', async () => {
   const result = await search(), storage = new MemoryStorage(), r = recorder();
   // Another operation has already added M under a different canvas id while the model ran.
@@ -47,10 +54,11 @@ test('saved versioned paths replay in either orientation without model work', ()
 });
 test('matching unfinished checkpoint is offered without automatically searching', async () => {
   const repository = new MemoryConnectionRepository(), fake = fakeContacts([[A, M], [M, N], [N, B]]);
-  await findConnection({ service: fake.service, from: A, to: B, figures: [A, B], signal: new AbortController().signal, repository, canvasId: 'one', limits: { tasks: 2 } });
+  const first = await findConnection({ service: fake.service, from: A, to: B, figures: [A, B], signal: new AbortController().signal, repository, canvasId: 'one', limits: { tasks: 2 } });
+  assertRequestAccounting(first.session!.diagnostics);
   const before = fake.calls.seeds + fake.calls.discovery.length + fake.calls.assessments.length, r = recorder();
   await runConnectionSearch({ service: fake.service as IAIService, from: B, target: { figure: A }, figures: [A, B], storage: new MemoryStorage(), signal: new AbortController().signal, repository, canvasId: 'one', effects: r.effects });
-  assert.equal(fake.calls.seeds + fake.calls.discovery.length + fake.calls.assessments.length, before); assert.deepEqual(r.log, ['paused']);
+  r.verify(); assert.equal(fake.calls.seeds + fake.calls.discovery.length + fake.calls.assessments.length, before); assert.deepEqual(r.log, ['paused']);
 });
 test('cancelled or stale search has no canvas side effects or error toast', async () => {
   const controller = new AbortController(), fake = fakeContacts([[A, M]]), r = recorder();
@@ -58,6 +66,7 @@ test('cancelled or stale search has no canvas side effects or error toast', asyn
   fake.service.discoverPersonalContacts = async () => { controller.abort(); return []; };
   const storage = new MemoryStorage();
   await runConnectionSearch({ service: fake.service as IAIService, from: A, target: { figure: B }, figures: [A, B], storage, signal: controller.signal, effects: r.effects });
+  r.verify();
   assert.ok(!r.log.includes('weave') && !r.log.includes('error')); assert.equal(listConnectionPaths(storage, r.canvas.figures).length, 0);
 });
 test('events and invalid identities are refused, distant real people remain eligible', () => {

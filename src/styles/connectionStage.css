@@ -21,10 +21,11 @@
 .relationship-card.stage-card { overflow: visible; }
 .relationship-card.stage-card .figure-card-corner { border-top-right-radius: 11px; }
 
-/* Cards wait as soft ghosts of themselves and land, with a little overshoot, as the thread reaches them. */
+/* Cards the thread has not reached yet are invisible (no pale placeholders); each fades in and lands, with a little
+   overshoot, as the thread reaches it. */
 .stage-card { transform-origin: 50% 100%; cursor: pointer; z-index: 1;
   transition: opacity 550ms ease, transform 850ms cubic-bezier(.2, 1.35, .35, 1), filter 600ms ease, box-shadow 350ms ease; }
-.stage-card.is-ghost { opacity: .14; filter: blur(5px) grayscale(1); transform: perspective(900px) translateY(36px) rotateX(14deg) scale(.94); pointer-events: none; }
+.stage-card.is-ghost { opacity: 0; filter: blur(5px) grayscale(1); transform: perspective(900px) translateY(36px) rotateX(14deg) scale(.94); pointer-events: none; }
 .stage-card.is-ghost > * { opacity: 0; }
 .stage-card.is-current { box-shadow: 0 0 0 3px rgb(var(--color-connection)), 0 16px 44px rgb(var(--color-connection) / .3); }
 .stage-card .connection-badge { transition: transform 500ms cubic-bezier(.2, 1.6, .4, 1); }
