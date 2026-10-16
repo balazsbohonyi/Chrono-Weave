@@ -306,7 +306,7 @@ const GalleryCanvas: React.FC<CanvasProps> = ({ figures, modalActive, highlighte
           const isGhosted = !!connection && !pickingSource && !searchActive && (!isChained || !isRevealedAt(reveal.progress, chainIndex));
           const isDimmed = pickingSource ? !isPickingSource && !isPickable?.(figure)
             : searchActive ? !isFocused : isGhosted || (!connection && selectedCategories.size > 0 && !selectedCategories.has(figure.category));
-          return <FigureCard key={figure.id} figure={figure} imageUrl={figure.imageUrl || portraits.get(figure.id)}
+          return <FigureCard key={figure.id} figure={figure} imageUrl={figure.imageUrl || portraits.get(figure.id)} zoom={camera.scale}
             isSource={figure.id === seedFigureId || isPickingSource} data-figure-id={figure.id}
             aria-label={pickingSource ? `Connect ${pickingSource.name} to ${figure.name}` : `Actions for ${figure.name}`}
             aria-disabled={pickingSource ? isDimmed || isPickingSource : undefined}

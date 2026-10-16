@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
-import { NetworkLayout, type LayoutInput, type LayoutLinkInput, type LayoutMode } from '../services/connectionNetworkLayout';
+import type { LayoutInput, LayoutLinkInput, LayoutMode } from '../services/connectionNetworkLayout';
+import { createNetworkLayout } from '../services/remoteNetworkLayout';
 
 interface Options {
   // A different key is a different exploration, so the layout starts over.
@@ -15,10 +16,11 @@ interface Options {
   reducedMotion: boolean;
 }
 
-// Owns one NetworkLayout per open exploration and drives it from requestAnimationFrame. Positions stay
-// inside the layout (and are painted by the graph straight onto the SVG), so a tick re-renders no React.
+// Owns one layout per open exploration (in a worker where the browser has them, see createNetworkLayout) and drives it from
+// requestAnimationFrame. Positions stay inside the layout (and are painted by the graph straight onto the SVG), so a tick
+// re-renders no React.
 export function useNetworkSimulation({ resetKey, inputs, links, bounds, mode, size, ready, reducedMotion }: Options) {
-  const layout = useMemo(() => new NetworkLayout(), [resetKey]);
+  const layout = useMemo(() => createNetworkLayout(), [resetKey]);
   const frame = useRef(0);
   const reduced = useRef(reducedMotion);
   reduced.current = reducedMotion;
@@ -32,7 +34,8 @@ export function useNetworkSimulation({ resetKey, inputs, links, bounds, mode, si
     frame.current = requestAnimationFrame(run);
   }, [layout]);
 
-  const signature = JSON.stringify([inputs.map(input => [input.id, input.year, input.endpoint, input.radius, input.clearance, input.side, input.distance, input.parent, input.category, input.spine]), links.map(link => [link.a, link.b]), bounds, mode, size.width, size.height, ready]);
+  const signature = useMemo(() => JSON.stringify([inputs.map(input => [input.id, input.year, input.endpoint, input.radius, input.clearance, input.side, input.distance, input.parent, input.category, input.spine]), links.map(link => [link.a, link.b])]),
+    [inputs, links]);
   useLayoutEffect(() => {
     if (!ready) return;
     layout.setBounds(bounds[0], bounds[1]);
@@ -40,7 +43,7 @@ export function useNetworkSimulation({ resetKey, inputs, links, bounds, mode, si
     layout.setMode(mode);
     layout.setGraph(inputs, links);
     kick();
-  }, [layout, signature, kick]);
+  }, [layout, signature, bounds[0], bounds[1], mode, size.width, size.height, ready, kick]);
 
   useEffect(() => () => {
     if (frame.current) cancelAnimationFrame(frame.current);

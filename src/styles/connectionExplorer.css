@@ -81,7 +81,9 @@
 .net-svg:active { cursor: grabbing; }
 .net-node, .net-edge, .net-fold { cursor: pointer; outline: none; }
 .net-node:focus, .net-edge:focus, .net-fold:focus, .net-svg:focus { outline: none; }
-.net-node, .net-edge { transition: opacity .2s; }
+/* Dimming fades in a small network. In a large one it is immediate: an opacity transition on every person and line repaints the
+   whole drawing each frame for its duration (SVG opacity is not composited), which made selecting someone stutter. */
+.net-graph:not(.is-large) .net-node, .net-graph:not(.is-large) .net-edge { transition: opacity .2s; }
 
 /* Year strips: the same thin glass bars the main canvas uses, so the years stay readable over the graph. */
 .net-strip { position: absolute; left: 0; right: 0; height: 24px; overflow: hidden; z-index: 2; pointer-events: none; background: rgb(var(--color-timeline-axis) / .75); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); }
@@ -144,7 +146,7 @@
 .net-pod text { fill: rgb(var(--color-content-primary)); font-weight: 800; letter-spacing: .02em; paint-order: stroke; stroke: rgb(var(--color-surface) / .8); stroke-linejoin: round; }
 /* The corridor's centre line: a soft band behind the chain, from one endpoint to the other. */
 .net-corridor { pointer-events: none; }
-.net-corridor line { stroke: rgb(var(--color-connection) / .1); stroke-width: 76; stroke-linecap: round; }
+.net-corridor path { stroke: rgb(var(--color-connection) / .1); stroke-width: 76; stroke-linecap: round; }
 /* The layout button shows the current layout and opens a menu of all of them upwards. */
 .net-layout-root { position: relative; display: inline-flex; }
 .net-layout-trigger { position: relative; }
@@ -176,7 +178,8 @@
 .net-fold text { fill: rgb(var(--color-content-primary)); font-size: 11px; font-weight: 700; pointer-events: none; }
 .net-fold:hover rect, .net-fold:focus-visible rect { stroke: rgb(var(--color-selection)); }
 
-.net-edge-line { fill: none; stroke: rgb(var(--color-content-muted)); stroke-width: 2; }
+.net-edge path, .net-gap path { fill: none; }
+.net-edge-line { stroke: rgb(var(--color-content-muted)); stroke-width: 2; }
 .net-edge-hit { stroke: transparent; stroke-width: 18; }
 .net-edge-halo { stroke: rgb(var(--color-selection)); stroke-width: 11; stroke-linecap: round; opacity: 0; }
 .net-edge.is-accepted .net-edge-line { stroke: rgb(var(--color-connection)); stroke-width: 3; }

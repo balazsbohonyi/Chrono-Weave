@@ -1,9 +1,10 @@
-import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import React, { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { CATEGORY_BAR_TEXT_COLORS, CATEGORY_COLORS } from '../../constants';
 import { readNetworkViewPrefs, saveNetworkViewPrefs } from '../../utils/networkViewPrefs';
-import { axisTicks, TICK_MIN_SPACING, type CategoryGuide, type ColumnGuide, type CorridorGuide, type LayoutMode, type NetworkLayout, type OrbitRing } from '../../services/connectionNetworkLayout';
+import { axisTicks, TICK_MIN_SPACING, type CategoryGuide, type ColumnGuide, type CorridorGuide, type LayoutMode, type OrbitRing } from '../../services/connectionNetworkLayout';
+import type { NetworkLayoutHandle } from '../../services/remoteNetworkLayout';
 import {
-  closestApproachLabel, describeSide, initials, STATUS_LABELS, truncateName, type NetworkEdge, type NetworkNode, type NetworkSelection, type NetworkView,
+  closestApproachLabel, describeSide, initials, STATUS_LABELS, truncateName, type NetworkEdge, type NetworkFold, type NetworkNode, type NetworkSelection, type NetworkView,
 } from '../../services/connectionNetworkView';
 import { formatYear } from '../../utils/formatters';
 import { createWheelClassifier } from '../../utils/wheelGesture';
@@ -24,8 +25,10 @@ interface Props {
   view: NetworkView;
   endpointNames: [string, string];
   nameOf: (id: string) => string;
-  layout: NetworkLayout;
+  layout: NetworkLayoutHandle;
   kick: () => void;
+  // The pinned people as the explorer last synced them (the layout's own set changes in place, so a memoized layer could not see it).
+  pinned: ReadonlySet<string>;
   mode: LayoutMode;
   onModeChange: (mode: LayoutMode) => void;
   size: { width: number; height: number };
@@ -76,16 +79,120 @@ const activate = (action: () => void) => (event: React.KeyboardEvent) => {
   if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); action(); }
 };
 
+type Focus = NetworkView['focus'];
+interface NodeHandlers {
+  down: (event: React.PointerEvent<SVGGElement>, id: string) => void;
+  move: (event: React.PointerEvent<SVGGElement>) => void;
+  up: (event: React.PointerEvent<SVGGElement>, id: string) => void;
+  release: (id: string) => void;
+  failed: (id: string) => void;
+}
+
+// The lines and the people are layers of their own, memoized: moving the camera, the clock or the axis re-renders neither. Each line
+// and person is a memoized item too, given only plain values, so a search update (which rebuilds the view, with new objects for
+// everybody) re-renders just the people and lines whose drawing changed. Their elements carry their ids (data-edge, data-node) and
+// the graph finds them after each render of a layer to paint positions on them directly.
+const EdgeItem = memo(function EdgeItem({ id, from, to, status, label, flags, onSelect }: {
+  id: string; from: string; to: string; status: NetworkEdge['status']; label: string; flags: string; onSelect: (selection: NetworkSelection) => void;
+}) {
+  const select = () => onSelect({ edge: id });
+  return <g data-net-interactive data-edge={id} data-from={from} data-to={to} role="button" tabIndex={0} aria-label={label} aria-pressed={flags.includes(' is-selected')}
+    className={`net-edge is-${status}${flags}`} onClick={select} onKeyDown={activate(select)}>
+    <title>{label}</title>
+    <path className="net-edge-halo" /><path className="net-edge-line" /><path className="net-edge-hit" />
+  </g>;
+});
+
+const EdgeLayer = memo(function EdgeLayer({ edges, selection, focus, chainEdges, nameOf, onSelect }: {
+  edges: NetworkEdge[]; selection: NetworkSelection; focus: Focus; chainEdges: ReadonlySet<string> | null;
+  nameOf: (id: string) => string; onSelect: (selection: NetworkSelection) => void;
+}) {
+  return <>{edges.map(edge => {
+    const flags = [edge.contextual && 'is-contextual', selection.edge === edge.id && 'is-selected',
+      selection.person && (edge.from === selection.person || edge.to === selection.person) && 'is-incident',
+      focus && !focus.edges.has(edge.id) && 'is-dim', chainEdges?.has(edge.id) && 'is-chain'].filter(Boolean);
+    return <EdgeItem key={edge.id} id={edge.id} from={edge.from} to={edge.to} status={edge.status} onSelect={onSelect}
+      label={`${nameOf(edge.from)} and ${nameOf(edge.to)}: ${STATUS_LABELS[edge.status]}`} flags={flags.map(flag => ` ${flag}`).join('')} />;
+  })}</>;
+});
+
+interface NodeItemProps {
+  id: string; name: string; years: string; category: NetworkNode['person']['category']; endpoint: 0 | 1 | null; label: string; className: string;
+  selected: boolean; r: number; url?: string; clip: string; pinned: boolean; active: boolean; shownName: string; foldCount: number; foldExpanded: boolean;
+  handlers: NodeHandlers; onSelect: (selection: NetworkSelection) => void; onToggleFold: (hostId: string) => void;
+}
+const NodeItem = memo(function NodeItem({ id, name, years, category, endpoint, label, className, selected, r, url, clip, pinned, active, shownName, foldCount, foldExpanded, handlers, onSelect, onToggleFold }: NodeItemProps) {
+  const isEndpoint = endpoint !== null;
+  const select = () => onSelect({ person: id });
+  return <g data-net-interactive data-node={id} role="button" tabIndex={0} aria-label={label} aria-pressed={selected}
+    className={className} onPointerDown={event => handlers.down(event, id)} onPointerMove={handlers.move} onPointerUp={event => handlers.up(event, id)} onPointerCancel={event => handlers.up(event, id)}
+    onDoubleClick={() => handlers.release(id)} onKeyDown={activate(select)}>
+    <title>{`${name} (${years})`}</title>
+    <g className="net-node-body">
+      {isEndpoint && <g className="net-beacon" aria-hidden="true"><circle className="net-halo" r={r + 28} /><circle className="net-halo-ring" r={r + 14} /></g>}
+      {active && <circle className="net-pulse" r={r + 9} />}
+      <circle className="net-select-ring" r={r + 8} />
+      <circle className="net-ring" r={r + 3} />
+      <circle className="net-disc" r={r} fill={CATEGORY_COLORS[category]} />
+      {url
+        ? <image href={url} x={-r} y={-r} width={r * 2} height={r * 2} clipPath={`url(#${clip})`} preserveAspectRatio="xMidYMid slice" onError={() => handlers.failed(id)} />
+        : <text className="net-initials" textAnchor="middle" dy="0.35em" style={{ fontSize: r * 0.8, fill: CATEGORY_BAR_TEXT_COLORS[category] }}>{initials(name)}</text>}
+      {isEndpoint && <g className="net-badge-ab"><circle cx={r * 0.78} cy={-r * 0.78} r={r * 0.4} /><text x={r * 0.78} y={-r * 0.78} textAnchor="middle" dy="0.35em">{endpoint === 0 ? 'A' : 'B'}</text></g>}
+      {pinned && <g className="net-pin"><title>Pinned · double-click to release</title><circle cx={-r * 0.78} cy={-r * 0.78} r={6} /><path d={`M ${-r * 0.78 - 2.5} ${-r * 0.78 + 2.5} L ${-r * 0.78 + 2.5} ${-r * 0.78 - 2.5}`} /></g>}
+    </g>
+    {isEndpoint && <rect className="net-pill" x={-pillWidth(shownName) / 2} y={r + 5} width={pillWidth(shownName)} height={22} rx={11} />}
+    <text className="net-name" textAnchor="middle" y={isEndpoint ? r + 20.5 : r + 15}>{shownName}</text>
+    {foldCount > 0 && <g data-net-interactive role="button" tabIndex={0} className="net-fold" aria-label={`${foldExpanded ? 'Hide' : 'Show'} ${foldCount} more ${foldCount === 1 ? 'contact' : 'contacts'} of ${name}`}
+      transform={`translate(${r * 0.8} ${r * 0.8})`} onPointerDown={event => event.stopPropagation()}
+      onClick={event => { event.stopPropagation(); onToggleFold(id); }} onKeyDown={activate(() => onToggleFold(id))}>
+      <rect x={-14} y={-9} width={28} height={18} rx={9} /><text textAnchor="middle" dy="0.35em">{foldExpanded ? '−' : '+'}{foldCount}</text>
+    </g>}
+  </g>;
+});
+
+const NodeLayer = memo(function NodeLayer({ nodes, folds, selection, focus, chainNodes, narrow, portraits, failed, pinned, endpointNames, clips, handlers, onSelect, onToggleFold }: {
+  nodes: NetworkNode[]; folds: NetworkFold[]; selection: NetworkSelection; focus: Focus; chainNodes: ReadonlySet<string> | null; narrow: boolean;
+  portraits: Map<string, string>; failed: ReadonlySet<string>; pinned: ReadonlySet<string>; endpointNames: [string, string];
+  clips: { endpoint: string; person: string }; handlers: NodeHandlers; onSelect: (selection: NetworkSelection) => void; onToggleFold: (hostId: string) => void;
+}) {
+  const foldOf = useMemo(() => new Map(folds.map(fold => [fold.hostId, fold])), [folds]);
+  return <>{nodes.map(node => {
+    const isEndpoint = node.endpoint !== null, fold = foldOf.get(node.id), isPinned = pinned.has(node.id), name = node.person.name;
+    const selected = selection.person === node.id, onEdge = !!selection.edge && !!focus?.nodes.has(node.id);
+    const className = `net-node ${sideClass(node)} ${node.supported ? 'is-supported' : 'is-tentative'} ${selected ? 'is-selected' : ''} ${onEdge ? 'is-edge-end' : ''} ${focus && !focus.nodes.has(node.id) ? 'is-dim' : ''} ${chainNodes?.has(node.id) ? 'is-chain' : ''} ${node.active ? 'is-active' : ''}`;
+    return <NodeItem key={node.id} id={node.id} name={name} years={`${node.person.birthYear}–${node.person.deathYear}`} category={node.person.category}
+      endpoint={node.endpoint} label={`${name}, ${describeSide(node, endpointNames)}${isPinned ? ', pinned' : ''}`} className={className} selected={selected}
+      r={nodeRadius(isEndpoint, narrow)} url={node.supported && !failed.has(node.id) ? portraits.get(node.id) : undefined} clip={isEndpoint ? clips.endpoint : clips.person}
+      pinned={isPinned} active={node.active} shownName={isEndpoint ? truncateName(name, ENDPOINT_NAME_LIMIT) : truncateName(name, labelLimit(narrow))}
+      foldCount={fold?.ids.length ?? 0} foldExpanded={!!fold?.expanded} handlers={handlers} onSelect={onSelect} onToggleFold={onToggleFold} />;
+  })}</>;
+});
+
+// Sets the ends of a straight line drawn as paths (an edge draws three: halo, line and hit area), one attribute each. Returns what
+// it set, so a caller can skip lines that did not move: most frames move only part of a big network.
+const setEnds = (paths: Iterable<SVGPathElement>, a: Point, b: Point, previous = '') => {
+  const d = `M${a.x.toFixed(1)} ${a.y.toFixed(1)}L${b.x.toFixed(1)} ${b.y.toFixed(1)}`;
+  if (d !== previous) for (const path of paths) path.setAttribute('d', d);
+  return d;
+};
+// A person (or line) the layout has not placed yet is kept out of sight until it has, rather than drawn at the origin. What was set
+// is remembered, so a frame does not read every element's style.
+interface Drawn { el: SVGGElement; key: string; visible: boolean }
+const show = (drawn: Drawn, visible: boolean) => { if (drawn.visible !== visible) { drawn.el.style.visibility = visible ? '' : 'hidden'; drawn.visible = visible; } };
+// From this many drawn people and lines, dimming is immediate instead of fading (see the stylesheet).
+const LARGE_DRAWING = 250;
+
 // The drawing: an SVG whose structure React renders and whose positions the layout paints directly,
 // so the simulation never re-renders the explorer. The camera is a transform over screen-sized content.
 const NetworkGraph: React.FC<Props> = ({
-  view, endpointNames, nameOf, layout, kick, mode, onModeChange, size, onSize, selection, onSelect, portraits, narrow, reducedMotion,
+  view, endpointNames, nameOf, layout, kick, pinned, mode, onModeChange, size, onSize, selection, onSelect, portraits, narrow, reducedMotion,
   success, solved = null, onReveal, resume = null, reveal, onPinsChange, onToggleFold, legend, maximized, onToggleMaximize,
 }) => {
   const uid = useId().replace(/:/g, '');
   const svg = useRef<SVGSVGElement>(null);
-  const nodeEls = useRef(new Map<string, SVGGElement>());
-  const edgeEls = useRef(new Map<string, { from: string; to: string; el: SVGGElement }>());
+  // The drawn people and lines, found after their layer renders; `key` is what was last painted, so unmoved ones are skipped.
+  const nodeEls = useRef(new Map<string, Drawn>());
+  const edgeEls = useRef(new Map<string, Drawn & { from: string; to: string; paths: SVGPathElement[] }>());
   const gapEl = useRef<SVGGElement | null>(null);
   // The guides of the cluster (rings) and columns (bands) layouts, each moved to its endpoint's live position.
   const ringEls = useRef(new Map<string, { anchor: string; el: SVGGElement }>());
@@ -119,37 +226,27 @@ const NetworkGraph: React.FC<Props> = ({
   const apply = useCallback((next: Camera) => { cameraRef.current = next; setCamera(next); }, []);
 
   const paint = useCallback(() => {
-    for (const [id, el] of nodeEls.current) {
+    for (const [id, drawn] of nodeEls.current) {
       const at = layout.position(id);
-      if (at) el.setAttribute('transform', `translate(${at.x.toFixed(1)} ${at.y.toFixed(1)})`);
+      show(drawn, !!at);
+      if (!at) continue;
+      const key = `translate(${at.x.toFixed(1)} ${at.y.toFixed(1)})`;
+      if (key !== drawn.key) { drawn.el.setAttribute('transform', key); drawn.key = key; }
     }
-    for (const { from, to, el } of edgeEls.current.values()) {
-      const a = layout.position(from), b = layout.position(to);
-      if (!a || !b) continue;
-      for (const line of el.querySelectorAll('line')) {
-        line.setAttribute('x1', a.x.toFixed(1)); line.setAttribute('y1', a.y.toFixed(1));
-        line.setAttribute('x2', b.x.toFixed(1)); line.setAttribute('y2', b.y.toFixed(1));
-      }
+    for (const drawn of edgeEls.current.values()) {
+      const a = layout.position(drawn.from), b = layout.position(drawn.to);
+      show(drawn, !!a && !!b);
+      if (a && b) drawn.key = setEnds(drawn.paths, a, b, drawn.key);
     }
     for (const { anchor, el } of ringEls.current.values()) {
       const at = layout.position(anchor);
       if (at) el.setAttribute('transform', `translate(${at.x.toFixed(1)} ${at.y.toFixed(1)})`);
     }
-    const band = corridorEl.current;
-    if (band) {
-      const a = layout.position(band.dataset.a ?? ''), b = layout.position(band.dataset.b ?? '');
-      if (a && b) for (const line of band.querySelectorAll('line')) {
-        line.setAttribute('x1', a.x.toFixed(1)); line.setAttribute('y1', a.y.toFixed(1));
-        line.setAttribute('x2', b.x.toFixed(1)); line.setAttribute('y2', b.y.toFixed(1));
-      }
-    }
-    const closest = gapEl.current;
-    if (closest) {
-      const a = layout.position(closest.dataset.a ?? ''), b = layout.position(closest.dataset.b ?? '');
-      if (a && b) for (const line of closest.querySelectorAll('line')) {
-        line.setAttribute('x1', a.x.toFixed(1)); line.setAttribute('y1', a.y.toFixed(1));
-        line.setAttribute('x2', b.x.toFixed(1)); line.setAttribute('y2', b.y.toFixed(1));
-      }
+    for (const el of [corridorEl.current, gapEl.current]) {
+      if (!el) continue;
+      const a = layout.position(el.dataset.a ?? ''), b = layout.position(el.dataset.b ?? '');
+      el.style.visibility = a && b ? '' : 'hidden';
+      if (a && b) setEnds(el.querySelectorAll('path'), a, b);
     }
   }, [layout]);
 
@@ -184,8 +281,8 @@ const NetworkGraph: React.FC<Props> = ({
     return sx > 20 && sx < width - 20 && sy > STRIP_HEIGHT + 8 && sy < height - STRIP_HEIGHT - 8;
   }, []);
 
-  // Positions painted by the layout, plus follow-the-graph camera until the user takes over.
-  const ticks = useRef(0);
+  // Positions painted by the layout, plus follow-the-graph camera until the user takes over. The camera follows every frame (the
+  // people and lines are memoized layers, so a camera change re-renders only the axis and guides) and only when it actually moves.
   useEffect(() => { setRings(layout.rings); setColumns(layout.columns); setCategories(layout.categories); setCorridor(layout.corridor); return layout.subscribe(() => {
     paint();
     setRings(layout.rings);
@@ -194,9 +291,10 @@ const NetworkGraph: React.FC<Props> = ({
     setCorridor(layout.corridor);
     const current = layout.yearDomain;
     setDomain(previous => previous[0] === current[0] && previous[1] === current[1] ? previous : current);
-    if (!userMoved.current && (ticks.current++ % 3 === 0 || !layout.active)) { const next = fitCamera(followAll.current, litChain.current ?? undefined); if (next) apply(next); }
+    if (userMoved.current) return;
+    const next = fitCamera(followAll.current, litChain.current ?? undefined), was = cameraRef.current;
+    if (next && (Math.abs(next.x - was.x) > 0.25 || Math.abs(next.y - was.y) > 0.25 || Math.abs(next.k - was.k) > 0.0005)) apply(next);
   }); }, [layout, paint, fitCamera, apply]);
-  useLayoutEffect(() => { paint(); });
 
   // Measure the available area. Layout and drawing work in real screen pixels.
   useLayoutEffect(() => {
@@ -324,34 +422,69 @@ const NetworkGraph: React.FC<Props> = ({
     if (current.started) { layout.dragEnd(id); if (reducedMotion) layout.settle(60); else kick(); onPinsChange(); }
     else if (event.type === 'pointerup') onSelect({ person: id });
   };
+  const releasePin = (id: string) => { if (layout.pinned.has(id)) { layout.unpin(id); kick(); onPinsChange(); } };
+  // The person layer is memoized, so it gets handlers that never change and always call the current ones.
+  const live = useRef({ onNodeDown, onNodeMove, onNodeUp, releasePin });
+  live.current = { onNodeDown, onNodeMove, onNodeUp, releasePin };
+  const handlers = useMemo<NodeHandlers>(() => ({
+    down: (event, id) => live.current.onNodeDown(event, id), move: event => live.current.onNodeMove(event), up: (event, id) => live.current.onNodeUp(event, id),
+    release: id => live.current.releasePin(id), failed: id => setFailed(previous => new Set(previous).add(id)),
+  }), []);
+  const clips = useMemo(() => ({ endpoint: `${uid}-clip-end`, person: `${uid}-clip-person` }), [uid]);
 
   const successChain = success && view.chain;
   // The chain of a solved connection stays drawn, lime, even with the lines off (only the chain's own lines are kept then, like the lit chain of a search that just succeeded).
   const coloredChain = successChain || (solved ? view.chain : null);
-  const dimmed = (nodeId?: string, edgeKey?: string) => !!view.focus && (nodeId ? !view.focus.nodes.has(nodeId) : !view.focus.edges.has(edgeKey!));
+  const chainNodes = useMemo(() => coloredChain ? new Set(coloredChain.nodeIds) : null, [coloredChain]);
+  const chainEdges = useMemo(() => coloredChain ? new Set(coloredChain.edgeIds) : null, [coloredChain]);
   const [bandA, bandB] = [0, 1].map(index => view.nodes.find(node => node.endpoint === index)?.person);
   const sx = (year: number) => camera.x + layout.xOf(year) * camera.k;
   const ticksForAxis = mode === 'time'
     ? axisTicks(domain[0], domain[1], layout.pixelsPerYear * camera.k, TICK_MIN_SPACING).filter(year => sx(year) > -40 && sx(year) < size.width + 40) : [];
   const closest = view.closest;
   // With the lines off, only what the user is looking at or the lit chain (of a search that just succeeded, or a solved connection) keeps its line, so selecting a contact still shows it.
-  const chainEdge = (edge: NetworkEdge) => !!view.chain?.edgeIds.includes(edge.id);
-  const shownEdges = showLines ? view.edges : view.edges.filter(edge => edge.id === selection.edge || (coloredChain && chainEdge(edge)));
-  // A colored chain is drawn last, over the crowd of other lines.
-  const drawnEdges = coloredChain ? [...shownEdges.filter(edge => !chainEdge(edge)), ...shownEdges.filter(chainEdge)] : shownEdges;
+  const drawnEdges = useMemo(() => {
+    const chainEdge = (edge: NetworkEdge) => !!chainEdges?.has(edge.id);
+    const shownEdges = showLines ? view.edges : view.edges.filter(edge => edge.id === selection.edge || chainEdge(edge));
+    // A colored chain is drawn last, over the crowd of other lines.
+    return chainEdges ? [...shownEdges.filter(edge => !chainEdge(edge)), ...shownEdges.filter(chainEdge)] : shownEdges;
+  }, [view.edges, showLines, selection.edge, chainEdges]);
   // The endpoints are drawn last, on top of everybody else, so a crowd never covers them.
-  const drawnNodes = [...view.nodes].sort((x, y) => Number(x.endpoint !== null) - Number(y.endpoint !== null));
-  const pinnedCount = layout.pinned.size;
+  const drawnNodes = useMemo(() => [...view.nodes].sort((x, y) => Number(x.endpoint !== null) - Number(y.endpoint !== null)), [view.nodes]);
+  const pinnedCount = pinned.size;
   const clustered = mode === 'cluster', columnar = mode === 'columns', podded = mode === 'category', corridored = mode === 'corridor';
   // Choosing an arrangement also frames the whole picture, which is about to move; the timeline and the free layout keep the camera.
   const chooseLayout = (next: LayoutMode) => { onModeChange(next); if (next !== 'time' && next !== 'free') fit(); };
   const closestVisible = showLines && closest && layout.nodes.has(closest.a) && layout.nodes.has(closest.b) && view.nodes.some(n => n.id === closest.a) && view.nodes.some(n => n.id === closest.b);
 
+  // Finds the drawn people and lines again after their layers render, then paints them at once: a person who just appeared stands at
+  // their place (or out of sight until the layout has one) before the browser shows them.
+  useLayoutEffect(() => {
+    const root = svg.current; if (!root) return;
+    const nodes = new Map<string, Drawn>();
+    for (const el of root.querySelectorAll<SVGGElement>('g[data-node]')) {
+      const known = nodeEls.current.get(el.dataset.node!);
+      nodes.set(el.dataset.node!, known?.el === el ? known : { el, key: '', visible: true });
+    }
+    const edges = new Map<string, Drawn & { from: string; to: string; paths: SVGPathElement[] }>();
+    for (const el of root.querySelectorAll<SVGGElement>('g[data-edge]')) {
+      const known = edgeEls.current.get(el.dataset.edge!);
+      edges.set(el.dataset.edge!, known?.el === el ? known : { from: el.dataset.from!, to: el.dataset.to!, el, paths: [...el.querySelectorAll('path')], key: '', visible: true });
+    }
+    nodeEls.current = nodes; edgeEls.current = edges;
+    paint();
+  }, [drawnNodes, drawnEdges, rings, columns, corridor, closestVisible, mode, paint]);
+
   // With a solved connection's lines on, every other line steps back (see the stylesheet) so the lime chain stands out.
-  return <div className={`net-graph ${success ? 'is-success' : ''} ${solved && showLines && view.chain ? 'is-solved' : ''}`}>
+  return <div className={['net-graph', success && 'is-success', solved && showLines && view.chain && 'is-solved', drawnNodes.length + drawnEdges.length >= LARGE_DRAWING && 'is-large'].filter(Boolean).join(' ')}>
     <div className="net-stage">
     <svg ref={svg} className="net-svg" role="group" aria-label="Live contact graph"
       onPointerDown={onBackgroundDown} onPointerMove={onBackgroundMove} onPointerUp={onBackgroundUp} onPointerCancel={onBackgroundUp}>
+      {/* Portraits share two round clips (endpoints are bigger), in each person's own coordinates. */}
+      <defs>
+        <clipPath id={clips.endpoint}><circle r={nodeRadius(true, narrow)} /></clipPath>
+        <clipPath id={clips.person}><circle r={nodeRadius(false, narrow)} /></clipPath>
+      </defs>
       {mode === 'time' && <g className="net-axis" aria-hidden="true">
         {[bandA, bandB].map((person, index) => person && <rect key={index} className={index === 0 ? 'net-band-a' : 'net-band-b'}
           x={sx(person.birthYear)} width={Math.max(2, (person.deathYear - person.birthYear) * layout.pixelsPerYear * camera.k)} y={0} height={size.height} />)}
@@ -385,60 +518,14 @@ const NetworkGraph: React.FC<Props> = ({
             </g>;
           })}
         </g>}
-        {corridored && corridor && <g className="net-corridor" aria-hidden="true" ref={el => { corridorEl.current = el; }} data-a={corridor.from} data-b={corridor.to}><line /></g>}
-        {drawnEdges.map(edge => {
-          const label = `${nameOf(edge.from)} and ${nameOf(edge.to)}: ${STATUS_LABELS[edge.status]}`;
-          const select = () => onSelect({ edge: edge.id });
-          return <g key={edge.id} data-net-interactive ref={el => { if (el) edgeEls.current.set(edge.id, { from: edge.from, to: edge.to, el }); else edgeEls.current.delete(edge.id); }}
-            role="button" tabIndex={0} aria-label={label} aria-pressed={selection.edge === edge.id}
-            className={`net-edge is-${edge.status} ${edge.contextual ? 'is-contextual' : ''} ${selection.edge === edge.id ? 'is-selected' : ''} ${selection.person && (edge.from === selection.person || edge.to === selection.person) ? 'is-incident' : ''} ${dimmed(undefined, edge.id) ? 'is-dim' : ''} ${coloredChain && view.chain!.edgeIds.includes(edge.id) ? 'is-chain' : ''}`}
-            onClick={select} onKeyDown={activate(select)}>
-            <title>{label}</title>
-            <line className="net-edge-halo" /><line className="net-edge-line" /><line className="net-edge-hit" />
-          </g>;
-        })}
+        {corridored && corridor && <g className="net-corridor" aria-hidden="true" ref={el => { corridorEl.current = el; }} data-a={corridor.from} data-b={corridor.to}><path /></g>}
+        <EdgeLayer edges={drawnEdges} selection={selection} focus={view.focus} chainEdges={chainEdges} nameOf={nameOf} onSelect={onSelect} />
         {closestVisible && <g className="net-gap" ref={el => { gapEl.current = el; }} data-a={closest.a} data-b={closest.b}>
           <title>{closestApproachLabel(closest, nameOf)}</title>
-          <line className="net-gap-line" /><line className="net-gap-hit" />
+          <path className="net-gap-line" /><path className="net-gap-hit" />
         </g>}
-        {drawnNodes.map((node, index) => {
-          const isEndpoint = node.endpoint !== null;
-          const r = nodeRadius(isEndpoint, narrow), url = node.supported && !failed.has(node.id) ? portraits.get(node.id) : undefined;
-          const fold = view.folds.find(item => item.hostId === node.id);
-          const selected = selection.person === node.id, onEdge = !!selection.edge && !!view.focus?.nodes.has(node.id);
-          const name = node.person.name;
-          const label = `${name}, ${describeSide(node, endpointNames)}${layout.pinned.has(node.id) ? ', pinned' : ''}`;
-          const select = () => onSelect({ person: node.id });
-          const clip = `${uid}-clip-${index}`;
-          const shownName = isEndpoint ? truncateName(name, ENDPOINT_NAME_LIMIT) : truncateName(name, labelLimit(narrow));
-          return <g key={node.id} data-net-interactive ref={el => { if (el) nodeEls.current.set(node.id, el); else nodeEls.current.delete(node.id); }}
-            role="button" tabIndex={0} aria-label={label} aria-pressed={selected}
-            className={`net-node ${sideClass(node)} ${node.supported ? 'is-supported' : 'is-tentative'} ${selected ? 'is-selected' : ''} ${onEdge ? 'is-edge-end' : ''} ${dimmed(node.id) ? 'is-dim' : ''} ${coloredChain && view.chain!.nodeIds.includes(node.id) ? 'is-chain' : ''} ${node.active ? 'is-active' : ''}`}
-            onPointerDown={event => onNodeDown(event, node.id)} onPointerMove={onNodeMove} onPointerUp={event => onNodeUp(event, node.id)} onPointerCancel={event => onNodeUp(event, node.id)}
-            onDoubleClick={() => { if (layout.pinned.has(node.id)) { layout.unpin(node.id); kick(); onPinsChange(); } }} onKeyDown={activate(select)}>
-            <title>{`${name} (${node.person.birthYear}–${node.person.deathYear})`}</title>
-            <g className="net-node-body">
-              {isEndpoint && <g className="net-beacon" aria-hidden="true"><circle className="net-halo" r={r + 28} /><circle className="net-halo-ring" r={r + 14} /></g>}
-              {node.active && <circle className="net-pulse" r={r + 9} />}
-              <circle className="net-select-ring" r={r + 8} />
-              <circle className="net-ring" r={r + 3} />
-              <clipPath id={clip}><circle r={r} /></clipPath>
-              <circle className="net-disc" r={r} fill={CATEGORY_COLORS[node.person.category]} />
-              {url
-                ? <image href={url} x={-r} y={-r} width={r * 2} height={r * 2} clipPath={`url(#${clip})`} preserveAspectRatio="xMidYMid slice" onError={() => setFailed(previous => new Set(previous).add(node.id))} />
-                : <text className="net-initials" textAnchor="middle" dy="0.35em" style={{ fontSize: r * 0.8, fill: CATEGORY_BAR_TEXT_COLORS[node.person.category] }}>{initials(name)}</text>}
-              {node.endpoint !== null && <g className="net-badge-ab"><circle cx={r * 0.78} cy={-r * 0.78} r={r * 0.4} /><text x={r * 0.78} y={-r * 0.78} textAnchor="middle" dy="0.35em">{node.endpoint === 0 ? 'A' : 'B'}</text></g>}
-              {layout.pinned.has(node.id) && <g className="net-pin"><title>Pinned · double-click to release</title><circle cx={-r * 0.78} cy={-r * 0.78} r={6} /><path d={`M ${-r * 0.78 - 2.5} ${-r * 0.78 + 2.5} L ${-r * 0.78 + 2.5} ${-r * 0.78 - 2.5}`} /></g>}
-            </g>
-            {isEndpoint && <rect className="net-pill" x={-pillWidth(shownName) / 2} y={r + 5} width={pillWidth(shownName)} height={22} rx={11} />}
-            <text className="net-name" textAnchor="middle" y={isEndpoint ? r + 20.5 : r + 15}>{shownName}</text>
-            {fold && <g data-net-interactive role="button" tabIndex={0} className="net-fold" aria-label={fold.expanded ? `Hide ${fold.ids.length} more ${fold.ids.length === 1 ? 'contact' : 'contacts'} of ${name}` : `Show ${fold.ids.length} more ${fold.ids.length === 1 ? 'contact' : 'contacts'} of ${name}`}
-              transform={`translate(${r * 0.8} ${r * 0.8})`} onPointerDown={event => event.stopPropagation()}
-              onClick={event => { event.stopPropagation(); onToggleFold(node.id); }} onKeyDown={activate(() => onToggleFold(node.id))}>
-              <rect x={-14} y={-9} width={28} height={18} rx={9} /><text textAnchor="middle" dy="0.35em">{fold.expanded ? '−' : '+'}{fold.ids.length}</text>
-            </g>}
-          </g>;
-        })}
+        <NodeLayer nodes={drawnNodes} folds={view.folds} selection={selection} focus={view.focus} chainNodes={chainNodes} narrow={narrow} portraits={portraits}
+          failed={failed} pinned={pinned} endpointNames={endpointNames} clips={clips} handlers={handlers} onSelect={onSelect} onToggleFold={onToggleFold} />
       </g>
     </svg>
     {mode === 'time' && ['top', 'bottom'].map(edge => <div key={edge} className={`net-strip is-${edge}`} aria-hidden="true">
@@ -484,4 +571,4 @@ const NetworkGraph: React.FC<Props> = ({
     </div>}
   </div>;
 };
-export default NetworkGraph;
+export default memo(NetworkGraph);

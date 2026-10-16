@@ -1,6 +1,7 @@
 import React from 'react';
 import type { HistoricalFigure } from '../types';
 import { formatYear } from '../utils/formatters';
+import { sizedPortrait } from '../utils/portraitSize';
 
 export interface FigureDetail {
   description: string;
@@ -47,7 +48,7 @@ const SidebarFigureCard: React.FC<Props> = ({ figure, detail, isActive = false, 
 
         {detail?.imageUrl && (
           <div className="w-20 h-20 bg-surface-placeholder rounded-[10px] flex-shrink-0 overflow-hidden shadow-sm border border-border-subtle mt-1">
-            <img src={detail.imageUrl} alt={figure.name} className="w-full h-full object-cover object-top" />
+            <img src={sizedPortrait(detail.imageUrl, 80)} alt={figure.name} className="w-full h-full object-cover object-top" />
           </div>
         )}
       </div>

@@ -7,8 +7,13 @@ const detailsCache = new Map<string, { description: string; imageUrl: string | n
 // Wikipedia designates no page image for some articles of well-known people. Their Wikidata portrait (P18) is the
 // fallback. Special:FilePath redirects to a rendered thumbnail, so no further lookup is needed.
 const WIKIDATA_CLAIMS_CONCURRENCY = 6;
+// Thumbnail widths, in Wikimedia's standard steps. The canvas shows figures large; Six Degrees shows people in 32-64px circles, where a
+// 400px picture costs a lot to draw: a network of hundreds of them overflows the browser's decoded-image cache, so every repaint
+// decodes and scales them all again (measured: about 7x the image decoding of 120px thumbnails while panning 1000 people).
+const FIGURE_THUMBNAIL_WIDTH = 400;
+const CONTACT_THUMBNAIL_WIDTH = 120;
 
-const fetchWikidataPortrait = async (entityId: string): Promise<string | null> => {
+const fetchWikidataPortrait = async (entityId: string, width: number): Promise<string | null> => {
     try {
         const params = new URLSearchParams({
             action: 'wbgetclaims', entity: entityId, property: 'P18', format: 'json', origin: '*'
@@ -19,7 +24,7 @@ const fetchWikidataPortrait = async (entityId: string): Promise<string | null> =
         const best = usable.find(claim => claim.rank === 'preferred') ?? usable[0];
         const file = best?.mainsnak.datavalue.value;
         return typeof file === 'string'
-            ? `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(file)}?width=400`
+            ? `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(file)}?width=${width}`
             : null;
     } catch (error) {
         console.warn("Wikidata portrait fetch failed", error);
@@ -28,12 +33,12 @@ const fetchWikidataPortrait = async (entityId: string): Promise<string | null> =
 };
 
 // Resolves entity id -> portrait URL with a small worker pool; misses are absent.
-const fetchWikidataPortraits = async (entityIds: string[]): Promise<Map<string, string>> => {
+const fetchWikidataPortraits = async (entityIds: string[], width: number): Promise<Map<string, string>> => {
     const portraits = new Map<string, string>();
     const queue = [...new Set(entityIds)];
     const worker = async () => {
         for (let id = queue.shift(); id; id = queue.shift()) {
-            const url = await fetchWikidataPortrait(id);
+            const url = await fetchWikidataPortrait(id, width);
             if (url) portraits.set(id, url);
         }
     };
@@ -42,7 +47,7 @@ const fetchWikidataPortraits = async (entityIds: string[]): Promise<Map<string, 
 };
 
 // Helper to fetch images from Wikipedia in batch
-const fetchBatchWikipediaImages = async (names: string[]): Promise<Map<string, string>> => {
+const fetchBatchWikipediaImages = async (names: string[], width = FIGURE_THUMBNAIL_WIDTH): Promise<Map<string, string>> => {
     const imageMap = new Map<string, string>();
     if (names.length === 0) return imageMap;
 
@@ -59,7 +64,7 @@ const fetchBatchWikipediaImages = async (names: string[]): Promise<Map<string, s
             prop: 'pageimages|pageprops',
             ppprop: 'wikibase_item',
             format: 'json',
-            pithumbsize: '400',
+            pithumbsize: String(width),
             origin: '*',
             redirects: '1' // Automatically resolve redirects
         });
@@ -110,7 +115,7 @@ const fetchBatchWikipediaImages = async (names: string[]): Promise<Map<string, s
 
             // 4. Fall back to the Wikidata portrait for articles Wikipedia gives no page image
             if (withoutThumbnail.size > 0) {
-                const portraits = await fetchWikidataPortraits([...withoutThumbnail.keys()]);
+                const portraits = await fetchWikidataPortraits([...withoutThumbnail.keys()], width);
                 for (const [entityId, inputs] of withoutThumbnail) {
                     const url = portraits.get(entityId);
                     if (url) inputs.forEach(input => imageMap.set(input, url));
@@ -124,9 +129,9 @@ const fetchBatchWikipediaImages = async (names: string[]): Promise<Map<string, s
     return imageMap;
 };
 
-// Portraits by name, for callers that have no HistoricalFigure (Six Degrees contacts). Misses are simply absent.
+// Portraits by name, for callers that have no HistoricalFigure (Six Degrees contacts), as small thumbnails. Misses are simply absent.
 export const fetchWikipediaImagesByName = (names: string[]): Promise<Map<string, string>> =>
-  fetchBatchWikipediaImages([...new Set(names)]);
+  fetchBatchWikipediaImages([...new Set(names)], CONTACT_THUMBNAIL_WIDTH);
 
 export const fetchBatchFigureDetails = async (
   figures: HistoricalFigure[]

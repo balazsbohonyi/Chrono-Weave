@@ -99,6 +99,36 @@ export function pushOutOfZone(point: Point, zone: Pick<FreeZone, 'x' | 'y' | 'ra
 }
 const tieBreak = (id: string) => { let hash = 0; for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) | 0; return hash % 2 === 0 ? 1 : -1; };
 
+// The time axis as pure functions of the endpoints' years and everybody's years, so a copy of the layout running elsewhere (a
+// worker) and the drawing agree on it without asking each other.
+export function yearDomainFor(bounds: readonly [number, number], years: Iterable<number>): [number, number] {
+  let [from, to] = bounds;
+  const pad = Math.max(8, (to - from) * 0.06);
+  from -= pad; to += pad;
+  for (const year of years) { from = Math.min(from, year - pad / 2); to = Math.max(to, year + pad / 2); }
+  return [Math.floor(from), Math.ceil(to)];
+}
+export function pixelsPerYearFor(domain: readonly [number, number]) {
+  const span = Math.max(1, domain[1] - domain[0]);
+  return Math.min(MAX_PIXELS_PER_YEAR, Math.max(MIN_PIXELS_PER_YEAR, TIME_REFERENCE_WIDTH * TIME_SPREAD / span));
+}
+export const timeX = (year: number, domain: readonly [number, number]) => MARGIN + (year - domain[0]) * pixelsPerYearFor(domain);
+
+// Where a dragged person may go: not into a free zone (so they stop at the rim), and an endpoint not so near the other that the zones
+// would meet at their smallest. `homeX` is where an endpoint stands on the time line; `other` is the other endpoint, when placed.
+export function clampDragPoint(node: Pick<LayoutNode, 'id' | 'endpoint' | 'radius' | 'clearance'>, x: number, y: number,
+  context: { arranged: boolean; time: boolean; zones: readonly FreeZone[]; homeX: number; other: { x: number; y: number; radius: number } | null }): Point {
+  if (context.arranged) return { x, y };
+  if (node.endpoint === null) {
+    let at = { x, y };
+    for (const zone of context.zones) at = pushOutOfZone(at, zone, node.radius + node.clearance, false, tieBreak(node.id)) ?? at;
+    return at;
+  }
+  const other = context.other; if (!other) return { x, y };
+  const apart = ZONE_MIN_SCALE * ZONE_FACTOR * (node.radius + other.radius);
+  return pushOutOfZone({ x: context.time ? context.homeX : x, y }, { x: other.x, y: other.y, radius: apart }, 0, context.time, tieBreak(node.id)) ?? { x, y };
+}
+
 // A small seeded generator so a given graph always settles the same way (also what the tests rely on).
 export function seededRandom(seed = 0x2f6e2b1) {
   let state = seed >>> 0;
@@ -525,11 +555,8 @@ export class NetworkLayout {
   position(id: string) { const node = this.nodes.get(id); return node && node.x !== undefined && node.y !== undefined ? { x: node.x, y: node.y } : undefined; }
 
   // Independent of the measured size, so resizing or opening the panel never re-spaces the people.
-  get pixelsPerYear() {
-    const span = Math.max(1, this.domain[1] - this.domain[0]);
-    return Math.min(MAX_PIXELS_PER_YEAR, Math.max(MIN_PIXELS_PER_YEAR, TIME_REFERENCE_WIDTH * TIME_SPREAD / span));
-  }
-  xOf(year: number) { return MARGIN + (year - this.domain[0]) * this.pixelsPerYear; }
+  get pixelsPerYear() { return pixelsPerYearFor(this.domain); }
+  xOf(year: number) { return timeX(year, this.domain); }
 
   setSize(width: number, height: number) {
     if (!(width > 0) || !(height > 0) || (width === this.width && height === this.height)) return;
@@ -777,21 +804,13 @@ export class NetworkLayout {
     }
   }
 
-  // Where a dragged person may go: not into a free zone (so they stop at the rim), and an endpoint not so near the other that the zones
-  // would meet at their smallest.
   private clampDrag(node: LayoutNode, x: number, y: number): Point {
-    if (this.arranged) return { x, y };
-    if (node.endpoint === null) {
-      let at = { x, y };
-      for (const zone of this.freeZones) at = pushOutOfZone(at, zone, node.radius + node.clearance, false, tieBreak(node.id)) ?? at;
-      return at;
-    }
-    const other = [...this.nodes.values()].find(candidate => candidate.endpoint !== null && candidate.id !== node.id);
+    const other = node.endpoint === null ? undefined : [...this.nodes.values()].find(candidate => candidate.endpoint !== null && candidate.id !== node.id);
     const ox = other && (other.fx ?? other.x), oy = other && (other.fy ?? other.y);
-    if (!other || ox === undefined || oy === undefined) return { x, y };
-    const apart = ZONE_MIN_SCALE * ZONE_FACTOR * (node.radius + other.radius);
-    const time = this.mode === 'time';
-    return pushOutOfZone({ x: time ? this.home(node).x : x, y }, { x: ox, y: oy, radius: apart }, 0, time, tieBreak(node.id)) ?? { x, y };
+    return clampDragPoint(node, x, y, {
+      arranged: this.arranged, time: this.mode === 'time', zones: this.arranged ? [] : this.freeZones, homeX: this.home(node).x,
+      other: other && ox !== undefined && oy !== undefined ? { x: ox, y: oy, radius: other.radius } : null,
+    });
   }
 
   // Whether dragging may change a node's place along the axis: always, except for the endpoints on the time line.
@@ -875,13 +894,7 @@ export class NetworkLayout {
     }
   };
 
-  private updateDomain() {
-    let [from, to] = this.bounds;
-    const pad = Math.max(8, (to - from) * 0.06);
-    from -= pad; to += pad;
-    for (const node of this.nodes.values()) { from = Math.min(from, node.year - pad / 2); to = Math.max(to, node.year + pad / 2); }
-    this.domain = [Math.floor(from), Math.ceil(to)];
-  }
+  private updateDomain() { this.domain = yearDomainFor(this.bounds, [...this.nodes.values()].map(node => node.year)); }
 
   private configureForces() {
     const time = this.mode === 'time', arranged = this.arranged;

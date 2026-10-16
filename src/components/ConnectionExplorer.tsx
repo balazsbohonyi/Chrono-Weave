@@ -38,9 +38,37 @@ const SAVE_ISSUE_TEXT = {
   trimmed: 'This search is larger than a saved copy can hold in full. The saved copy keeps the endpoints, the accepted network, and as many of the other contacts as fit; the least useful unverified ones are left out.',
 };
 const midpoint = (person: { birthYear: number; deathYear: number }) => (person.birthYear + person.deathYear) / 2;
+const NO_REVEAL = () => {};
+
+// The explored time ticks every second while a search runs; it is a component of its own so the tick re-renders only the clock,
+// not the graph and the panel.
+const ExplorerClock: React.FC<{ busy: boolean; elapsedMs: number }> = ({ busy, elapsedMs }) => {
+  const [elapsed, setElapsed] = useState(elapsedMs);
+  useEffect(() => {
+    setElapsed(elapsedMs);
+    if (!busy) return;
+    const start = Date.now();
+    const timer = setInterval(() => setElapsed(elapsedMs + Date.now() - start), 1000);
+    return () => clearInterval(timer);
+  }, [busy, elapsedMs]);
+  const minutes = Math.floor(elapsed / 60000), seconds = Math.floor(elapsed / 1000) % 60;
+  return <div className="ce-clock">
+    <span className={`ce-working ${busy ? 'is-working' : ''}`} aria-hidden="true">
+      <svg className="ce-working-glass" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+        <circle cx="10.5" cy="10.5" r="5.8" /><path d="M15 15l5.5 5.5" />
+      </svg>
+    </span>
+    <div className={`ce-timer ${busy ? 'is-running' : ''}`} role="timer" aria-label={`${minutes} minutes ${seconds} seconds explored`}>
+      {/* Every character has a cell of its own width, so the digits changing never move the clock. */}
+      <span className="ce-timer-value" aria-hidden="true">{`${minutes}:${String(seconds).padStart(2, '0')}`.split('').map((character, index) =>
+        <span key={index} className={character === ':' ? 'ce-colon' : 'ce-digit'}>{character}</span>)}</span>
+      <span className="ce-timer-caption" aria-hidden="true">explored</span>
+    </div>
+  </div>;
+};
 
 // HERO: two endpoint anchors frame the growing contact network, separate from the timeline.
-const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onContinue, onFresh, onClose, success = null, chain = null, solved = null, onReveal = () => {}, onOpenInfo, suspended = false }) => {
+const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onContinue, onFresh, onClose, success = null, chain = null, solved = null, onReveal = NO_REVEAL, onOpenInfo, suspended = false }) => {
   const dialog = useRef<HTMLDivElement>(null);
   const narrow = useMediaQuery(NARROW_QUERY);
   const reducedMotion = useMediaQuery(REDUCED_MOTION_QUERY);
@@ -61,7 +89,6 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
   const [maximizedChoice, setMaximized] = useState(() => readNetworkViewPrefs().maximized);
   useEffect(() => saveNetworkViewPrefs({ maximized: maximizedChoice }), [maximizedChoice]);
   const maximized = maximizedChoice && !narrow;
-  const [elapsed, setElapsed] = useState(session?.elapsedMs ?? 0);
   const hasSelection = !!selection.person || !!selection.edge;
 
   const select = useCallback((next: NetworkSelection) => {
@@ -132,22 +159,18 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
     return () => element.removeEventListener('wheel', keepPageZoom);
   }, []);
 
-  useEffect(() => {
-    setElapsed(session?.elapsedMs ?? 0);
-    if (!busy) return;
-    const start = Date.now(), previous = session?.elapsedMs ?? 0;
-    const timer = setInterval(() => setElapsed(previous + Date.now() - start), 1000);
-    return () => clearInterval(timer);
-  }, [busy, session?.elapsedMs]);
-
-  const name = (id: string) => session?.people.find(p => p.id === id)?.name ?? id;
-  const endpointNames: [string, string] = [name(session?.endpoints[0] ?? ''), name(session?.endpoints[1] ?? '')];
-  const endpointPerson = (index: 0 | 1) => session?.people.find(p => p.id === session.endpoints[index]);
-  const legend = view && <NetworkLegend filters={filters} counts={view.counts} onToggle={toggleFilter} narrow={narrow} />;
-  const stable = session?.diagnostics.stopReason === 'work-budget' || session?.diagnostics.stopReason === 'time-budget';
+  // Names are looked up for every line of the graph, so by id rather than by searching the people.
+  const peopleById = useMemo(() => new Map(session?.people.map(person => [person.id, person])), [session?.people]);
+  const name = useCallback((id: string) => peopleById.get(id)?.name ?? id, [peopleById]);
+  const endpointIds = session?.endpoints ?? ['', ''];
+  const endpointNames = useMemo<[string, string]>(() => [name(endpointIds[0]), name(endpointIds[1])], [name, endpointIds[0], endpointIds[1]]);
+  const endpointPerson = (index: 0 | 1) => peopleById.get(endpointIds[index]);
+  const legend = useMemo(() => view && <NetworkLegend filters={filters} counts={view.counts} onToggle={toggleFilter} narrow={narrow} />, [view, filters, toggleFilter, narrow]);
+  const stopReason = session?.diagnostics.stopReason;
+  const stable = stopReason === 'work-budget' || stopReason === 'time-budget';
   // A search that stopped on its own limit invites the person to carry on, instead of leaving them to find the footer button.
-  const resume = !busy && !success && !solved && session && stable ? { onResume: onContinue, reason: session.diagnostics.stopReason === 'time-budget' ? 'time' as const : 'work' as const } : null;
-  const minutes = Math.floor(elapsed / 60000), seconds = Math.floor(elapsed / 1000) % 60;
+  const resume = useMemo(() => !busy && !success && !solved && session && stable ? { onResume: onContinue, reason: stopReason === 'time-budget' ? 'time' as const : 'work' as const } : null,
+    [busy, success, solved, !!session, stable, onContinue, stopReason]);
 
   const endpoint = (index: 0 | 1) => {
     const person: ContactPerson | undefined = endpointPerson(index);
@@ -202,25 +225,13 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
           ? <span className="ce-degrees" aria-label={`${solved.degrees} ${solved.degrees === 1 ? 'degree' : 'degrees'} of separation`}><b>{solved.degrees}</b> {solved.degrees === 1 ? 'degree' : 'degrees'}</span>
           : <span className="ce-arrow" aria-hidden="true">→</span>}{endpoint(1)}</div>
           : <p className="ce-opening">Opening contact exploration</p>}
-        <div className="ce-clock">
-          <span className={`ce-working ${busy ? 'is-working' : ''}`} aria-hidden="true">
-            <svg className="ce-working-glass" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
-              <circle cx="10.5" cy="10.5" r="5.8" /><path d="M15 15l5.5 5.5" />
-            </svg>
-          </span>
-          <div className={`ce-timer ${busy ? 'is-running' : ''}`} role="timer" aria-label={`${minutes} minutes ${seconds} seconds explored`}>
-            {/* Every character has a cell of its own width, so the digits changing never move the clock. */}
-            <span className="ce-timer-value" aria-hidden="true">{`${minutes}:${String(seconds).padStart(2, '0')}`.split('').map((character, index) =>
-              <span key={index} className={character === ':' ? 'ce-colon' : 'ce-digit'}>{character}</span>)}</span>
-            <span className="ce-timer-caption" aria-hidden="true">explored</span>
-          </div>
-        </div>
+        <ExplorerClock busy={busy} elapsedMs={session?.elapsedMs ?? 0} />
       </div>
     </header>
     <div className={`connection-explorer-body ${maximized ? 'is-maximized' : ''}`}>
       <section className="connection-explorer-network" aria-label="Explored contact network">
         {view
-          ? <NetworkGraph view={view} endpointNames={endpointNames} nameOf={name} layout={layout} kick={kick} mode={mode} onModeChange={setMode}
+          ? <NetworkGraph view={view} endpointNames={endpointNames} nameOf={name} layout={layout} kick={kick} pinned={pinned} mode={mode} onModeChange={setMode}
             size={size} onSize={resize} selection={selection} onSelect={select} portraits={portraits} narrow={narrow} reducedMotion={reducedMotion}
             success={success} solved={solved} onReveal={onReveal} resume={resume} reveal={reveal} onPinsChange={syncPins} onToggleFold={toggleFold} legend={legend}
             maximized={maximized} onToggleMaximize={narrow ? undefined : toggleMaximized} />

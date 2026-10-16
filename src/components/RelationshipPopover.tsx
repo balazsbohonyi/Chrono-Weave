@@ -3,6 +3,7 @@ import React, { useLayoutEffect, useRef } from 'react';
 import { HistoricalFigure, DeepDiveData } from '../types';
 import { RelationshipData } from '../App';
 import { formatYear } from '../utils/formatters';
+import { sizedPortrait } from '../utils/portraitSize';
 import MarkdownContent from './MarkdownContent';
 import { useModalFocus } from '../hooks/useModalFocus';
 
@@ -200,7 +201,7 @@ const RelationshipPopover: React.FC<RelationshipPopoverProps> = ({
 
                         {target.imageUrl && (
                             <div className="biography-header-portrait w-28 h-28 bg-surface-placeholder rounded-md overflow-hidden shadow-sm border border-border-subtle">
-                                <img src={target.imageUrl} alt={target.name} className="w-full h-full object-cover object-top" />
+                                <img src={sizedPortrait(target.imageUrl, 112)} alt={target.name} className="w-full h-full object-cover object-top" />
                             </div>
                         )}
                     </div>
@@ -233,7 +234,7 @@ const FigureCard: React.FC<{
             {/* Image Floated Right */}
             {(detail?.imageUrl || figure.imageUrl) && (
                 <div className="float-right ml-4 mb-2 w-24 h-24 bg-surface-placeholder rounded-[10px] overflow-hidden shadow-sm border border-border-subtle">
-                    <img src={detail?.imageUrl || figure.imageUrl} alt={figure.name} className="w-full h-full object-cover object-top" />
+                    <img src={sizedPortrait(detail?.imageUrl || figure.imageUrl, 96)} alt={figure.name} className="w-full h-full object-cover object-top" />
                 </div>
             )}
 
