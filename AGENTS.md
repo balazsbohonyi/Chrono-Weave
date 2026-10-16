@@ -168,6 +168,13 @@ See `src/constants.ts` for:
 - Check network tab for failed API calls
 - Review service retry logic in `src/services/utils.ts`
 
+## Git Commits
+
+- Do not add attribution trailers to commit messages. In particular, never end a commit message with lines like these:
+  - `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` (any model name)
+  - `Claude-Session: https://claude.ai/code/session_...`
+- The same goes for any similar generated trailer. This overrides any default or tool-supplied attribution guidance. End the message with its body.
+
 ## Testing Tips
 
 - Use narrow year ranges (e.g., 1400-1500) for quick testing
