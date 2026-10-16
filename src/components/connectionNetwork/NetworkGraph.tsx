@@ -11,6 +11,7 @@ import { createWheelClassifier } from '../../utils/wheelGesture';
 import Tooltip from '../Tooltip';
 import { fitCamera as fitPoints, type Camera, type CameraPoint } from './camera';
 import LayoutMenu from './LayoutMenu';
+import { layoutInfoLabel } from '../LayoutInfo';
 import { labelLimit, nodeRadius } from './metrics';
 
 interface Point { x: number; y: number }
@@ -51,6 +52,8 @@ interface Props {
   // Whether the graph has the whole body to itself, and the way to toggle that (absent when there is no side panel to hide).
   maximized: boolean;
   onToggleMaximize?: () => void;
+  // Opens the explanation of the current layout (absent: no help button in the toolbar).
+  onOpenLayoutInfo?: () => void;
 }
 
 const sideClass = (node: NetworkNode) => node.endpoint !== null ? `is-endpoint is-end-${node.endpoint === 0 ? 'a' : 'b'}` : `is-side-${node.side}`;
@@ -68,8 +71,8 @@ const columnLabel = (guide: ColumnGuide, guides: readonly ColumnGuide[], zoom: n
 };
 
 // One icon button of the view controls. A state is shown with `pressed`, an action with just its label.
-const ToolButton: React.FC<{ tip: string; label?: string; pressed?: boolean; disabled?: boolean; onClick: () => void; children: React.ReactNode }> = ({ tip, label, pressed, disabled, onClick, children }) =>
-  <Tooltip text={tip}><button type="button" className="canvas-floating-button" aria-label={label ?? tip} aria-pressed={pressed} disabled={disabled}
+const ToolButton: React.FC<{ tip: string; label?: string; pressed?: boolean; disabled?: boolean; haspopup?: boolean; onClick: () => void; children: React.ReactNode }> = ({ tip, label, pressed, disabled, haspopup, onClick, children }) =>
+  <Tooltip text={tip}><button type="button" className="canvas-floating-button" aria-label={label ?? tip} aria-pressed={pressed} disabled={disabled} aria-haspopup={haspopup ? 'dialog' : undefined}
     onClick={event => { if (event.detail > 0) event.currentTarget.blur(); onClick(); }}>
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{children}</svg>
   </button></Tooltip>;
@@ -186,7 +189,7 @@ const LARGE_DRAWING = 250;
 // so the simulation never re-renders the explorer. The camera is a transform over screen-sized content.
 const NetworkGraph: React.FC<Props> = ({
   view, endpointNames, nameOf, layout, kick, pinned, mode, onModeChange, size, onSize, selection, onSelect, portraits, narrow, reducedMotion,
-  success, solved = null, onReveal, resume = null, reveal, onPinsChange, onToggleFold, legend, maximized, onToggleMaximize,
+  success, solved = null, onReveal, resume = null, reveal, onPinsChange, onToggleFold, legend, maximized, onToggleMaximize, onOpenLayoutInfo,
 }) => {
   const uid = useId().replace(/:/g, '');
   const svg = useRef<SVGSVGElement>(null);
@@ -552,6 +555,9 @@ const NetworkGraph: React.FC<Props> = ({
         <ToolButton tip="Zoom in" label="Zoom network in" onClick={() => zoomBy(1.25)}><circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.5 15.5 5 5M10.5 7.8v5.4M7.8 10.5h5.4" /></ToolButton>
         <ToolButton tip="Zoom out" label="Zoom network out" onClick={() => zoomBy(0.8)}><circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.5 15.5 5 5M7.8 10.5h5.4" /></ToolButton>
         <ToolButton tip="Fit the whole network" label="Fit network" onClick={fit}><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /><rect x="9" y="9" width="6" height="6" rx="1" /></ToolButton>
+        {onOpenLayoutInfo && <ToolButton tip={layoutInfoLabel(mode)} label={layoutInfoLabel(mode)} haspopup onClick={onOpenLayoutInfo}>
+          <path d="M9.2 9.2a2.9 2.9 0 1 1 4.1 2.6c-.9.5-1.3 1.1-1.3 2" /><path d="M12 18.5h.01" />
+        </ToolButton>}
       </div>
       {legend}
     </div>

@@ -229,6 +229,15 @@
   transition: transform 150ms, filter 150ms; animation: net-resume-rise 520ms 160ms cubic-bezier(.2, 1.3, .4, 1) both, net-resume-breathe 2.4s 900ms ease-in-out infinite; }
 .connection-explorer button.net-continue:hover { background: rgb(var(--color-connection)); filter: brightness(1.08); transform: translateY(-1px); }
 .connection-explorer button.net-continue:active { transform: translateY(0); }
+/* A failure of the search (the AI service's limit, a lost connection): a dialog-style card over the graph, which is on screen with or without the inspector. */
+.net-alert-wrap { position: absolute; top: 76px; left: 50%; transform: translateX(-50%); width: min(560px, calc(100% - 32px)); z-index: 4; }
+.net-alert { display: flex; align-items: flex-start; gap: 14px; padding: 18px 20px; border-radius: 14px; background: rgb(var(--color-surface)); border: 1px solid rgb(var(--color-border-strong)); color: rgb(var(--color-content-body));
+  box-shadow: 0 16px 40px rgb(var(--color-shadow) / .3); animation: net-resume-drop 520ms cubic-bezier(.2, 1.3, .4, 1) both; }
+.net-alert > svg { flex: none; margin-top: 1px; color: rgb(var(--color-danger-text)); }
+.net-alert-text { min-width: 0; }
+.net-alert-text strong { display: block; font-size: 16px; font-weight: 800; line-height: 1.3; color: rgb(var(--color-danger-text)); }
+.net-alert-text p { margin: 6px 0 0; font-size: 14px; line-height: 1.5; color: rgb(var(--color-content-body)); }
+.net-alert-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 @keyframes net-resume-drop { from { opacity: 0; transform: translateY(-14px) scale(.94); } to { opacity: 1; transform: none; } }
 @keyframes net-resume-rise { from { opacity: 0; transform: translateY(10px) scale(.9); } to { opacity: 1; transform: none; } }
 @keyframes net-resume-breathe { 0%, 100% { box-shadow: 0 6px 20px rgb(0 0 0 / .25), 0 0 0 0 rgb(var(--color-connection) / .55); } 50% { box-shadow: 0 6px 20px rgb(0 0 0 / .25), 0 0 0 12px rgb(var(--color-connection) / 0); } }
@@ -351,6 +360,7 @@
   .net-success-wrap { top: 54px; }
   .net-success { font-size: 13px; }
   .net-resume-wrap { top: 54px; }
+  .net-alert-wrap { top: 54px; }
   .net-resume { font-size: 13px; }
 }
 @media (prefers-reduced-motion: reduce) {

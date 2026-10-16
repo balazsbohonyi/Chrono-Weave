@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { readFileSync } from 'node:fs';
-import ConnectionExplorer from '../src/components/ConnectionExplorer';
+import ConnectionExplorer, { SearchFailureNotice } from '../src/components/ConnectionExplorer';
 import { LAYOUT_OPTIONS, LayoutIcon } from '../src/components/connectionNetwork/layoutOptions';
 import { figurePerson, identifyPerson, sessionKey, type ContactPerson, type ConnectionSession } from '../src/services/connectionGraph';
 import { A, B, M, N } from './connectionFixtures';
@@ -167,6 +167,25 @@ test('a verified chain is announced in the graph and waits for the Reveal button
   assert.doesNotMatch(render(session), /net-reveal/);
 });
 
+test('a failure is announced in a card over the graph with a way to resume, and not in the inspector that a maximized graph hides', () => {
+  const message = 'The AI service has reached its usage limit. Please try again later or choose another provider in Settings.';
+  const card = renderToStaticMarkup(<SearchFailureNotice message={message} onResume={() => {}} onDismiss={() => {}} />);
+  assert.match(card, /role="alert"/); assert.match(card, /Search interrupted/); assert.match(card, /usage limit/);
+  assert.match(card, /class="connection-explorer-primary"[^>]*>Resume search</); assert.match(card, />Dismiss</);
+  // The inspector no longer repeats it.
+  const session = build(() => []); session.error = message;
+  assert.doesNotMatch(render(session), /usage limit/);
+});
+
+test('reopening a pair whose last search failed shows no banner: only a failure while the overlay is open is announced', () => {
+  const session = build(() => []);
+  session.error = 'The AI service has reached its usage limit.';
+  delete session.diagnostics.stopReason;
+  assert.doesNotMatch(render(session), /net-alert|usage limit/);
+  // The paused banner stays out of the way of a failed search too.
+  assert.doesNotMatch(render(session), /Search paused/);
+});
+
 test('every layout hangs under one button of the view controls: the menu lists them all with an icon, and starts closed on the current one', () => {
   const markup = render(build(() => [], true));
   assert.match(markup, /aria-haspopup="menu"[^>]*aria-expanded="false"[^>]*aria-label="Layout: Timeline"|aria-label="Layout: Timeline"[^>]*aria-haspopup="menu"/);
@@ -178,6 +197,18 @@ test('every layout hangs under one button of the view controls: the menu lists t
   assert.deepEqual(LAYOUT_OPTIONS.map(option => option.mode), ['time', 'free', 'cluster', 'columns', 'category', 'corridor']);
   assert.equal(new Set(LAYOUT_OPTIONS.map(option => option.label)).size, LAYOUT_OPTIONS.length);
   for (const option of LAYOUT_OPTIONS) assert.match(renderToStaticMarkup(<LayoutIcon>{option.icon}</LayoutIcon>), /<svg[^>]*aria-hidden="true"><(path|circle|rect)/, `${option.label} has an icon`);
+});
+
+test('the last button of the view controls explains the current layout: a bare question mark, with no circle around it', () => {
+  const markup = render(build(() => [], true));
+  const toolbar = markup.slice(markup.indexOf('Network view controls'), markup.indexOf('aria-label="Contact filters"'));
+  const labels = [...toolbar.matchAll(/aria-label="([^"]+)"/g)].map(match => match[1]);
+  assert.equal(labels.at(-1), 'About the Timeline layout');
+  assert.equal(labels.at(-2), 'Fit network');
+  const button = toolbar.match(/<button[^>]*aria-label="About the Timeline layout"[^>]*>.*?<\/button>/)?.[0] ?? '';
+  assert.match(button, /aria-haspopup="dialog"/);
+  assert.doesNotMatch(button, /<circle/);
+  assert.doesNotMatch(markup, /Graph layout<\/p>/);
 });
 
 test('the graph offers a bare maximize icon that hides the side panel, and starts un-maximized', () => {

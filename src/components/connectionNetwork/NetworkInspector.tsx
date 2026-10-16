@@ -186,7 +186,6 @@ const NetworkInspector: React.FC<Props> = ({ session, view, selection, portraits
         </div>
       </>}
     </div>
-    {session?.error && <p role="alert">{session.error}</p>}
     {session && !session.persistent && <p className="connection-explorer-storage">This exploration is available in this session. Saving across reloads is unavailable.</p>}
   </aside>;
 };

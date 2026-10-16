@@ -123,9 +123,12 @@ export const SixDegreesInfoDialog: React.FC<{ onClose: () => void }> = ({ onClos
         <button type="button" className="close-button sdi-close" aria-label="Close" onClick={onClose}>
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M6 6l12 12M6 18L18 6" /></svg>
         </button>
-        <div className="sdi-scroll no-scrollbar">
+        <div className="sdi-panel">
+        <header className="sdi-header">
           <p className="sdi-kicker">How it works</p>
           <h2 id={titleId} className="sdi-title">{SIX_DEGREES_INFO.title}</h2>
+        </header>
+        <div className="sdi-scroll no-scrollbar">
           {SIX_DEGREES_INFO.sections.map(section => (
             <section key={section.title} className="sdi-section">
               <h3>{section.title}</h3>
@@ -150,6 +153,7 @@ export const SixDegreesInfoDialog: React.FC<{ onClose: () => void }> = ({ onClos
               )}
             </section>
           ))}
+        </div>
         </div>
       </div>
     </div>

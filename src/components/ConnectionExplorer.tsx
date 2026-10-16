@@ -13,6 +13,8 @@ import NetworkGraph, { type RevealRequest } from './connectionNetwork/NetworkGra
 import NetworkInspector from './connectionNetwork/NetworkInspector';
 import NetworkLegend from './connectionNetwork/NetworkLegend';
 import NetworkPortrait from './connectionNetwork/NetworkPortrait';
+import { createPortal } from 'react-dom';
+import LayoutInfoDialog from './LayoutInfo';
 import Tooltip from './Tooltip';
 import { SixDegreesInfoButton } from './SixDegreesInfo';
 import { foldBadgeReach, NARROW_QUERY, nodeRadius, REDUCED_MOTION_QUERY } from './connectionNetwork/metrics';
@@ -67,6 +69,22 @@ const ExplorerClock: React.FC<{ busy: boolean; elapsedMs: number }> = ({ busy, e
   </div>;
 };
 
+// The card over the graph that says why a search stopped: a dialog-style notice with the way on (resume) and a way to put it aside.
+export const SearchFailureNotice: React.FC<{ message: string; onResume: () => void; onDismiss: () => void }> = ({ message, onResume, onDismiss }) =>
+  <div className="net-alert-wrap">
+    <div className="net-alert" role="alert">
+      <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /><path d="M12 9v4M12 17h.01" />
+      </svg>
+      <div className="net-alert-text"><strong>Search interrupted</strong><p>{message}</p>
+        <div className="net-alert-actions">
+          <button type="button" className="connection-explorer-primary" onClick={onResume}>Resume search</button>
+          <button type="button" onClick={onDismiss}>Dismiss</button>
+        </div>
+      </div>
+    </div>
+  </div>;
+
 // HERO: two endpoint anchors frame the growing contact network, separate from the timeline.
 const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onContinue, onFresh, onClose, success = null, chain = null, solved = null, onReveal = NO_REVEAL, onOpenInfo, suspended = false }) => {
   const dialog = useRef<HTMLDivElement>(null);
@@ -90,6 +108,10 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
   useEffect(() => saveNetworkViewPrefs({ maximized: maximizedChoice }), [maximizedChoice]);
   const maximized = maximizedChoice && !narrow;
   const hasSelection = !!selection.person || !!selection.edge;
+  // The explanation of the current layout, a dialog of its own above the explorer (which is inert meanwhile, like under the Six Degrees one).
+  const [layoutInfoOpen, setLayoutInfoOpen] = useState(false);
+  const openLayoutInfo = useCallback(() => setLayoutInfoOpen(true), []);
+  const closeLayoutInfo = useCallback(() => setLayoutInfoOpen(false), []);
 
   const select = useCallback((next: NetworkSelection) => {
     setSelection(next);
@@ -169,8 +191,17 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
   const stopReason = session?.diagnostics.stopReason;
   const stable = stopReason === 'work-budget' || stopReason === 'time-budget';
   // A search that stopped on its own limit invites the person to carry on, instead of leaving them to find the footer button.
-  const resume = useMemo(() => !busy && !success && !solved && session && stable ? { onResume: onContinue, reason: stopReason === 'time-budget' ? 'time' as const : 'work' as const } : null,
-    [busy, success, solved, !!session, stable, onContinue, stopReason]);
+  // Why the search stopped, when it failed (the AI service's limit, a lost connection): over the graph, where it cannot be missed whether
+  // or not the inspector is showing, until it is dismissed or the search carries on. A dismissal belongs to one run of the search (its segment): a new run that fails the same way shows it again.
+  const [dismissedError, setDismissedError] = useState<string | null>(null);
+  const failureKey = session?.error ? `${session.segment}:${session.error}` : null;
+  // Only a failure that happened while this overlay was open is announced: reopening a pair whose last search failed shows no banner (the
+  // header says the search stopped), and it comes up when the search is resumed and fails again.
+  const [ranHere, setRanHere] = useState(busy);
+  useEffect(() => { if (busy) setRanHere(true); }, [busy]);
+  const failure = !busy && !success && !solved && ranHere && session?.error && failureKey !== dismissedError ? session.error : null;
+  const resume = useMemo(() => !busy && !success && !solved && session && stable && !session.error ? { onResume: onContinue, reason: stopReason === 'time-budget' ? 'time' as const : 'work' as const } : null,
+    [busy, success, solved, !!session, stable, session?.error, onContinue, stopReason]);
 
   const endpoint = (index: 0 | 1) => {
     const person: ContactPerson | undefined = endpointPerson(index);
@@ -199,8 +230,9 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
     </Tooltip>;
   };
 
-  return <div ref={dialog} role="dialog" aria-modal="true" aria-label={session ? `Contact exploration: ${endpointNames[0]} to ${endpointNames[1]}` : 'Opening contact exploration'}
-    className="connection-explorer" tabIndex={-1} inert={suspended}>
+  return <>
+  <div ref={dialog} role="dialog" aria-modal="true" aria-label={session ? `Contact exploration: ${endpointNames[0]} to ${endpointNames[1]}` : 'Opening contact exploration'}
+    className="connection-explorer" tabIndex={-1} inert={suspended || layoutInfoOpen}>
     <button type="button" className="close-button relationship-close" aria-label="Close contact exploration" onClick={onClose}>
       <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 6l12 12M6 18L18 6" /></svg>
     </button>
@@ -234,8 +266,9 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
           ? <NetworkGraph view={view} endpointNames={endpointNames} nameOf={name} layout={layout} kick={kick} pinned={pinned} mode={mode} onModeChange={setMode}
             size={size} onSize={resize} selection={selection} onSelect={select} portraits={portraits} narrow={narrow} reducedMotion={reducedMotion}
             success={success} solved={solved} onReveal={onReveal} resume={resume} reveal={reveal} onPinsChange={syncPins} onToggleFold={toggleFold} legend={legend}
-            maximized={maximized} onToggleMaximize={narrow ? undefined : toggleMaximized} />
+            maximized={maximized} onToggleMaximize={narrow ? undefined : toggleMaximized} onOpenLayoutInfo={openLayoutInfo} />
           : <div className="net-graph"><p className="net-empty">Preparing the contact network…</p></div>}
+        {failure && <SearchFailureNotice message={failure} onResume={onContinue} onDismiss={() => setDismissedError(failureKey)} />}
       </section>
       <NetworkInspector session={session} view={view} selection={selection} portraits={portraits} pinned={pinned} narrow={narrow}
         open={sheetOpen || hasSelection} onSelect={selectFromPanel} onUnpin={unpin} onDismiss={dismissSheet} onBackToList={backToList} query={query} onQueryChange={setQuery} />
@@ -250,6 +283,8 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
         <button type="button" onClick={onClose}>Back to canvas</button>
       </div>
     </footer>
-  </div>;
+  </div>
+  {layoutInfoOpen && createPortal(<LayoutInfoDialog mode={mode} onClose={closeLayoutInfo} />, document.body)}
+  </>;
 };
 export default ConnectionExplorer;

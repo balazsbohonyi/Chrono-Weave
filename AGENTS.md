@@ -134,6 +134,7 @@ All components are in `src/components/`:
 - **FloatingToolbar**: Secondary interaction toolbar
 - **ConnectionExplorer**: Six Degrees live contact-network overlay (graph, inspector, footer)
 - **SixDegreesInfo**: "?" button and dialog explaining Six Degrees of Separation and this app's twist (chains across centuries)
+- **LayoutInfo**: the "?" button (last in the explorer graph's bottom-left toolbar) opens a dialog explaining the layout in use: timeline strips and placement by mid-life, rings, columns, categories, corridor, free. `LAYOUT_INFO` holds the wording per `LayoutMode`; a new layout needs an entry there and a picture in `Diagram`
 - **ConnectionPicker / ConnectionPanel / ConnectionThread / ConnectionStage**: Six Degrees — choosing the other end, the sidebar Connection tab, the SVG thread, and the stage that plays a finished connection over the blurred canvas
 
 ## Configuration Constants

@@ -65,12 +65,11 @@ const COLUMN_GROUP_GAP = 40;
 const COLUMN_MIN_SEPARATION = 640;
 const COLUMN_GAP = 120;
 const ENDPOINT_LABEL_HALF = 118;
-// Category layout: a pod holds one category's people in a grid of slots under a title; the pods are packed in rows into a block that
+// Category layout: a pod holds one category's people in a grid of slots under a title; the pods partition one block that
 // is wider than tall, with the endpoints standing outside it, one on each side.
 const POD_PADDING = 26;
 const POD_HEADER = 50;
 const POD_GAP = 44;
-const POD_ASPECT = 1.5;
 const POD_BLOCK_ASPECT = 1.7;
 const POD_MIN_SEPARATION = 480;
 const POD_SIDE_GAP = ENDPOINT_LABEL_HALF + 70;
@@ -374,9 +373,83 @@ export function planColumns(people: OrbitPerson[], center: Point, neighbours: Re
   return { home, offsets, columns: guides.map(guide => ({ ...guide, top, bottom })) };
 }
 
-// Where everybody goes when grouped by category: one pod per category (the biggest first), each a grid of slots in year order under a
-// title, the pods packed in rows into a block wider than tall and centred on `center`; endpoint A stands left of the block and B right
-// of it. The endpoints belong to no pod: they stay the landmarks the pods hang between. Pure: the layout turns it into forces.
+// Where everybody goes when grouped by category: one big rectangle, wider than tall, is partitioned between the categories, the pods
+// filling it edge to edge with no hanging corners, each pod a grid of slots in year order under a title. The partition is the one that
+// takes the least room (see `partitionPods`). The rectangle is centred on `center`; endpoint A stands left of it and B right of it. The
+// endpoints belong to no pod: they stay the landmarks the pods hang between. Pure: the layout turns it into forces.
+const POD_MAX_STRETCH = 1.5;
+const POD_TITLE_WIDTH = 230;
+const POD_SHAPES_KEPT = 12;
+
+// How `count` people sit in a pod of this size: a grid whose rows and columns follow the pod's proportions, spread (up to a limit)
+// over the room there is and centred in it. Null when a slot per person does not fit.
+function podGrid(count: number, width: number, height: number, slot: number) {
+  const inner = width - 2 * POD_PADDING, room = height - POD_HEADER - POD_PADDING;
+  const maxColumns = Math.floor(inner / slot), maxRows = Math.floor(room / slot);
+  if (maxColumns < 1 || maxRows < 1 || Math.ceil(count / maxColumns) > maxRows) return null;
+  const rows = Math.min(maxRows, Math.max(Math.ceil(count / maxColumns), Math.ceil(Math.sqrt(count * room / inner)))), columns = Math.ceil(count / rows);
+  const pitchX = Math.min(slot * POD_MAX_STRETCH, inner / columns), pitchY = Math.min(slot * POD_MAX_STRETCH, room / rows);
+  return { columns, pitchX, pitchY, left: POD_PADDING + (inner - columns * pitchX) / 2, top: POD_HEADER + (room - rows * pitchY) / 2 };
+}
+
+// A size a block of pods can have (gaps included), and how it is made of two smaller blocks: side by side, or one above the other.
+interface Box { x: number; y: number; width: number; height: number }
+interface PodShape { width: number; height: number; cut?: { vertical: boolean; first: PodShape; second: PodShape } }
+// Keeps the shapes no other shape beats (no wider and no taller), thinned to a handful: the sizes worth choosing from.
+function bestShapes(shapes: PodShape[]): PodShape[] {
+  const sorted = [...shapes].sort((x, y) => x.width - y.width || x.height - y.height), kept: PodShape[] = [];
+  for (const shape of sorted) if (!kept.length || shape.height < kept[kept.length - 1].height - 1e-9) kept.push(shape);
+  if (kept.length <= POD_SHAPES_KEPT) return kept;
+  return Array.from({ length: POD_SHAPES_KEPT }, (_, index) => kept[Math.round(index * (kept.length - 1) / (POD_SHAPES_KEPT - 1))]);
+}
+
+// A slicing floorplan: the pods (given as people counts, the biggest first) are split into two runs of neighbours, each run is laid out the same way,
+// and the two blocks go side by side or one above the other, the shorter (or narrower) one stretched to the other's size so the whole is
+// a rectangle. Every run of pods keeps the list of the sizes worth having (a pod can be one column tall and narrow, or many wide and
+// short); the best whole is the one that takes the least room near the wanted proportions. Returns the pods' places in the block.
+export function partitionPods(counts: readonly number[], slot: number): { width: number; height: number; places: Box[] } {
+  const total = counts.length;
+  if (!total) return { width: 0, height: 0, places: [] };
+  const alone = (count: number) => bestShapes(Array.from({ length: count }, (_, index) => index + 1).map(columns => ({
+    width: Math.max(POD_TITLE_WIDTH, columns * slot + 2 * POD_PADDING) + POD_GAP, height: Math.ceil(count / columns) * slot + POD_HEADER + POD_PADDING + POD_GAP,
+  })));
+  // Only runs of neighbours in the biggest-first order are grouped (from pod `from` up to, not including, `to`), which keeps the search
+  // small enough to run whenever the network changes while still finding good partitions.
+  const groups = new Map<number, PodShape[]>(), key = (from: number, to: number) => from * (total + 1) + to;
+  for (let length = 1; length <= total; length++) for (let from = 0; from + length <= total; from++) {
+    const to = from + length;
+    if (length === 1) { groups.set(key(from, to), alone(counts[from])); continue; }
+    const made: PodShape[] = [];
+    for (let middle = from + 1; middle < to; middle++) for (const first of groups.get(key(from, middle))!) for (const second of groups.get(key(middle, to))!) {
+      made.push({ width: first.width + second.width, height: Math.max(first.height, second.height), cut: { vertical: false, first, second } });
+      made.push({ width: Math.max(first.width, second.width), height: first.height + second.height, cut: { vertical: true, first, second } });
+    }
+    groups.set(key(from, to), bestShapes(made));
+  }
+  const cost = (shape: PodShape) => shape.width * shape.height * Math.exp(Math.abs(Math.log(shape.width / shape.height / POD_BLOCK_ASPECT)));
+  const whole = groups.get(key(0, total))!.reduce((best, shape) => cost(shape) < cost(best) ? shape : best);
+  // Hand the block out: every part is as big as the block it is cut from along the cut, so the parts fill it exactly.
+  const podOf = new Map<PodShape, number>();
+  for (let index = 0; index < total; index++) for (const shape of groups.get(key(index, index + 1))!) podOf.set(shape, index);
+  const places: Box[] = [];
+  const hand = (shape: PodShape, box: Box) => {
+    if (!shape.cut) { places[podOf.get(shape)!] = box; return; }
+    // A part may be handed more room than it asked for (it was stretched to its neighbour): the extra is shared by both halves of its cut.
+    const { first, second, vertical } = shape.cut;
+    if (vertical) {
+      const firstHeight = box.height * first.height / (first.height + second.height);
+      hand(first, { x: box.x, y: box.y, width: box.width, height: firstHeight });
+      hand(second, { x: box.x, y: box.y + firstHeight, width: box.width, height: box.height - firstHeight });
+    } else {
+      const firstWidth = box.width * first.width / (first.width + second.width);
+      hand(first, { x: box.x, y: box.y, width: firstWidth, height: box.height });
+      hand(second, { x: box.x + firstWidth, y: box.y, width: box.width - firstWidth, height: box.height });
+    }
+  };
+  hand(whole, { x: 0, y: 0, width: whole.width, height: whole.height });
+  return { width: whole.width, height: whole.height, places };
+}
+
 export function planCategories(people: OrbitPerson[], center: Point): CategoryPlan {
   const hubs = [0, 1].map(index => people.find(person => person.endpoint === index));
   const members = people.filter(person => person.endpoint === null);
@@ -385,47 +458,23 @@ export function planCategories(people: OrbitPerson[], center: Point): CategoryPl
   for (const person of members) byCategory.set(person.category || 'OTHER', [...(byCategory.get(person.category || 'OTHER') ?? []), person]);
   const pods = [...byCategory].map(([category, list]) => {
     list.sort((x, y) => x.year - y.year || x.id.localeCompare(y.id));
-    const columns = Math.max(1, Math.round(Math.sqrt(list.length * POD_ASPECT))), rows = Math.ceil(list.length / columns);
-    return { category, list, columns, width: columns * slot + 2 * POD_PADDING, height: rows * slot + POD_HEADER + POD_PADDING, x: 0, y: 0 };
+    return { category, list };
   }).sort((x, y) => y.list.length - x.list.length || x.category.localeCompare(y.category));
-  // Shelf packing: fill a row up to a width, then start the next. Every width that adds one more pod to a row is tried, and the one
-  // whose block comes closest to the wanted proportions wins.
-  const shelves = (limit: number) => {
-    const packed: Array<typeof pods> = [];
-    let used = 0;
-    for (const pod of pods) {
-      if (!packed.length || (used > 0 && used + pod.width > limit)) { packed.push([]); used = 0; }
-      packed[packed.length - 1].push(pod); used += pod.width + POD_GAP;
-    }
-    const rowWidths = packed.map(row => row.reduce((sum, pod) => sum + pod.width, 0) + (row.length - 1) * POD_GAP);
-    const height = packed.reduce((sum, row) => sum + Math.max(...row.map(pod => pod.height)) + POD_GAP, -POD_GAP);
-    return { rows: packed, widths: rowWidths, fit: Math.abs(Math.log(Math.max(1, ...rowWidths) / Math.max(1, height) / POD_BLOCK_ASPECT)) };
-  };
-  let best = shelves(0);
-  for (let count = 1, limit = 0; pods.length && count <= pods.length; count++) {
-    limit = pods.slice(0, count).reduce((sum, pod) => sum + pod.width + POD_GAP, 0);
-    const candidate = shelves(limit);
-    if (candidate.fit < best.fit - 1e-9) best = candidate;
-  }
-  const { rows, widths } = best;
-  const blockW = Math.max(0, ...widths);
-  let top = 0;
-  rows.forEach((row, index) => {
-    let left = (blockW - widths[index]) / 2;
-    for (const pod of row) { pod.x = left; pod.y = top; left += pod.width + POD_GAP; }
-    top += Math.max(...row.map(pod => pod.height)) + POD_GAP;
-  });
-  const blockH = Math.max(0, top - POD_GAP), originX = center.x - blockW / 2, originY = center.y - blockH / 2;
+  const block = partitionPods(pods.map(pod => pod.list.length), slot);
+  const originX = center.x - block.width / 2, originY = center.y - block.height / 2;
   const offsets: CategoryPlan['offsets'] = new Map(), categories: CategoryGuide[] = [];
-  for (const pod of pods) {
-    categories.push({ category: pod.category, count: pod.list.length, x: originX + pod.x, y: originY + pod.y, width: pod.width, height: pod.height });
-    pod.list.forEach((person, index) => offsets.set(person.id, {
+  pods.forEach((pod, index) => {
+    // A pod is the share of the block it was given, held apart from the next by a gap all round.
+    const place = block.places[index], x = originX + place.x + POD_GAP / 2, y = originY + place.y + POD_GAP / 2, width = place.width - POD_GAP, height = place.height - POD_GAP;
+    categories.push({ category: pod.category, count: pod.list.length, x, y, width, height });
+    const grid = podGrid(pod.list.length, width, height, slot) ?? { columns: Math.max(1, Math.floor(width / slot)), pitchX: slot, pitchY: slot, left: POD_PADDING, top: POD_HEADER };
+    pod.list.forEach((person, position) => offsets.set(person.id, {
       anchor: CENTER,
-      dx: originX + pod.x + POD_PADDING + (index % pod.columns) * slot + slot / 2 - center.x,
-      dy: originY + pod.y + POD_HEADER + Math.floor(index / pod.columns) * slot + slot / 2 - center.y,
+      dx: x + grid.left + (position % grid.columns + 0.5) * grid.pitchX - center.x,
+      dy: y + grid.top + (Math.floor(position / grid.columns) + 0.5) * grid.pitchY - center.y,
     }));
-  }
-  const separation = Math.max(POD_MIN_SEPARATION, blockW + 2 * POD_SIDE_GAP);
+  });
+  const separation = Math.max(POD_MIN_SEPARATION, block.width + 2 * POD_SIDE_GAP);
   const home = new Map<string, Point>();
   if (hubs[0]) home.set(hubs[0].id, { x: center.x - separation / 2, y: center.y });
   if (hubs[1]) home.set(hubs[1].id, { x: center.x + separation / 2, y: center.y });

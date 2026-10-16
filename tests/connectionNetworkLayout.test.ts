@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { axisTicks, NetworkLayout, planCategories, planColumns, planCorridor, planOrbit, seededRandom, type LayoutInput } from '../src/services/connectionNetworkLayout';
+import { axisTicks, NetworkLayout, partitionPods, planCategories, planColumns, planCorridor, planOrbit, seededRandom, type LayoutInput } from '../src/services/connectionNetworkLayout';
 
 const inputs: LayoutInput[] = [
   { id: 'a', year: 1625, endpoint: 0, radius: 32 },
@@ -557,6 +557,27 @@ test('categories layout: a big crowd of three fields packs into a block wider th
   const ids = crowd.map(item => item.id); let overlapping = 0;
   for (let i = 0; i < ids.length; i++) for (let j = i + 1; j < ids.length; j++) if (gap(layout, ids[i], ids[j]) < 60) overlapping++;
   assert.equal(overlapping, 0);
+});
+
+test('categories plan: the pods partition one block edge to edge, with no hanging corners, however uneven the categories are', () => {
+  for (const counts of [[46, 38, 3], [120, 1], [30, 30, 30, 5, 2, 1], [7], [12, 12, 12, 12], [200, 90, 60, 40, 25, 12, 5, 3, 1]]) {
+    const { width, height, places } = partitionPods(counts, 100);
+    assert.equal(places.length, counts.length);
+    // The tiles add up to the block and none overlaps another: they fill it exactly.
+    assert.ok(Math.abs(places.reduce((sum, box) => sum + box.width * box.height, 0) - width * height) < 1e-3 * width * height, `${counts} fill the block`);
+    for (const one of places) {
+      assert.ok(one.x >= -1e-6 && one.y >= -1e-6 && one.x + one.width <= width + 1e-6 && one.y + one.height <= height + 1e-6, `${counts} stay inside the block`);
+      for (const other of places) if (one !== other) assert.ok(one.x + one.width <= other.x + 1e-6 || other.x + other.width <= one.x + 1e-6 || one.y + one.height <= other.y + 1e-6 || other.y + other.height <= one.y + 1e-6, `${counts} do not overlap`);
+    }
+    // Wider than tall in the end, or close to it, and not much bigger than the people need (a slot each, plus titles and gaps).
+    assert.ok(width / height > 1 && width / height < 2.4, `${counts} are wider than tall: ${(width / height).toFixed(2)}`);
+    assert.ok(width * height < 2.2 * (counts.reduce((sum, count) => sum + count, 0) * 100 * 100 + counts.length * 230 * 120 + 40000), `${counts} are packed`);
+  }
+  // The same through the plan: the pods share the block, so the space between them is just the gap.
+  const plan = planCategories([['A', 46], ['B', 38], ['C', 3]].flatMap(([category, count]) => Array.from({ length: count as number }, (_, index) => ({ id: `${category}${index}`, year: 1900 + index, endpoint: null, radius: 22, category: category as string, side: 'none' as const, distance: null, parent: null }))), { x: 0, y: 0 });
+  const left = Math.min(...plan.categories.map(guide => guide.x)), right = Math.max(...plan.categories.map(guide => guide.x + guide.width));
+  const top = Math.min(...plan.categories.map(guide => guide.y)), bottom = Math.max(...plan.categories.map(guide => guide.y + guide.height));
+  assert.ok(plan.categories.reduce((sum, guide) => sum + guide.width * guide.height, 0) / ((right - left) * (bottom - top)) > 0.85, 'the pods cover most of their bounding block');
 });
 
 test('corridor plan: the spine stands on the centre line in order, the ribs hang above and below their person, strays wait underneath', () => {
