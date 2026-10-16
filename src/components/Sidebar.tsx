@@ -124,7 +124,10 @@ const Sidebar: React.FC<SidebarProps> = ({
 
             setIsLoading(true);
             // Batch fetch for displayed figures
-            const results = await fetchBatchFigureDetails(displayFigures);
+            // Portraits remembered from earlier visits show at once; the rest follow when Wikipedia has answered.
+            const results = await fetchBatchFigureDetails(displayFigures, remembered => {
+                if (isMounted) setDetailsMap(prev => new Map([...prev, ...remembered]));
+            });
 
             if (isMounted) {
                 setDetailsMap(prev => new Map([...prev, ...results]));

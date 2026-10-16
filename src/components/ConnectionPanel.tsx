@@ -99,9 +99,8 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({ connection, currentIn
   useEffect(() => {
     if (!known.length) return;
     let current = true;
-    fetchBatchFigureDetails(known).then(result => {
-      if (current) setDetails(previous => new Map([...previous, ...result]));
-    }).catch(error => console.warn('Could not load connection portraits', error));
+    const show = (result: Map<string, FigureDetail>) => { if (current) setDetails(previous => new Map([...previous, ...result])); };
+    fetchBatchFigureDetails(known, show).then(show).catch(error => console.warn('Could not load connection portraits', error));
     return () => { current = false; };
   }, [chainKey]);
 
