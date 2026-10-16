@@ -1,6 +1,6 @@
 import {
-  CONTACT_VERSION, CONNECTION_REQUEST_KINDS, PAIR_ASK_REASONS, migrateAttemptContext, validAccepted, validPerson, sessionKey,
-  type ContactAssessment, type ContactKnowledge, type ContactPerson, type ConnectionDiagnostics, type ConnectionSession,
+  CONTACT_VERSION, CONNECTION_REQUEST_KINDS, MAX_VARIANTS, PAIR_ASK_REASONS, QID_PATTERN, WIKIDATA_COUNTERS, migrateAttemptContext, validAccepted, validPerson, sessionKey,
+  type ContactAssessment, type ContactKnowledge, type ContactPerson, type ConnectionDiagnostics, type ConnectionSession, type PersonVariant,
 } from '../services/connectionGraph';
 import { pairKey } from '../services/pathService';
 
@@ -29,8 +29,17 @@ function person(raw: unknown): ContactPerson | null {
   return { id: p.id, name: p.name, birthYear: p.birthYear, deathYear: p.deathYear, occupation: p.occupation,
     category: p.category, description: p.description, aliases: p.aliases.slice(0, 6),
     proposedAliases: Array.isArray(p.proposedAliases) ? p.proposedAliases.filter(a => typeof a === 'string').slice(0, 6) : [],
-    ...(typeof p.canonicalId === 'string' ? { canonicalId: p.canonicalId } : {}) };
+    ...(typeof p.canonicalId === 'string' ? { canonicalId: p.canonicalId } : {}),
+    ...(typeof p.qid === 'string' && QID_PATTERN.test(p.qid) ? { qid: p.qid } : {}),
+    ...(Number.isFinite(p.qidCheckedAt) ? { qidCheckedAt: p.qidCheckedAt } : {}),
+    ...(variants(p.variants).length ? { variants: variants(p.variants) } : {}) };
 }
+// Other names and years a person was recorded under: only well-formed ones, a few at most.
+const variants = (value: unknown): PersonVariant[] => !Array.isArray(value) ? [] : value.flatMap((raw): PersonVariant[] => {
+  const v = raw as PersonVariant | null;
+  return v && typeof v.name === 'string' && v.name.trim() && Number.isSafeInteger(v.birthYear) && Number.isSafeInteger(v.deathYear) && v.birthYear !== 0 && v.deathYear !== 0
+    ? [{ name: v.name, birthYear: v.birthYear, deathYear: v.deathYear }] : [];
+}).slice(-MAX_VARIANTS);
 function assessment(raw: unknown, people: Map<string, ContactPerson>): ContactAssessment | null {
   if (!raw || typeof raw !== 'object') return null;
   const c = raw as ContactAssessment;
@@ -68,7 +77,7 @@ function counts<K extends string>(value: unknown, keys: readonly K[], complete: 
   return found.length && (!complete || found.length === keys.length) ? Object.fromEntries(found.map(key => [key, (value as Record<string, number>)[key]])) as Record<K, number> : undefined;
 }
 function recoverDiagnostics(d: ConnectionDiagnostics): ConnectionDiagnostics {
-  const requests = counts(d.requests, CONNECTION_REQUEST_KINDS, false), pairAsks = counts(d.pairAsks, PAIR_ASK_REASONS, true);
+  const requests = counts(d.requests, CONNECTION_REQUEST_KINDS, false), pairAsks = counts(d.pairAsks, PAIR_ASK_REASONS, true), wikidata = counts(d.wikidata, WIKIDATA_COUNTERS, true);
   const assessBatches = sizes(d.assessBatches), discoverSources = sizes(d.discoverSources);
   const t = d.total, totalRequests = counts(t?.requests, CONNECTION_REQUEST_KINDS, true), totalPairAsks = counts(t?.pairAsks, PAIR_ASK_REASONS, true);
   return {
@@ -77,7 +86,7 @@ function recoverDiagnostics(d: ConnectionDiagnostics): ConnectionDiagnostics {
     pairs: Number.isSafeInteger(d.pairs) ? d.pairs : 0,
     stopReason: typeof d.stopReason === 'string' ? d.stopReason : undefined,
     ...(requests ? { requests } : {}), ...(assessBatches ? { assessBatches } : {}), ...(discoverSources ? { discoverSources } : {}),
-    ...(pairAsks ? { pairAsks } : {}), ...(counter(d.validationRetries) ? { validationRetries: d.validationRetries } : {}),
+    ...(pairAsks ? { pairAsks } : {}), ...(counter(d.validationRetries) ? { validationRetries: d.validationRetries } : {}), ...(wikidata ? { wikidata } : {}),
     ...(t && counter(t.segments) && totalRequests && totalPairAsks && Number.isFinite(t.elapsedMs) && t.elapsedMs >= 0
       ? { total: { segments: t.segments, requests: totalRequests, pairAsks: totalPairAsks, elapsedMs: t.elapsedMs } } : {}),
   };

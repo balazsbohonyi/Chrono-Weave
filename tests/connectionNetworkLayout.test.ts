@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { axisTicks, NetworkLayout, partitionPods, planCategories, planColumns, planCorridor, planOrbit, seededRandom, type LayoutInput } from '../src/services/connectionNetworkLayout';
+import {
+  axisTicks, NetworkLayout, partitionPods, planCategories, planColumns, planCorridor, planOrbit, podTitle, POD_TITLE_MAX_SIZE, podTitleSize, podTitleWidth, seededRandom, titleCase, type LayoutInput,
+} from '../src/services/connectionNetworkLayout';
 
 const inputs: LayoutInput[] = [
   { id: 'a', year: 1625, endpoint: 0, radius: 32 },
@@ -572,6 +574,57 @@ test('categories layout: contacts between pods never pull anybody out of their o
     return at.x < pod.x || at.x > pod.x + pod.width || at.y < pod.y || at.y > pod.y + pod.height;
   });
   assert.deepEqual(strays.map(item => item.id), []);
+});
+
+// What the Unresolved legend chip does to the layout: people come and go while the layout is at rest, and the pods are partitioned anew each time.
+const strayFrom = (layout: NetworkLayout, world: LayoutInput[]) => world.filter(item => item.endpoint === null).filter(item => {
+  const pod = layout.categories.find(guide => guide.category === item.category)!, at = layout.position(item.id)!;
+  return !pod || !at || at.x < pod.x || at.x > pod.x + pod.width || at.y < pod.y || at.y > pod.y + pod.height;
+}).map(item => item.id);
+
+test('categories layout: people leaving (a legend chip switched off) or joining (switched on) re-seat everybody in their pods', () => {
+  const fields = ['SCIENTISTS', 'WRITERS', 'ARTISTS', 'THINKERS', 'BUSINESS', 'MILITARY'], random = seededRandom(5);
+  const everyone: LayoutInput[] = [fieldWorld[0], fieldWorld[3], ...Array.from({ length: 160 }, (_, index) => person(`c${index}`, fields[Math.floor(random() * random() * fields.length)], 1300 + Math.floor(random() * 700)))];
+  // The first 100 are the supported people; the last 60 are the ones the chip reveals.
+  const supported = everyone.slice(0, 102);
+  const layout = new NetworkLayout(seededRandom(5));
+  layout.setSize(1500, 700); layout.setBounds(1452, 1889); layout.setMode('category');
+  layout.setGraph(everyone, []); layout.settle();
+  assert.deepEqual(strayFrom(layout, everyone), [], 'all of them, seated');
+  layout.setGraph(supported, []); layout.settle();
+  assert.deepEqual(strayFrom(layout, supported), [], 'after the chip went off');
+  layout.setGraph(everyone, []); layout.settle();
+  assert.deepEqual(strayFrom(layout, everyone), [], 'after the chip came on again');
+  // The same when only a few come and go (below the size of a crowd that is seated before it is drawn).
+  layout.setGraph(everyone.slice(0, 160), []); layout.settle();
+  assert.deepEqual(strayFrom(layout, everyone.slice(0, 160)), [], 'after a few left');
+  layout.setGraph(everyone, []); layout.settle();
+  assert.deepEqual(strayFrom(layout, everyone), [], 'after a few came back');
+});
+
+test('categories plan: every pod is wide enough for its own title, even a long one like "Leaders & Baddies" over a pod of few columns', () => {
+  assert.equal(titleCase('LEADERS & BADDIES'), 'Leaders & Baddies');
+  const mixes: Array<Array<[string, number]>> = [
+    [['SCIENTISTS', 48], ['THINKERS', 47], ['LEADERS & BADDIES', 30], ['ENTERTAINERS', 30], ['ARTISTS', 28], ['WRITERS', 27], ['BUSINESS', 22], ['EXPLORERS', 12]],
+    [['LEADERS & BADDIES', 3], ['ENTERTAINERS', 2], ['SCIENTISTS', 1]],
+    [['LEADERS & BADDIES', 1200], ['ENTERTAINERS', 900]],
+    [['LEADERS & BADDIES', 6], ['EVENTS', 400]],
+  ];
+  for (const mix of mixes) {
+    const people = mix.flatMap(([category, count]) => Array.from({ length: count }, (_, index) => ({ id: `${category}${index}`, year: 1900 + index, endpoint: null, radius: 22, category, side: 'none' as const, distance: null, parent: null })));
+    const plan = planCategories(people, { x: 0, y: 0 });
+    for (const guide of plan.categories) {
+      const title = podTitle(guide.category, guide.count);
+      assert.ok(guide.width >= podTitleWidth(title, POD_TITLE_MAX_SIZE) - 1e-6, `${title} (${guide.width.toFixed(0)} wide) fits its title at the largest size`);
+      assert.ok(podTitleSize(title, guide.width) >= POD_TITLE_MAX_SIZE - 1e-6, `${title} can be drawn at the largest size`);
+    }
+    // Wider pods must not break the partition: still no overlaps and one block wider than tall.
+    for (const one of plan.categories) for (const other of plan.categories) if (one.category < other.category) {
+      assert.ok(one.x + one.width <= other.x + 1e-6 || other.x + other.width <= one.x + 1e-6 || one.y + one.height <= other.y + 1e-6 || other.y + other.height <= one.y + 1e-6, `${one.category} and ${other.category} overlap`);
+    }
+  }
+  // A title is as wide as the drawing needs: a longer one is wider, and a bigger size is wider.
+  assert.ok(podTitleWidth('Leaders & Baddies · 30', 16) > podTitleWidth('Scientists · 48', 16) && podTitleWidth('Writers · 27', 30) > podTitleWidth('Writers · 27', 16));
 });
 
 test('categories plan: the pods partition one block edge to edge, with no hanging corners, however uneven the categories are', () => {

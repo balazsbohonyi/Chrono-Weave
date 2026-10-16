@@ -5,7 +5,7 @@ import { getUserErrorMessage } from '../utils/userErrors';
 import { overlaps, pairKey, isNewPerson } from './pathService';
 import {
   acceptedDistances, ambiguousBridge, blockedContact, canvasPerson, duplicateKeeper, figurePerson, GAP_HINT_MIN_YEARS, identifyPerson, resolvableDuplicates, routeDistances, samePerson, selectFrontier, temporalGap,
-  sessionKey, shortestContactPath, validAccepted, validPerson, mergeResolvedIdentity, emptyPairAsks, emptyRequestCounts,
+  sessionKey, shortestContactPath, validAccepted, validPerson, mergeResolvedIdentity, emptyPairAsks, emptyRequestCounts, needsWikidata, proposalKey, reconcileIdentities,
   CONNECTION_REQUEST_KINDS, PAIR_ASK_REASONS,
   type AmbiguousBridge, type CandidateContact, type ContactAssessment, type ContactKnowledge, type ContactPerson, type ConnectionSession, type ConnectionRequestKind, type PairAskReason,
 } from './connectionGraph';
@@ -14,6 +14,7 @@ import { validationRetryCount } from './jsonResponse';
 import { withProvenance } from './connectionAI';
 import { MemoryConnectionRepository, sessionExceedsLimits, type ConnectionRepository } from '../utils/connectionKnowledge';
 import { withAbort } from './utils';
+import type { WikidataOutcome, WikidataResolver } from './wikidataService';
 
 export interface ConnectionFeasibility { feasible: boolean; gapYears: number; peopleNeeded: number; message: string | null }
 // Historical distance never refuses a search; chronology is checked on every edge instead.
@@ -85,6 +86,8 @@ export interface ConnectionSearchOptions {
   from: HistoricalFigure; to: HistoricalFigure; figures: HistoricalFigure[]; signal: AbortSignal;
   storage?: Storage; repository?: ConnectionRepository; canvasId?: string; session?: ConnectionSession;
   provenance?: { provider: string; model: string }; limits?: Partial<typeof SEARCH_LIMITS>;
+  // Who people are and when they lived, from Wikidata (see `wikidataService`). Without it people are identified by name and years alone.
+  wikidata?: WikidataResolver;
   onSnapshot?: (session: ConnectionSession) => void; onProgress?: (progress: ConnectionProgress) => void;
 }
 
@@ -119,7 +122,7 @@ export async function findConnection(options: ConnectionSearchOptions): Promise<
     session.updatedAt = Date.now();
     session.diagnostics = { ...session.diagnostics, tasks, people: addedPeople, pairs: triedPairs,
       requests: { ...requests }, assessBatches: [...assessBatches], discoverSources: [...discoverSources],
-      pairAsks: { ...pairAsks }, validationRetries, total: total() };
+      pairAsks: { ...pairAsks }, validationRetries, total: total(), ...(options.wikidata ? { wikidata: { ...wikidataStats } } : {}) };
     options.onSnapshot?.(structuredClone(session));
     options.onProgress?.({ label: session.phase });
   };
@@ -144,13 +147,65 @@ export async function findConnection(options: ConnectionSearchOptions): Promise<
       return result;
     } finally { validationRetries += validationRetryCount() - retriesBefore; } // Requests are serial, so the delta is this request's.
   };
+  // Wikidata says who a person is (a QID: two records with one are one person) and when they lived. Best effort and never a model request, so
+  // it is no `task` and moves no request counter: a person it cannot answer for is identified by name and years exactly as before, and
+  // is asked about again by a later search. A person is asked about at most once per segment, whatever the answer.
+  const wikidataStats = { lookups: 0, resolved: 0, merged: 0, corrected: 0, failed: 0 };
+  const asked = new Set<string>(), answers = new Map<string, WikidataOutcome>();
+  // When a whole batch gets no answer at all Wikidata is out of reach: it is not asked again in this segment (each attempt can cost its timeout).
+  let wikidataDown = false;
+  type Proposal = NewPerson & { aliases?: string[] };
+  // What Wikidata says about each of the proposals, asking only about those not asked this segment (and not already known to it); answers
+  // given earlier in the segment are returned again, so a person asked about first and reconciled later still gets theirs.
+  const askWikidata = async (inputs: Proposal[]): Promise<Map<string, WikidataOutcome>> => {
+    const result = new Map<string, WikidataOutcome>();
+    if (!options.wikidata) return result;
+    for (const input of inputs) { const answer = answers.get(proposalKey(input)); if (answer) result.set(proposalKey(input), answer); }
+    if (wikidataDown) return result;
+    const wanted = [...new Map(inputs.filter(input => validPerson(input) && !asked.has(proposalKey(input))).map(input => [proposalKey(input), input])).values()]
+      .filter(input => { const known = knowledge.people.find(person => !person.canonicalId && samePerson(person, { ...input, aliases: [] })); return !known || needsWikidata(known); });
+    if (!wanted.length) return result;
+    for (const input of wanted) asked.add(proposalKey(input));
+    wikidataStats.lookups += wanted.length;
+    try {
+      const found = await options.wikidata.resolve(wanted.map(({ name, birthYear, deathYear }) => ({ name, birthYear, deathYear })), signal);
+      for (const input of wanted) {
+        const outcome = found.get(proposalKey(input));
+        if (outcome === undefined) { wikidataStats.failed++; continue; }
+        if (outcome !== 'miss') wikidataStats.resolved++;
+        answers.set(proposalKey(input), outcome); result.set(proposalKey(input), outcome);
+      }
+      if (!found.size) wikidataDown = true;
+    } catch { signal.throwIfAborted(); wikidataStats.failed += wanted.length; wikidataDown = true; }
+    return result;
+  };
+  // `identifyPerson` with what Wikidata said about the proposal: found by its item, or recorded with its years; a person Wikidata had no answer for is marked as asked.
+  const corrected = new Set<string>();
+  const identify = (input: Proposal, outcomes: ReadonlyMap<string, WikidataOutcome>): ContactPerson => {
+    const outcome = outcomes.get(proposalKey(input)), identity = outcome && outcome !== 'miss' ? outcome : undefined;
+    const known = !!identity && knowledge.people.some(person => !person.canonicalId && samePerson(person, { ...input, aliases: [] }));
+    const before = knowledge.people.length, person = identifyPerson(knowledge.people, input, identity);
+    if (outcome === 'miss' && !person.qid) person.qidCheckedAt = Date.now();
+    if (identity) {
+      // Counted once per proposal: years Wikidata gave differently, and a proposal that landed, by its item, on somebody recorded under other years or another name.
+      if ((identity.birthYear !== input.birthYear || identity.deathYear !== input.deathYear) && !corrected.has(proposalKey(input))) { corrected.add(proposalKey(input)); wikidataStats.corrected++; }
+      if (!known && knowledge.people.length === before) wikidataStats.merged++;
+    }
+    return person;
+  };
   try {
     const targetStatus = classifyConnectionTarget(options.from, options.to);
     if ('reason' in targetStatus) throw new Error(targetStatus.message);
     knowledge = await withAbort(repo.loadKnowledge(), signal);
+    // The endpoints are identified by name and years alone, as a saved search of the pair found them (its key is made of their ids); Wikidata is
+    // asked about them with everybody else below, and gives the same records their item and years without changing who they are.
     const from = identifyPerson(knowledge.people, figurePerson(options.from));
     const to = identifyPerson(knowledge.people, figurePerson(options.to));
     if (from.id === to.id) throw new Error('The endpoints resolve to the same person. Choose someone else.');
+    // Two records of one Wikidata item are one person too. The answers are kept, so asking again below costs nothing.
+    const endpointAnswers = await askWikidata([figurePerson(options.from), figurePerson(options.to)]);
+    const itemOf = (person: ContactPerson, figure: HistoricalFigure) => { const answer = endpointAnswers.get(proposalKey(figurePerson(figure))); return person.qid ?? (answer && answer !== 'miss' ? answer.qid : undefined); };
+    if (itemOf(from, options.from) && itemOf(from, options.from) === itemOf(to, options.to)) throw new Error('The endpoints resolve to the same person. Choose someone else.');
     const key = sessionKey(options.canvasId ?? 'canvas', from.id, to.id);
     session = options.session ? structuredClone(options.session) : {
       version: 2, key, canvasId: options.canvasId ?? 'canvas', endpoints: [from.id, to.id], people: [from, to],
@@ -178,6 +233,22 @@ export async function findConnection(options: ConnectionSearchOptions): Promise<
     for (const c of session.candidates) if (c.assessment && c.status === 'accepted' && validAccepted(c.assessment, new Map(knowledge.people.map(p => [p.id, p])))
       && !knowledge.contacts.some(existing => pairKey(...existing.pair) === pairKey(...c.assessment!.pair) && existing.verdict === 'accepted')) knowledge.contacts.push(c.assessment);
     for (const c of session.candidates) { if (c.status === 'checking') c.status = c.assessment?.verdict ?? 'proposed'; c.failures = undefined; }
+    // People already known that Wikidata has not been asked about: the duplicates a saved search or the shared knowledge already holds are
+    // found here, by their item, and become one person with the right years.
+    const reconcilePeople = async (people: ContactPerson[]) => {
+      if (!options.wikidata) return;
+      const unasked = people.filter(person => needsWikidata(person));
+      if (!unasked.length) return;
+      const outcomes = await askWikidata(unasked);
+      if (!outcomes.size) return;
+      const stats = reconcileIdentities(knowledge, session, outcomes, [from.id, to.id]);
+      wikidataStats.merged += stats.merged; wikidataStats.corrected += stats.corrected;
+    };
+    if (options.wikidata) {
+      // The people of the session, and those an accepted contact of either end would bring into it.
+      const reach = new Set([...session.people.map(person => person.id), ...acceptedDistances(from.id, knowledge.people, knowledge.contacts).keys(), ...acceptedDistances(to.id, knowledge.people, knowledge.contacts).keys()]);
+      await reconcilePeople(knowledge.people.filter(person => reach.has(person.id)));
+    }
     let indexedPeople = knowledge.people, indexedLength = knowledge.people.length;
     let personIndex = new Map(knowledge.people.map(p => [p.id, p]));
     const byId = () => {
@@ -209,7 +280,8 @@ export async function findConnection(options: ConnectionSearchOptions): Promise<
     let identityChecks = 0;
     const resolveDuplicate = async (): Promise<boolean> => {
       for (const { name, records } of ambiguousBridge(from.id, to.id, knowledge.people, knowledge.contacts)?.identities ?? []) {
-        if (identityChecks >= limits.identityChecks || !resolvableDuplicates(records, [from.id, to.id])) continue;
+        // Records that all have their own Wikidata item are different people: there is nothing to ask the model.
+        if (records.every(record => record.qid) || identityChecks >= limits.identityChecks || !resolvableDuplicates(records, [from.id, to.id])) continue;
         const key = `duplicates:${canonicalName(name)}`, context = JSON.stringify([provenance.provider, provenance.model, records.map(p => [p.birthYear, p.deathYear])]);
         if (session!.attempts[key]?.context === context) continue;
         identityChecks++;
@@ -327,12 +399,16 @@ export async function findConnection(options: ConnectionSearchOptions): Promise<
       session.seedContext = seedContext;
       if (proposal) {
         let materialized: Array<ContactPerson | undefined> = [];
-        try { materialized = proposal.nodes.map(node => {
-          if (!isNewPerson(node)) { const p = options.figures.find(p => p.id === node.id) ?? [options.from, options.to].find(p => p.id === node.id); return p ? identifyPerson(knowledge.people, figurePerson(p)) : undefined; }
-          if (addedPeople >= limits.people) return undefined;
-          const before = knowledge.people.length;
-          const p = identifyPerson(knowledge.people, node); addedPeople += knowledge.people.length - before; return p;
-        }); } catch { /* Structurally unusable seeds fall through to graph discovery. */ }
+        try {
+          const figureOf = (id: string) => options.figures.find(p => p.id === id) ?? [options.from, options.to].find(p => p.id === id);
+          const seeded = await askWikidata(proposal.nodes.flatMap(node => { if (isNewPerson(node)) return [node]; const p = figureOf(node.id); return p ? [figurePerson(p)] : []; }));
+          materialized = proposal.nodes.map(node => {
+            if (!isNewPerson(node)) { const p = figureOf(node.id); return p ? identify(figurePerson(p), seeded) : undefined; }
+            if (addedPeople >= limits.people) return undefined;
+            const before = knowledge.people.length;
+            const p = identify(node, seeded); addedPeople += knowledge.people.length - before; return p;
+          });
+        } catch (error) { signal.throwIfAborted(); /* Structurally unusable seeds fall through to graph discovery. */ }
         if (materialized.length >= 2 && materialized.every(Boolean) && materialized.length <= 22 && new Set(materialized.map(p => p!.id)).size === materialized.length
           && materialized[0]!.id === from.id && materialized.at(-1)!.id === to.id) {
           for (let i = 0; i < materialized.length - 1; i++) propose(materialized[i]!, materialized[i + 1]!, proposal.links[i]?.claim ?? 'Seed route candidate', true);
@@ -342,6 +418,7 @@ export async function findConnection(options: ConnectionSearchOptions): Promise<
     }
     while (tasks < limits.tasks && addedPeople < limits.people && triedPairs < limits.pairs) {
       signal.throwIfAborted();
+      await reconcilePeople(session.people); // people an accepted contact has brought into the search since
       const fromReach = reachOf(from.id), toReach = reachOf(to.id);
       // Both ends are expanded together: up to discoveryPeople sources from each, every source aimed at the opposite endpoint.
       // The stretch of time nobody found so far lived in, between the two sides: the people nearest to it are expanded first, and the model is told about it.
@@ -363,7 +440,8 @@ export async function findConnection(options: ConnectionSearchOptions): Promise<
       const clusterOf = (reach: Map<string, number>) => knowledge.people.filter(p => reach.has(p.id)).slice(0, 16);
       const toCluster = clusterOf(toReach), fromCluster = clusterOf(fromReach), perCluster = fromSources.length && toSources.length ? 8 : 16;
       const opposite = [...new Map([...(fromSources.length ? toCluster.slice(0, perCluster) : []), ...(toSources.length ? fromCluster.slice(0, perCluster) : [])].map(p => [p.id, p])).values()];
-      const references = [...new Map([...opposite, ...session.people.slice(-32), ...options.figures.filter(validPerson).slice(0, 64).map(p => identifyPerson(knowledge.people, figurePerson(p)))].map(p => [p.id, p])).values()].slice(0, 80);
+      const referenceInputs = options.figures.filter(validPerson).slice(0, 64).map(figurePerson), referenceOutcomes = await askWikidata(referenceInputs);
+      const references = [...new Map([...opposite, ...session.people.slice(-32), ...referenceInputs.map(input => identify(input, referenceOutcomes))].map(p => [p.id, p])).values()].slice(0, 80);
       const rounds = sources.map(p => session!.rounds.find(r => r.personId === p.id) ?? { personId: p.id, round: 0, proposed: [], emptyRounds: 0, lastExpanded: 0 });
       const goalOf = (p: ContactPerson) => fromSources.includes(p) ? to : from;
       const label = fromSources.length && toSources.length ? `Exploring contacts between ${from.name} and ${to.name}` : `Exploring contacts toward ${fromSources.length ? to.name : from.name}`;
@@ -372,13 +450,15 @@ export async function findConnection(options: ConnectionSearchOptions): Promise<
         target: fromSources.length ? to : from, references, limit: limits.candidates,
         ...(gap && gap.years >= GAP_HINT_MIN_YEARS ? { gap: { fromYear: gap.fromYear, toYear: gap.toYear } } : {}),
       }, signal), () => { discoverSources.push(sources.length); });
+      const found = await askWikidata(discoveries.map(d => d.person));
       for (const round of rounds) {
         let added = 0;
         for (const candidate of discoveries.filter(d => d.sourceId === round.personId).slice(0, limits.candidates)) {
-          const old = knowledge.people.find(p => samePerson(p, candidate.person));
+          const outcome = found.get(proposalKey(candidate.person)), qid = outcome && outcome !== 'miss' ? outcome.qid : undefined;
+          const old = knowledge.people.find(p => samePerson(p, candidate.person)) ?? (qid ? knowledge.people.find(p => p.qid === qid) : undefined);
           if (!old && addedPeople >= limits.people) continue;
           const before = knowledge.people.length;
-          const p = identifyPerson(knowledge.people, candidate.person); addedPeople += knowledge.people.length - before;
+          const p = identify(candidate.person, found); addedPeople += knowledge.people.length - before;
           if (round.proposed.includes(p.id)) continue;
           round.proposed.push(p.id); added++;
           propose(byId().get(round.personId)!, p, candidate.claim);
@@ -392,7 +472,7 @@ export async function findConnection(options: ConnectionSearchOptions): Promise<
         && (canonicalName(a.name).split(' ').some(token => token.length > 2 && canonicalName(b.name).split(' ').includes(token))
           || a.proposedAliases?.some(name => canonicalName(name) === canonicalName(b.name))
           || b.proposedAliases?.some(name => canonicalName(name) === canonicalName(a.name))))
-        .map(b => [a, b] as const)).slice(0, 2);
+        .map(b => [a, b] as const)).filter(([a, b]) => !(a.qid && b.qid)).slice(0, 2); // two Wikidata items are two people: nothing to ask
       for (const [a, b] of aliases) {
         const identityKey = `identity:${pairKey(a.id, b.id)}`, context = attemptContext(a, b);
         if (session.attempts[identityKey]?.context === context || tasks + 2 > limits.tasks) continue;

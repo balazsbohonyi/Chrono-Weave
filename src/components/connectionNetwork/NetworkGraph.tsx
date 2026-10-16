@@ -1,7 +1,7 @@
 import React, { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { CATEGORY_BAR_TEXT_COLORS, CATEGORY_COLORS } from '../../constants';
 import { readNetworkViewPrefs, saveNetworkViewPrefs } from '../../utils/networkViewPrefs';
-import { axisTicks, TICK_MIN_SPACING, type CategoryGuide, type ColumnGuide, type CorridorGuide, type LayoutMode, type OrbitRing } from '../../services/connectionNetworkLayout';
+import { axisTicks, podTitle, podTitleSize, POD_TITLE_MAX_SIZE, TICK_MIN_SPACING, type CategoryGuide, type ColumnGuide, type CorridorGuide, type LayoutMode, type OrbitRing } from '../../services/connectionNetworkLayout';
 import type { NetworkLayoutHandle } from '../../services/remoteNetworkLayout';
 import {
   closestApproachLabel, describeSide, initials, STATUS_LABELS, truncateName, type NetworkEdge, type NetworkFold, type NetworkNode, type NetworkSelection, type NetworkView,
@@ -60,8 +60,6 @@ const sideClass = (node: NetworkNode) => node.endpoint !== null ? `is-endpoint i
 // Endpoint names are shown whole, on a pill, so they stay readable among a crowd.
 const ENDPOINT_NAME_LIMIT = 28;
 const pillWidth = (text: string) => text.length * 7.6 + 20;
-// 'LEADERS & BADDIES' -> 'Leaders & Baddies'
-const titleCase = (text: string) => text.toLowerCase().replace(/(^|[\s&-])([a-z])/g, (_, before: string, letter: string) => before + letter.toUpperCase());
 // Column headers are drawn at a constant size on screen, so when zoomed out they share the room of the narrowest band: all of them
 // say "n links" while that fits, then just the number, then only every fifth.
 const columnLabel = (guide: ColumnGuide, guides: readonly ColumnGuide[], zoom: number) => {
@@ -512,12 +510,14 @@ const NetworkGraph: React.FC<Props> = ({
         </g>}
         {podded && <g className="net-pods" aria-hidden="true">
           {categories.map(guide => {
-            // The title keeps a readable size on screen, up to the height of the pod's header.
-            const size = Math.min(34, Math.max(14, 15 / camera.k));
+            // The title keeps a readable size on screen, up to the height of the pod's header, and never wider than the pod (zoomed out
+            // it would otherwise grow past the pod's edge into the next one).
+            const title = podTitle(guide.category, guide.count);
+            const size = Math.min(POD_TITLE_MAX_SIZE, Math.max(14, 15 / camera.k), podTitleSize(title, guide.width));
             return <g key={guide.category} className="net-pod" style={{ '--cat': (CATEGORY_COLORS as Record<string, string>)[guide.category] ?? 'rgb(var(--color-content-muted))' } as React.CSSProperties}>
               <rect x={guide.x} y={guide.y} width={guide.width} height={guide.height} rx={20} />
               <circle cx={guide.x + 18 + size * 0.32} cy={guide.y + Math.min(46, 14 + size) - size * 0.33} r={size * 0.32} />
-              <text x={guide.x + 18 + size * 0.95} y={guide.y + Math.min(46, 14 + size)} style={{ fontSize: size, strokeWidth: size / 5 }}>{titleCase(guide.category)} · {guide.count}</text>
+              <text x={guide.x + 18 + size * 0.95} y={guide.y + Math.min(46, 14 + size)} style={{ fontSize: size, strokeWidth: size / 5 }}>{title}</text>
             </g>;
           })}
         </g>}

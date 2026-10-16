@@ -88,5 +88,19 @@
     "assess 1",
     "assess 1",
     "discover 4"
+  ],
+  "two records of one person, resolved to one Wikidata item, are assessed once": [
+    "assess 1",
+    "seed 1",
+    "assess 1",
+    "discover 2",
+    "assess 2"
+  ],
+  "two names that Wikidata resolves to one item need no identity request": [
+    "seed 1",
+    "discover 2",
+    "assess 2",
+    "discover 4",
+    "assess 1"
   ]
 }

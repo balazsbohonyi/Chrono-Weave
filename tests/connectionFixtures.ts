@@ -5,6 +5,7 @@ import { pairKey } from '../src/services/pathService';
 import { identifyPerson, type ConnectionDiagnostics, type ConnectionSession, type ContactAssessment, type ContactPerson } from '../src/services/connectionGraph';
 import { saveConnectionPath as savePath } from '../src/utils/connectionPaths';
 import { MemoryConnectionRepository } from '../src/utils/connectionKnowledge';
+import { wikidataKey, type ProposedLifespan, type WikidataOutcome, type WikidataResolver } from '../src/services/wikidataService';
 export function saveTestConnectionPath(storage: Storage, chain: HistoricalFigure[], evidence: string[], createdAt = Date.now()) {
   const people: ContactPerson[] = [], ids = chain.map(p => identifyPerson(people, figurePerson(p)).id);
   const contacts = chain.slice(1).map((_, i) => ({ pair: [ids[i], ids[i + 1]] as [string, string], verdict: 'accepted' as const, interactionType: 'meeting' as const,
@@ -51,6 +52,25 @@ export async function ambiguousBridgeRepository(twinContacts = false, twinFigure
   await repository.checkpoint({ people, contacts }, {} as ConnectionSession);
   return repository;
 }
+
+// A Wikidata that knows the people `answer` knows: an identity, 'miss' (no such person), or undefined (cannot be reached). `asked` is every batch it was given.
+export function fakeWikidata(answer: (input: ProposedLifespan) => WikidataOutcome | undefined) {
+  const asked: ProposedLifespan[][] = [];
+  const resolver: WikidataResolver = {
+    async resolve(inputs) {
+      asked.push(inputs);
+      return new Map(inputs.flatMap(input => { const outcome = answer(input); return outcome === undefined ? [] : [[wikidataKey(input), outcome] as const]; }));
+    },
+  };
+  return { resolver, asked };
+}
+// The same physicist recorded twice by a model: under two forms of the name, with two birth years. Wikidata knows him as Q100.
+export const TWIN_WRONG = person('Robert Twin', 1506, 1590), TWIN_RIGHT = person('J. Robert Twin', 1504, 1590);
+export const TWIN_ITEM = { qid: 'Q100', birthYear: 1504, deathYear: 1590 };
+export const twinWikidata = () => fakeWikidata(input => input.name.endsWith('Robert Twin') ? TWIN_ITEM : 'miss');
+// A model that offers both forms of the twin to everybody it is asked about.
+export const twinDiscovery: IAIService['discoverPersonalContacts'] = async request => request.sources.flatMap(source =>
+  [TWIN_WRONG, TWIN_RIGHT].filter(p => !source.previous.some(q => q.name === p.name)).map(p => ({ sourceId: source.person.id, person: proposal(p), claim: 'They exchanged letters.' })));
 
 // Request accounting that must hold for every snapshot and every finished segment of every search:
 // the per-kind counters add up to the tasks issued, and the batches and reasons describe the same requests.

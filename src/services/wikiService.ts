@@ -1,5 +1,6 @@
 
 import { HistoricalFigure } from "../types";
+import { mapInputsToTitles } from "./wikiTitles";
 
 // Cache to avoid re-fetching details for the same person within the session
 const detailsCache = new Map<string, { description: string; imageUrl: string | null }>();
@@ -80,27 +81,8 @@ const fetchBatchWikipediaImages = async (names: string[], width = FIGURE_THUMBNA
             // The API might normalize names (e.g. "leonardo da vinci" -> "Leonardo da Vinci")
             // or redirect them.
             
-            const nameToTitle = new Map<string, string>();
-            chunk.forEach(name => nameToTitle.set(name, name));
-
-            // 1. Handle Normalization: Input -> Normalized
-            const normalized = data.query?.normalized || [];
-            normalized.forEach((n: any) => {
-                if (nameToTitle.get(n.from) === n.from) {
-                    nameToTitle.set(n.from, n.to);
-                }
-            });
-
-            // 2. Handle Redirects: Normalized -> Final Title
-            const redirects = data.query?.redirects || [];
-            redirects.forEach((r: any) => {
-                // Find inputs pointing to this redirect source
-                for (const [input, currentTarget] of nameToTitle.entries()) {
-                    if (currentTarget === r.from) {
-                        nameToTitle.set(input, r.to);
-                    }
-                }
-            });
+            // 1-2. Input -> normalised -> final title (shared with the Wikidata identity lookup)
+            const nameToTitle = mapInputsToTitles(chunk, data.query ?? {});
 
             // 3. Extract Images using Final Title
             const withoutThumbnail = new Map<string, string[]>(); // Wikidata entity -> input names

@@ -1,13 +1,15 @@
 import { saveTestConnectionPath as saveConnectionPath } from './connectionFixtures';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { decideConnectionStart, finishedExploration, runConnectionSearch, settleConnection, savedConnectionView, type CanvasState, type ConnectionFlowEffects } from '../src/services/connectionFlow';
+import { decideConnectionStart, finishedExploration, reconcileSession, runConnectionSearch, settleConnection, savedConnectionView, type CanvasState, type ConnectionFlowEffects } from '../src/services/connectionFlow';
+import { figurePerson, identifyPerson, sessionKey, type ConnectionSession, type ContactAssessment, type ContactPerson } from '../src/services/connectionGraph';
+import type { WikidataResolver } from '../src/services/wikidataService';
 import { findConnection } from '../src/services/connectionPath';
 import { MemoryConnectionRepository } from '../src/utils/connectionKnowledge';
 import { listConnectionPaths, readConnectionPath,  wovenFigureIds } from '../src/utils/connectionPaths';
 import { emptyClusters } from '../src/utils/discoveryClusters';
 import { MemoryStorage } from './helpers';
-import { A, B, M, N, assertRequestAccounting, fakeContacts, person } from './connectionFixtures';
+import { A, B, M, N, TWIN_RIGHT, TWIN_WRONG, assertRequestAccounting, fakeContacts, person, twinWikidata } from './connectionFixtures';
 import type { IAIService } from '../src/types';
 
 // Every session handed to the exploration effect (live snapshots and restored checkpoints) must have consistent request
@@ -113,4 +115,75 @@ test('when the saved search is gone, or no longer holds the chain, the explorati
   assert.equal(fallback.session.status, 'connected'); assert.equal(fallback.session.candidates.length, 3);
   // Without the identities a connection was saved with there is nothing to open.
   assert.equal(await finishedExploration({ repository: other, canvasId: 'one', entry: { ...entry, identityIds: undefined } }), null);
+});
+
+// A made connection whose middle person the model recorded twice (two forms of the name, two birth years): the shared knowledge and the saved
+// search each hold both records, and one of them carries the chain. Wikidata knows them as one person.
+const zed = person('Zed', 1540, 1620);
+async function savedWithTwins(saveSession = true) {
+  const repository = new MemoryConnectionRepository(), people: ContactPerson[] = [];
+  const [a, z, wrong, right, fermi] = [A, zed, TWIN_WRONG, TWIN_RIGHT, person('Enrico Fermi', 1520, 1600)].map(p => identifyPerson(people, figurePerson(p)));
+  const accepted = (x: ContactPerson, y: ContactPerson): ContactAssessment => ({ pair: [x.id, y.id], verdict: 'accepted', interactionType: 'correspondence',
+    evidence: `${x.name} and ${y.name} corresponded.`, provenance: { provider: 'fake', model: 'fake', version: 2, assessedAt: 1 } });
+  const contacts = [accepted(a, wrong), accepted(wrong, z), accepted(right, fermi)];
+  const session: ConnectionSession = { version: 2, key: sessionKey('one', a.id, z.id), canvasId: 'one', endpoints: [a.id, z.id], people: structuredClone([a, z, wrong, right, fermi]),
+    candidates: contacts.map(contact => ({ from: contact.pair[0], to: contact.pair[1], claim: '', status: 'accepted' as const, assessment: structuredClone(contact) })),
+    rounds: [], attempts: {}, segment: 2, status: 'connected', phase: 'Accepted chain found', elapsedMs: 5, updatedAt: Date.now(), diagnostics: { tasks: 0, people: 0, pairs: 0 } };
+  if (saveSession) await repository.checkpoint({ people, contacts }, session);
+  else await repository.checkpoint({ people, contacts }, { ...session, key: 'someone-else', endpoints: [a.id, fermi.id] } as ConnectionSession);
+  return { repository, session, ids: { a: a.id, z: z.id, wrong: wrong.id, right: right.id, fermi: fermi.id } };
+}
+
+test('reopening a saved exploration asks Wikidata about its people, merges the duplicate, follows the chain onto the survivor and saves it all', async () => {
+  const { repository, session, ids } = await savedWithTwins(), wikidata = twinWikidata();
+  const chain = [ids.a, ids.wrong, ids.z];
+  const reconciled = await reconcileSession({ repository, wikidata: wikidata.resolver, session, chain });
+  assert.equal(reconciled.changed, true);
+  const people = reconciled.session.people.filter(p => !p.canonicalId);
+  assert.deepEqual(people.filter(p => p.qid === 'Q100').map(p => p.id), [ids.right], 'the record whose years were right survives');
+  assert.equal(people.length, 4, 'one Twin, not two');
+  assert.deepEqual(reconciled.chain, [ids.a, ids.right, ids.z], 'the chain runs through the survivor');
+  assert.ok(reconciled.session.candidates.every(c => c.from !== c.to && [c.from, c.to].every(id => id !== ids.wrong)));
+  assert.equal(reconciled.session.candidates.filter(c => c.status === 'accepted').length, 3);
+  assert.equal(session.people.length, 5, 'the session that was passed in is left as it was');
+  // What was learnt is saved, under the status the saved search has.
+  const stored = (await repository.loadSession(session.key))!, knowledge = await repository.loadKnowledge();
+  assert.equal(stored.status, 'connected');
+  assert.equal(stored.people.filter(p => p.qid === 'Q100').length, 1);
+  assert.equal(knowledge.people.filter(p => !p.canonicalId && p.qid === 'Q100').length, 1);
+  // Nobody is asked twice.
+  const again = twinWikidata(), second = await reconcileSession({ repository, wikidata: again.resolver, session: stored, chain: reconciled.chain });
+  assert.deepEqual([second.changed, again.asked], [false, []]);
+});
+
+test('an exploration that cannot be checked is shown as it was', async () => {
+  const { repository, session } = await savedWithTwins();
+  for (const resolve of [async () => new Map(), async () => { throw new Error('offline'); }] as WikidataResolver['resolve'][]) {
+    const result = await reconcileSession({ repository, wikidata: { resolve }, session, chain: ['x'] });
+    assert.deepEqual([result.changed, result.session === session, result.chain], [false, true, ['x']]);
+  }
+  assert.equal((await repository.loadKnowledge()).people.some(p => p.qid), false, 'nothing was learnt, nothing saved');
+});
+
+test('an exploration rebuilt from a saved connection (never saved as a search) is corrected for display, and saves nothing', async () => {
+  const { repository, session } = await savedWithTwins(false);
+  const result = await reconcileSession({ repository, wikidata: twinWikidata().resolver, session });
+  assert.equal(result.changed, true);
+  assert.equal(result.session.people.filter(p => p.qid === 'Q100').length, 1);
+  assert.equal(await repository.loadSession(session.key), null);
+  assert.equal((await repository.loadKnowledge()).people.some(p => p.qid), false);
+});
+
+test('a made connection reopens as the whole exploration every time, also after one of its people was merged into another record', async () => {
+  const { repository, session, ids } = await savedWithTwins();
+  const [first, second] = session.candidates.slice(0, 2).map(candidate => candidate.assessment!);
+  const entry = { key: 'k', figures: [], evidence: [first.evidence, second.evidence], createdAt: 1, contacts: [first, second], identityIds: [ids.a, ids.wrong, ids.z],
+    people: session.people.filter(p => [ids.a, ids.wrong, ids.z].includes(p.id)) } as unknown as Parameters<typeof finishedExploration>[0]['entry'];
+  const opened = (await finishedExploration({ repository, canvasId: 'one', entry }))!;
+  assert.deepEqual([opened.chain, opened.session.people.length], [[ids.a, ids.wrong, ids.z], 5]);
+  await reconcileSession({ repository, wikidata: twinWikidata().resolver, session: opened.session, chain: opened.chain });
+  const again = (await finishedExploration({ repository, canvasId: 'one', entry }))!;
+  assert.deepEqual(again.chain, [ids.a, ids.right, ids.z], 'the chain runs through the survivor');
+  assert.equal(again.session.people.length, 4, 'the saved exploration, not a small one rebuilt from the chain');
+  assert.equal(again.session.status, 'connected');
 });

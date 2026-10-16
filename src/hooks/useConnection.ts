@@ -6,9 +6,10 @@ import type {
 } from '../types';
 import { classifyConnectionTarget, type ConnectionProgress, type ConnectionTargetStatus } from '../services/connectionPath';
 import {
-  decideConnectionStart, degreeLabel, finishedExploration, runConnectionSearch, savedConnectionView,
+  decideConnectionStart, degreeLabel, finishedExploration, reconcileSession, runConnectionSearch, savedConnectionView,
   type ConnectionTarget, type ConnectionView,
 } from '../services/connectionFlow';
+import { createWikidataResolver, type WikidataResolver } from '../services/wikidataService';
 import { listConnectionPaths, type ConnectionPathEntry } from '../utils/connectionPaths';
 import type { WovenCanvas } from '../utils/weaveConnection';
 import type { ConnectionFocusRequest, ConnectionReveal } from './useConnectionReveal';
@@ -28,6 +29,8 @@ export interface PickingState {
 interface Dependencies {
   canvasId: string;
   repository?: ConnectionRepository;
+  // Who people are and when they lived (Wikipedia and Wikidata); the real one unless a test or a caller supplies another.
+  wikidata?: WikidataResolver;
   provenance: { provider: string; model: string };
   figures: HistoricalFigure[];
   config: CanvasConfig;
@@ -46,6 +49,9 @@ interface Dependencies {
   // Stops anything else that is running, and closes dialogs the search would sit behind.
   onSearchStart: () => void;
 }
+
+let sharedWikidata: WikidataResolver | undefined;
+const defaultWikidata = () => sharedWikidata ??= createWikidataResolver();
 
 // How long the first person is on the stage before the sidebar slides away: the stage has faded in and the camera
 // is resting on them (the opening dwell lasts a couple of seconds), so the sidebar leaves while nothing else moves.
@@ -75,6 +81,8 @@ export function useConnection(dependencies: Dependencies) {
   const search = useRef<AbortController | null>(null);
   const nextId = useRef(0);
   const generation = useRef(0);
+  // Identifies the exploration that was opened last, so a slow Wikidata answer never replaces a newer one or a running search.
+  const reconcileToken = useRef(0);
   const [exploration, setExploration] = useState<ConnectionSession | null>(null);
   // The people of the connection on show when a finished one is reopened (so its chain is the one that is lit); null for a search.
   const [explorationChain, setExplorationChain] = useState<string[] | null>(null);
@@ -123,6 +131,7 @@ export function useConnection(dependencies: Dependencies) {
 
   const reset = useCallback(() => {
     generation.current++;
+    reconcileToken.current++;
     cancelSearch();
     cancelSidebarHide();
     setExploration(null);
@@ -158,6 +167,7 @@ export function useConnection(dependencies: Dependencies) {
     if (!invoker?.closest('.connection-explorer, [data-connection-picker]')) explorerInvoker.current = invoker;
 
     latest.current.onSearchStart();
+    reconcileToken.current++;
     hold.current.abandon();
     setSuccess(null);
     const action = latest.current.begin();
@@ -177,6 +187,7 @@ export function useConnection(dependencies: Dependencies) {
     try {
       await runConnectionSearch({
         service, storage: canvasStorage, figures: canvasFigures, from, target, signal, repository, canvasId, session, mode, provenance: latest.current.provenance,
+        wikidata: latest.current.wikidata ?? defaultWikidata(),
         effects: {
           isCurrent,
           progress: setProgress,
@@ -229,10 +240,22 @@ export function useConnection(dependencies: Dependencies) {
   // Plays a lit chain on the canvas. Closing the explorer instead leaves without playing it: the connection is
   // already saved and stays in the Connection tab to replay.
   const revealConnection = useCallback(() => { hold.current.reveal(); }, []);
+  // An exploration opened without a search is shown at once and checked with Wikidata in the background: if that merges duplicates or corrects
+  // years, the corrected exploration replaces it, unless something newer has been opened or a search has started since.
+  const reconcileOpened = useCallback((opened: ConnectionSession, chain?: string[]) => {
+    const token = ++reconcileToken.current;
+    void reconcileSession({ repository, wikidata: latest.current.wikidata ?? defaultWikidata(), session: opened, chain }).then(reconciled => {
+      if (!reconciled.changed || reconcileToken.current !== token) return;
+      setExploration(reconciled.session);
+      if (chain) setExplorationChain(reconciled.chain ?? null);
+      setCheckpointRevision(previous => previous + 1);
+    });
+  }, [repository]);
   const openCheckpoint = useCallback((session: ConnectionSession) => {
     explorerInvoker.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     cancelSearch(); setExploration(session); setExplorerOpen(true);
-  }, [cancelSearch]);
+    reconcileOpened(session);
+  }, [cancelSearch, reconcileOpened]);
 
   // A connection that was already made, reopened as an exploration to look around: the whole network is shown as in any exploration (its chain is
   // only a colour of its lines), nothing can be searched, and Reveal plays the connection on the canvas. Closing it leaves without playing.
@@ -248,7 +271,8 @@ export function useConnection(dependencies: Dependencies) {
     setExploration(opened.session); setExplorationChain(opened.chain);
     setSolvedEntry(entry);
     setExplorerOpen(true);
-  }, [cancelSearch, repository]);
+    reconcileOpened(opened.session, opened.chain);
+  }, [cancelSearch, repository, reconcileOpened]);
   const revealSolved = useCallback(() => {
     if (!solvedEntry) return;
     setSolvedEntry(null); setExplorationChain(null); setExplorerOpen(false);

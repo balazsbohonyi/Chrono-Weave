@@ -381,6 +381,24 @@ const POD_MAX_STRETCH = 1.5;
 const POD_TITLE_WIDTH = 230;
 const POD_SHAPES_KEPT = 12;
 
+// A pod's title ("Leaders & Baddies · 30") sits on a dot, inset from the pod's left edge. The layout runs in a worker with no fonts to
+// measure with, so the width of the text is estimated per character (a little over what the heavy title font needs) here, for the layout
+// that gives each pod at least the width its title needs and for the drawing that shrinks a title that would not fit the pod.
+const TITLE_INSET = 18;
+const TITLE_DOT_EM = 0.95;
+const TITLE_CHAR_EM = 0.62;
+// The largest title size the drawing ever uses (it keeps the title about 15px on screen, so zooming out grows it in the layout's units up to
+// this). Every pod is made wide enough for its title at that size, so a title never has to shrink to fit; the drawing still caps its size by
+// the pod's width (`podTitleSize`) as the safety net for the estimate.
+export const POD_TITLE_MAX_SIZE = 34;
+// 'LEADERS & BADDIES' -> 'Leaders & Baddies'
+export const titleCase = (text: string) => text.toLowerCase().replace(/(^|[\s&-])([a-z])/g, (_, before: string, letter: string) => before + letter.toUpperCase());
+export const podTitle = (category: string, count: number) => `${titleCase(category)} · ${count}`;
+// The width of a pod's title row (dot, text and the inset on both sides) at this font size.
+export const podTitleWidth = (title: string, size: number) => 2 * TITLE_INSET + size * (TITLE_DOT_EM + title.length * TITLE_CHAR_EM);
+// The largest font size at which the title still fits inside a pod of this width.
+export const podTitleSize = (title: string, width: number) => (width - 2 * TITLE_INSET) / (TITLE_DOT_EM + title.length * TITLE_CHAR_EM);
+
 // How `count` people sit in a pod of this size: a grid whose rows and columns follow the pod's proportions, spread (up to a limit)
 // over the room there is and centred in it. Null when a slot per person does not fit.
 function podGrid(count: number, width: number, height: number, slot: number) {
@@ -407,18 +425,20 @@ function bestShapes(shapes: PodShape[]): PodShape[] {
 // and the two blocks go side by side or one above the other, the shorter (or narrower) one stretched to the other's size so the whole is
 // a rectangle. Every run of pods keeps the list of the sizes worth having (a pod can be one column tall and narrow, or many wide and
 // short); the best whole is the one that takes the least room near the wanted proportions. Returns the pods' places in the block.
-export function partitionPods(counts: readonly number[], slot: number): { width: number; height: number; places: Box[] } {
+// `minWidths` is the least width each pod may have (its title has to fit; the default is `POD_TITLE_WIDTH` for every pod), so a pod with a long
+// title is never narrower than that however few columns its people need, and the partition shapes itself around it.
+export function partitionPods(counts: readonly number[], slot: number, minWidths: readonly number[] = []): { width: number; height: number; places: Box[] } {
   const total = counts.length;
   if (!total) return { width: 0, height: 0, places: [] };
-  const alone = (count: number) => bestShapes(Array.from({ length: count }, (_, index) => index + 1).map(columns => ({
-    width: Math.max(POD_TITLE_WIDTH, columns * slot + 2 * POD_PADDING) + POD_GAP, height: Math.ceil(count / columns) * slot + POD_HEADER + POD_PADDING + POD_GAP,
+  const alone = (count: number, minWidth: number) => bestShapes(Array.from({ length: count }, (_, index) => index + 1).map(columns => ({
+    width: Math.max(minWidth, columns * slot + 2 * POD_PADDING) + POD_GAP, height: Math.ceil(count / columns) * slot + POD_HEADER + POD_PADDING + POD_GAP,
   })));
   // Only runs of neighbours in the biggest-first order are grouped (from pod `from` up to, not including, `to`), which keeps the search
   // small enough to run whenever the network changes while still finding good partitions.
   const groups = new Map<number, PodShape[]>(), key = (from: number, to: number) => from * (total + 1) + to;
   for (let length = 1; length <= total; length++) for (let from = 0; from + length <= total; from++) {
     const to = from + length;
-    if (length === 1) { groups.set(key(from, to), alone(counts[from])); continue; }
+    if (length === 1) { groups.set(key(from, to), alone(counts[from], Math.max(POD_TITLE_WIDTH, minWidths[from] ?? 0))); continue; }
     const made: PodShape[] = [];
     for (let middle = from + 1; middle < to; middle++) for (const first of groups.get(key(from, middle))!) for (const second of groups.get(key(middle, to))!) {
       made.push({ width: first.width + second.width, height: Math.max(first.height, second.height), cut: { vertical: false, first, second } });
@@ -460,7 +480,7 @@ export function planCategories(people: OrbitPerson[], center: Point): CategoryPl
     list.sort((x, y) => x.year - y.year || x.id.localeCompare(y.id));
     return { category, list };
   }).sort((x, y) => y.list.length - x.list.length || x.category.localeCompare(y.category));
-  const block = partitionPods(pods.map(pod => pod.list.length), slot);
+  const block = partitionPods(pods.map(pod => pod.list.length), slot, pods.map(pod => podTitleWidth(podTitle(pod.category, pod.list.length), POD_TITLE_MAX_SIZE)));
   const originX = center.x - block.width / 2, originY = center.y - block.height / 2;
   const offsets: CategoryPlan['offsets'] = new Map(), categories: CategoryGuide[] = [];
   pods.forEach((pod, index) => {
@@ -635,7 +655,8 @@ export class NetworkLayout {
   // introduced them (at their own year in time mode) and the simulation is nudged, not restarted.
   setGraph(inputs: LayoutInput[], links: LayoutLinkInput[]) {
     const ids = new Set(inputs.map(input => input.id));
-    for (const id of [...this.nodes.keys()]) if (!ids.has(id)) { this.nodes.delete(id); this.pinned.delete(id); }
+    let removed = false;
+    for (const id of [...this.nodes.keys()]) if (!ids.has(id)) { this.nodes.delete(id); this.pinned.delete(id); removed = true; }
     const neighbours = new Map<string, string[]>();
     for (const { a, b } of links) {
       neighbours.set(a, [...(neighbours.get(a) ?? []), b]); neighbours.set(b, [...(neighbours.get(b) ?? []), a]);
@@ -648,7 +669,8 @@ export class NetworkLayout {
       const side = input.side ?? 'none', distance = input.distance ?? null, parent = input.parent ?? null, category = input.category ?? '', spine = input.spine ?? null;
       const clearance = input.clearance ?? 0;
       if (existing) {
-        regrouped ||= existing.side !== side || existing.distance !== distance || existing.parent !== parent || existing.category !== category || existing.spine !== spine;
+        regrouped ||= existing.side !== side || existing.distance !== distance || existing.parent !== parent || existing.category !== category || existing.spine !== spine
+          || existing.radius !== input.radius;
         Object.assign(existing, { year: input.year, radius: input.radius, clearance, endpoint: input.endpoint, side, distance, parent, category, spine });
         continue;
       }
@@ -678,7 +700,9 @@ export class NetworkLayout {
     this.applyEndpoints();
     this.keepClear();
     if (crowd || (firstPeople && added)) this.seat(fresh);
-    else if (added || (regrouped && this.arranged)) this.reheat(this.arranged ? 0.55 : 0.35);
+    // People leaving re-plan an arranged layout as much as people arriving do (a legend chip switched off leaves the pods, rings or
+    // columns that remain partitioned anew), so everybody who stays is pushed toward the new places, not left at rest on the old ones.
+    else if (added || ((regrouped || removed) && this.arranged)) this.reheat(this.arranged ? 0.55 : 0.35);
     this.emit();
   }
 

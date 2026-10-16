@@ -1,7 +1,8 @@
 import { findConnection, type ConnectionResult, type ConnectionSearchOptions } from '../src/services/connectionPath';
+import { pairKey } from '../src/services/pathService';
 import { figurePerson } from '../src/services/connectionGraph';
 import { MemoryConnectionRepository } from '../src/utils/connectionKnowledge';
-import { fakeContacts, person, ambiguousBridgeRepository, A, B, M, N, BRIDGE, CLEAN_BRIDGE, proposal } from './connectionFixtures';
+import { fakeContacts, person, ambiguousBridgeRepository, fakeWikidata, twinDiscovery, twinWikidata, A, B, M, N, BRIDGE, CLEAN_BRIDGE, TWIN_WRONG, proposal } from './connectionFixtures';
 
 export type TraceService = ConnectionSearchOptions['service'];
 
@@ -86,6 +87,23 @@ export const traceWorlds: TraceWorld[] = [
   { name: 'a chain only through conflicting date records ends explored once both ends are exhausted, and resuming repeats it without requests', run: async wrap => {
     const repository = await ambiguousBridgeRepository(true), service = wrap(fakeContacts([]).service), first = await search({ service, repository });
     return [first, await search({ service, repository, session: first.session! })];
+  } },
+  // Wikidata tells that two forms of a name with two birth years are one person, so the search assesses him once instead of twice.
+  { name: 'two records of one person, resolved to one Wikidata item, are assessed once', run: async wrap => {
+    const zed = person('Zed', 1540, 1620);
+    return [await search({ service: wrap(fakeContacts([[A, TWIN_WRONG], [TWIN_WRONG, zed]], twinDiscovery).service), to: zed, figures: [A, zed], wikidata: twinWikidata().resolver })];
+  } },
+  // The same two names with the same years as in the alias world above, but Wikidata knows them as one person: no identity request is needed.
+  { name: 'two names that Wikidata resolves to one item need no identity request', run: async wrap => {
+    const oldName = person('Charles Contact', 1600, 1730), alias = person('Charles C. Contact', 1600, 1730), fake = fakeContacts([[A, M], [M, oldName], [alias, B]]);
+    fake.service.resolveFigure = async name => name.includes('Charles') ? figurePerson(oldName) : null;
+    // Charles is one person whichever form of the name he is recorded under, so the pairs are judged by who they are.
+    const who = (name: string) => name.startsWith('Charles') ? 'Charles' : name, supported = new Set([[A.name, M.name], [M.name, 'Charles'], ['Charles', B.name]].map(([a, b]) => pairKey(a, b)));
+    fake.service.assessPersonalContacts = async pairs => pairs.map(pair => supported.has(pairKey(who(pair.first.name), who(pair.second.name)))
+      ? { pair: [pair.first.id, pair.second.id], verdict: 'accepted', interactionType: 'correspondence', evidence: `${pair.first.name} and ${pair.second.name} exchanged letters about their joint research.` }
+      : { pair: [pair.first.id, pair.second.id], verdict: 'unresolved', evidence: '', uncertainty: 'No specific interaction established.' });
+    const wikidata = fakeWikidata(input => input.name.includes('Charles') ? { qid: 'Q7', birthYear: 1600, deathYear: 1730 } : 'miss');
+    return [await search({ service: wrap(fake.service), wikidata: wikidata.resolver })];
   } },
 ];
 

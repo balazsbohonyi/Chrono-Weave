@@ -1,4 +1,5 @@
-import { canvasPerson, figurePerson, identifyPerson, sessionKey, samePerson, validAccepted, validPerson, type ConnectionSession } from './connectionGraph';
+import { canvasPerson, figurePerson, identifyPerson, needsWikidata, reconcileIdentities, sessionKey, samePerson, validAccepted, validPerson, type ConnectionSession } from './connectionGraph';
+import type { WikidataResolver } from './wikidataService';
 import { pairKey } from './pathService';
 import type { ConnectionRepository } from '../utils/connectionKnowledge';
 import type {
@@ -79,8 +80,13 @@ export interface ConnectionFlowEffects {
 export async function finishedExploration({ repository, canvasId, entry }: {
   repository: ConnectionRepository; canvasId: string; entry: ConnectionPathEntry;
 }): Promise<{ session: ConnectionSession; chain: string[] } | null> {
-  const ids = entry.identityIds, contacts = entry.contacts, people = entry.people;
-  if (!ids || ids.length < 2 || !contacts || contacts.length !== ids.length - 1 || !people) return null;
+  const savedIds = entry.identityIds, savedContacts = entry.contacts, people = entry.people;
+  if (!savedIds || savedIds.length < 2 || !savedContacts || savedContacts.length !== savedIds.length - 1 || !people) return null;
+  // A person of the chain may have been merged into another record since it was saved (the same person under another name or years, found by
+  // Wikidata): the saved search then names the survivor, so the chain is followed onto it.
+  const known = (await repository.loadKnowledge()).people;
+  const survivor = (id: string) => { let person = known.find(p => p.id === id); for (let hops = 0; person?.canonicalId && hops < 8; hops++) person = known.find(p => p.id === person!.canonicalId); return person && !person.canonicalId ? person.id : id; };
+  const ids = savedIds.map(survivor), contacts = savedContacts.map(contact => ({ ...contact, pair: [survivor(contact.pair[0]), survivor(contact.pair[1])] as [string, string] }));
   const endpoints: [string, string] = [ids[0], ids[ids.length - 1]];
   const key = sessionKey(canvasId, endpoints[0], endpoints[1]);
   const finished = { status: 'connected' as const, phase: 'Accepted chain found', endpoints };
@@ -88,7 +94,7 @@ export async function finishedExploration({ repository, canvasId, entry }: {
   const holdsChain = (session: ConnectionSession) => contacts.every(contact => session.candidates.some(candidate => candidate.status === 'accepted' && pairKey(candidate.from, candidate.to) === pairKey(...contact.pair)))
     && ids.every(id => session.people.some(person => person.id === id));
   if (stored && holdsChain(stored)) return { session: { ...stored, ...finished }, chain: ids };
-  const chainPeople = ids.flatMap(id => people.find(person => person.id === id) ?? []);
+  const chainPeople = ids.flatMap(id => known.find(person => person.id === id && !person.canonicalId) ?? people.find(person => person.id === id) ?? []);
   if (chainPeople.length !== ids.length) return null;
   return {
     session: { version: 2, key, canvasId, endpoints, people: chainPeople,
@@ -96,6 +102,31 @@ export async function finishedExploration({ repository, canvasId, entry }: {
       rounds: [], attempts: {}, segment: 1, ...finished, elapsedMs: 0, updatedAt: entry.createdAt, persistent: repository.persistent, diagnostics: { tasks: 0, people: 0, pairs: 0 } },
     chain: ids,
   };
+}
+
+// A saved exploration opened without a search: the people in it that Wikidata has not been asked about are asked now, so the duplicates it
+// holds become one person and their years are right, and what was learnt is saved (with the status the saved search has, not the one it is
+// shown with). Best effort: when Wikidata cannot be reached, or has nothing to say, the exploration is returned as it was. `chain` (the lit
+// people of a connection that was made) follows any person who was merged into another.
+export async function reconcileSession({ repository, wikidata, session, chain, signal }: {
+  repository: ConnectionRepository; wikidata: WikidataResolver; session: ConnectionSession; chain?: string[]; signal?: AbortSignal;
+}): Promise<{ session: ConnectionSession; chain?: string[]; changed: boolean }> {
+  const unchanged = { session, chain, changed: false };
+  try {
+    const knowledge = await repository.loadKnowledge(), view = structuredClone(session);
+    for (const person of view.people) if (!knowledge.people.some(known => known.id === person.id)) knowledge.people.push(structuredClone(person));
+    const byId = new Map(knowledge.people.map(person => [person.id, person]));
+    const unasked = view.people.flatMap(person => { const record = byId.get(person.id); return record && needsWikidata(record) ? [record] : []; });
+    if (!unasked.length) return unchanged;
+    const outcomes = await wikidata.resolve(unasked.map(({ name, birthYear, deathYear }) => ({ name, birthYear, deathYear })), signal);
+    if (!outcomes.size) return unchanged;
+    reconcileIdentities(knowledge, view, outcomes, view.endpoints);
+    const stored = await repository.loadSession(view.key);
+    // A session that was never saved (one rebuilt from a saved connection) has nothing to save the knowledge with.
+    if (stored) await repository.checkpoint(knowledge, { ...view, status: stored.status, phase: stored.phase, endpoints: stored.endpoints });
+    const survivor = (id: string) => { let person = knowledge.people.find(known => known.id === id); for (let hops = 0; person?.canonicalId && hops < 8; hops++) person = knowledge.people.find(known => known.id === person!.canonicalId); return person?.id ?? id; };
+    return { session: view, chain: chain && [...new Set(chain.map(survivor))], changed: true };
+  } catch { return unchanged; }
 }
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
@@ -144,9 +175,10 @@ export function settleConnection({ result, request, storage, effects }: {
 
 // The whole search after the request was accepted: identify a typed name, look for a saved path, search,
 // settle. Nothing here throws; a failure to identify the name goes back to the picker, any other to a toast.
-export async function runConnectionSearch({ service, storage, figures, from, target, signal, effects, repository, canvasId, session, provenance, mode }: {
+export async function runConnectionSearch({ service, storage, figures, from, target, signal, effects, repository, canvasId, session, provenance, mode, wikidata }: {
   service: IAIService; storage: Storage; figures: HistoricalFigure[]; from: HistoricalFigure; target: ConnectionTarget;
   signal: AbortSignal; effects: ConnectionFlowEffects; repository?: ConnectionRepository; canvasId?: string; session?: ConnectionSession; provenance?: { provider: string; model: string }; mode?: 'auto' | 'resume' | 'fresh';
+  wikidata?: WikidataResolver;
 }): Promise<void> {
   try {
     let to: HistoricalFigure;
@@ -171,7 +203,7 @@ export async function runConnectionSearch({ service, storage, figures, from, tar
       if (existing && existing.status !== 'connected') { effects.exploration?.({ ...existing, endpoints: [first.id, second.id], status: 'paused', phase: 'Saved exploration: choose Resume or Start a new search' }); return; }
     }
     const result = await findConnection({
-      service, from, to, figures, storage, signal, repository, canvasId, session, provenance,
+      service, from, to, figures, storage, signal, repository, canvasId, session, provenance, wikidata,
       onSnapshot: next => effects.exploration?.(next),
       onProgress: next => { if (effects.isCurrent()) effects.progress(next); },
     });
