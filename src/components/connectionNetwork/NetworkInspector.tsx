@@ -84,7 +84,7 @@ const NetworkInspector: React.FC<Props> = ({ session, view, selection, portraits
         </section>}
         {unverified.length > 0 && <details className="net-unverified"><summary>Unverified around this person ({unverified.length})</summary>
           <ul className="net-contact-rows">{unverified.map(({ other, candidate }) => <li key={edgeId(candidate)}><button type="button" onClick={() => onSelect({ edge: edgeId(candidate) })}>
-            <span><strong>{other.name}</strong><em> · {STATUS_LABELS[candidate.status]}</em><small>{excerpt(detailOf(candidate))}</small></span>
+            {portrait(other, 34)}<span><strong>{other.name}</strong><em> · {STATUS_LABELS[candidate.status]}</em><small>{excerpt(detailOf(candidate))}</small></span>
           </button></li>)}</ul></details>}
       </div>
     </>;

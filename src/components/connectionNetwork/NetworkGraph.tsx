@@ -86,7 +86,8 @@ interface NodeHandlers {
   move: (event: React.PointerEvent<SVGGElement>) => void;
   up: (event: React.PointerEvent<SVGGElement>, id: string) => void;
   release: (id: string) => void;
-  failed: (id: string) => void;
+  // A picture that did not load: the person and the address that failed (a new address, e.g. after they became AI-supported, is tried again).
+  failed: (id: string, url: string) => void;
 }
 
 // The lines and the people are layers of their own, memoized: moving the camera, the clock or the axis re-renders neither. Each line
@@ -136,7 +137,7 @@ const NodeItem = memo(function NodeItem({ id, name, years, category, endpoint, l
       <circle className="net-ring" r={r + 3} />
       <circle className="net-disc" r={r} fill={CATEGORY_COLORS[category]} />
       {url
-        ? <image href={url} x={-r} y={-r} width={r * 2} height={r * 2} clipPath={`url(#${clip})`} preserveAspectRatio="xMidYMid slice" onError={() => handlers.failed(id)} />
+        ? <image href={url} x={-r} y={-r} width={r * 2} height={r * 2} clipPath={`url(#${clip})`} preserveAspectRatio="xMidYMid slice" onError={() => handlers.failed(id, url)} />
         : <text className="net-initials" textAnchor="middle" dy="0.35em" style={{ fontSize: r * 0.8, fill: CATEGORY_BAR_TEXT_COLORS[category] }}>{initials(name)}</text>}
       {isEndpoint && <g className="net-badge-ab"><circle cx={r * 0.78} cy={-r * 0.78} r={r * 0.4} /><text x={r * 0.78} y={-r * 0.78} textAnchor="middle" dy="0.35em">{endpoint === 0 ? 'A' : 'B'}</text></g>}
       {pinned && <g className="net-pin"><title>Pinned · double-click to release</title><circle cx={-r * 0.78} cy={-r * 0.78} r={6} /><path d={`M ${-r * 0.78 - 2.5} ${-r * 0.78 + 2.5} L ${-r * 0.78 + 2.5} ${-r * 0.78 - 2.5}`} /></g>}
@@ -153,7 +154,7 @@ const NodeItem = memo(function NodeItem({ id, name, years, category, endpoint, l
 
 const NodeLayer = memo(function NodeLayer({ nodes, folds, selection, focus, chainNodes, narrow, portraits, failed, pinned, endpointNames, clips, handlers, onSelect, onToggleFold }: {
   nodes: NetworkNode[]; folds: NetworkFold[]; selection: NetworkSelection; focus: Focus; chainNodes: ReadonlySet<string> | null; narrow: boolean;
-  portraits: Map<string, string>; failed: ReadonlySet<string>; pinned: ReadonlySet<string>; endpointNames: [string, string];
+  portraits: Map<string, string>; failed: ReadonlyMap<string, string>; pinned: ReadonlySet<string>; endpointNames: [string, string];
   clips: { endpoint: string; person: string }; handlers: NodeHandlers; onSelect: (selection: NetworkSelection) => void; onToggleFold: (hostId: string) => void;
 }) {
   const foldOf = useMemo(() => new Map(folds.map(fold => [fold.hostId, fold])), [folds]);
@@ -163,7 +164,7 @@ const NodeLayer = memo(function NodeLayer({ nodes, folds, selection, focus, chai
     const className = `net-node ${sideClass(node)} ${node.supported ? 'is-supported' : 'is-tentative'} ${selected ? 'is-selected' : ''} ${onEdge ? 'is-edge-end' : ''} ${focus && !focus.nodes.has(node.id) ? 'is-dim' : ''} ${chainNodes?.has(node.id) ? 'is-chain' : ''} ${node.active ? 'is-active' : ''}`;
     return <NodeItem key={node.id} id={node.id} name={name} years={`${node.person.birthYear}–${node.person.deathYear}`} category={node.person.category}
       endpoint={node.endpoint} label={`${name}, ${describeSide(node, endpointNames)}${isPinned ? ', pinned' : ''}`} className={className} selected={selected}
-      r={nodeRadius(isEndpoint, narrow)} url={node.supported && !failed.has(node.id) ? portraits.get(node.id) : undefined} clip={isEndpoint ? clips.endpoint : clips.person}
+      r={nodeRadius(isEndpoint, narrow)} url={failed.get(node.id) !== portraits.get(node.id) ? portraits.get(node.id) : undefined} clip={isEndpoint ? clips.endpoint : clips.person}
       pinned={isPinned} active={node.active} shownName={isEndpoint ? truncateName(name, ENDPOINT_NAME_LIMIT) : truncateName(name, labelLimit(narrow))}
       foldCount={fold?.ids.length ?? 0} foldExpanded={!!fold?.expanded} handlers={handlers} onSelect={onSelect} onToggleFold={onToggleFold} />;
   })}</>;
@@ -217,7 +218,7 @@ const NetworkGraph: React.FC<Props> = ({
   // While the winning chain is lit, the camera frames it, whatever else is on screen.
   const litChain = useRef<ReadonlySet<string> | null>(null);
   const classifyWheel = useRef(createWheelClassifier()).current;
-  const [failed, setFailed] = useState(() => new Set<string>());
+  const [failed, setFailed] = useState(() => new Map<string, string>());
   const [domain, setDomain] = useState(layout.yearDomain);
   const sizeRef = useRef(size);
   sizeRef.current = size;
@@ -429,7 +430,7 @@ const NetworkGraph: React.FC<Props> = ({
   live.current = { onNodeDown, onNodeMove, onNodeUp, releasePin };
   const handlers = useMemo<NodeHandlers>(() => ({
     down: (event, id) => live.current.onNodeDown(event, id), move: event => live.current.onNodeMove(event), up: (event, id) => live.current.onNodeUp(event, id),
-    release: id => live.current.releasePin(id), failed: id => setFailed(previous => new Set(previous).add(id)),
+    release: id => live.current.releasePin(id), failed: (id, url) => setFailed(previous => previous.get(id) === url ? previous : new Map(previous).set(id, url)),
   }), []);
   const clips = useMemo(() => ({ endpoint: `${uid}-clip-end`, person: `${uid}-clip-person` }), [uid]);
 

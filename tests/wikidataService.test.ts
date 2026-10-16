@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  acceptIdentity, claimsQuery, createWikidataResolver, historicalYear, parseClaimRows, pickYear, titlesToQids, wikidataKey, yearOfTime,
+  acceptIdentity, claimsQuery, createWikidataResolver, historicalYear, parseClaimRows, parsePortraitRows, pickYear, portraitsByQid, portraitsQuery, portraitUrl,
+  titlesToQids, wikidataKey, yearOfTime,
   type FetchLike, type WikidataClaim, type WikidataEntity,
 } from '../src/services/wikidataService';
 
@@ -110,6 +111,51 @@ test('the claims query asks only for the given QIDs, with one row per statement'
   assert.ok(query.includes('wd:Q132537 wd:Q935 }'), query);
   assert.ok(!query.includes('not-a-qid') && !query.includes('DROP'));
   assert.ok(/UNION/.test(query) && query.includes('P569') && query.includes('P570') && query.includes('wd:Q5'));
+});
+
+// Portraits through the item (recorded: Oppenheimer, Hitler and Dante have a P18 picture, Q4115189 has none).
+test('the portraits query asks only for the given QIDs and only for their portrait statement', () => {
+  const query = portraitsQuery(['Q132537', 'Q352', 'not-a-qid', 'Q1 } DROP']);
+  assert.ok(query.includes('wd:Q132537 wd:Q352 }') && query.includes('wdt:P18'), query);
+  assert.ok(!query.includes('not-a-qid') && !query.includes('DROP'));
+});
+
+test('a recorded portraits answer becomes one thumbnail URL per item, and an item without a portrait is simply absent', () => {
+  const portraits = parsePortraitRows(fixture('portraits'), 120);
+  assert.deepEqual([...portraits.keys()].sort(), ['Q1067', 'Q132537', 'Q352']);
+  assert.equal(portraits.get('Q352'), 'https://commons.wikimedia.org/wiki/Special:FilePath/Adolf%20Hitler%20cropped%20restored%203x4.jpg?width=120');
+  assert.ok(portraits.get('Q132537')!.startsWith('https://commons.wikimedia.org/wiki/Special:FilePath/Oppenheimer%20(cropped).jpg?width=120'));
+  assert.equal(portraits.has('Q4115189'), false);
+});
+
+test('portrait files: the name is re-encoded once, and anything that is not a Commons file path is no portrait', () => {
+  assert.equal(portraitUrl('http://commons.wikimedia.org/wiki/Special:FilePath/A%20B%C3%A9.jpg', 400), 'https://commons.wikimedia.org/wiki/Special:FilePath/A%20B%C3%A9.jpg?width=400');
+  assert.equal(portraitUrl('http://example.org/elsewhere.jpg', 120), null);
+  assert.equal(portraitUrl('http://commons.wikimedia.org/wiki/Special:FilePath/%E0%A4%A.jpg', 120), null, 'a malformed escape does not throw');
+  assert.equal(parsePortraitRows({ results: { bindings: [{ item: { value: 'http://www.wikidata.org/entity/Q1' }, image: { value: 'http://commons.wikimedia.org/wiki/Special:FilePath/One.jpg' } },
+    { item: { value: 'http://www.wikidata.org/entity/Q1' }, image: { value: 'http://commons.wikimedia.org/wiki/Special:FilePath/Two.jpg' } }, { item: {} }, null] } }, 120).get('Q1')?.includes('One.jpg'), true, 'the first of several');
+  assert.equal(parsePortraitRows({ nonsense: true }, 120).size, 0);
+});
+
+test('portraits are asked for fifty items at a time in one SPARQL request each, naming every item answered', async () => {
+  const { fetchImpl, calls } = fakeFetch(), sparqlPortraits: FetchLike = async (input, init) => { await fetchImpl(input, init); return reply(fixture('portraits')); };
+  const qids = ['Q132537', 'Q352', 'Q1067', 'Q4115189', ...Array.from({ length: 116 }, (_, index) => `Q${900000 + index}`)];
+  const { portraits, answered } = await portraitsByQid(qids, 120, sparqlPortraits);
+  assert.deepEqual(calls.map(call => call.service), ['sparql', 'sparql', 'sparql']);
+  assert.deepEqual(calls.map(call => (call.url.searchParams.get('query')!.match(/wd:Q\d+/g) ?? []).length).sort(), [20, 50, 50]);
+  assert.equal(answered.size, 120, 'every item of a batch that was answered, with or without a portrait');
+  assert.equal(portraits.size, 3);
+  const headers = calls[0].init?.headers as Record<string, string>;
+  assert.ok(headers['Api-User-Agent'] && headers.Accept.includes('sparql-results+json'));
+});
+
+test('a portraits batch that cannot be asked, or is not SPARQL, answers nothing: those items are not "without a portrait"', async () => {
+  assert.deepEqual(await portraitsByQid(['Q1', 'Q2'], 120, async () => reply({}, 503)), { portraits: new Map(), answered: new Set() });
+  assert.equal((await portraitsByQid(['Q1'], 120, async () => reply({ unexpected: 'shape' }))).answered.size, 0);
+  assert.equal((await portraitsByQid(['Q1'], 120, async () => { throw new Error('offline'); })).answered.size, 0);
+  const aborted = new AbortController(); aborted.abort();
+  await assert.rejects(portraitsByQid(['Q1'], 120, async () => { throw new Error('cancelled'); }, aborted.signal));
+  assert.deepEqual(await portraitsByQid([], 120, async () => { throw new Error('never asked'); }), { portraits: new Map(), answered: new Set() });
 });
 
 const lopez = { name: 'Jennifer Lopez', birthYear: 1969, deathYear: 2026 };

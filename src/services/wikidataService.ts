@@ -144,6 +144,49 @@ export async function fetchClaimRows(qids: readonly string[], fetchImpl: FetchLi
   const params = new URLSearchParams({ query: claimsQuery(qids), format: 'json' });
   return getJson(fetchImpl, `${SPARQL_ENDPOINT}?${params}`, signal, limits.timeoutMs, { Accept: 'application/sparql-results+json', 'Api-User-Agent': API_USER_AGENT });
 }
+// ---- Portraits through the item -------------------------------------------------------------------------------------------------
+// A person whose item is known (their QID) can be shown with the picture Wikidata holds for exactly that item (P18, the preferred
+// statement, else a normal one), however unverified their contacts are: no name is looked up, so no namesake's face can turn up.
+
+export function portraitsQuery(qids: readonly string[]): string {
+  const items = qids.filter(qid => QID_PATTERN.test(qid)).map(qid => `wd:${qid}`).join(' ');
+  return `SELECT ?item ?image WHERE { VALUES ?item { ${items} } ?item wdt:P18 ?image }`;
+}
+// The thumbnail address of a Commons file named by an entity statement (`…/Special:FilePath/Name.jpg`), the same form the name-based
+// fallback in wikiService builds. Anything else is no usable portrait.
+export function portraitUrl(image: string, width: number): string | null {
+  const file = /\/Special:FilePath\/([^/?#]+)$/.exec(image)?.[1];
+  if (!file) return null;
+  try { return `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(decodeURIComponent(file))}?width=${width}`; } catch { return null; }
+}
+// The rows of the portraits query as a portrait URL per QID (the first when an item has several). An item with no row is not in the result.
+export function parsePortraitRows(json: unknown, width: number): Map<string, string> {
+  const portraits = new Map<string, string>();
+  const rows = (json as { results?: { bindings?: Array<{ item?: { value?: string }; image?: { value?: string } }> } } | null)?.results?.bindings;
+  if (!Array.isArray(rows)) return portraits;
+  for (const row of rows) {
+    const qid = row?.item?.value?.match(/Q\d+$/)?.[0], url = row?.image?.value ? portraitUrl(row.image.value, width) : null;
+    if (qid && url && !portraits.has(qid)) portraits.set(qid, url);
+  }
+  return portraits;
+}
+// Portraits by item, 50 at a time: `portraits` has the ones found, `answered` every item the service answered about (an item answered without
+// a portrait simply has none), so an item whose batch could not be asked is in neither and is asked again later. Never throws, except to say it was cancelled.
+export async function portraitsByQid(qids: readonly string[], width: number, fetchImpl: FetchLike, signal?: AbortSignal, limits = WIKIDATA_LIMITS): Promise<{ portraits: Map<string, string>; answered: Set<string> }> {
+  const portraits = new Map<string, string>(), answered = new Set<string>();
+  await inPool(chunked([...new Set(qids.filter(qid => QID_PATTERN.test(qid)))], limits.claimBatch), limits.pool, async chunk => {
+    try {
+      const params = new URLSearchParams({ query: portraitsQuery(chunk), format: 'json' });
+      const json = await getJson(fetchImpl, `${SPARQL_ENDPOINT}?${params}`, signal, limits.timeoutMs, { Accept: 'application/sparql-results+json', 'Api-User-Agent': API_USER_AGENT });
+      // A reply that is not SPARQL results is not an answer.
+      if (!Array.isArray((json as { results?: { bindings?: unknown } } | null)?.results?.bindings)) throw new Error('No SPARQL results');
+      for (const [qid, url] of parsePortraitRows(json, width)) portraits.set(qid, url);
+      chunk.forEach(qid => answered.add(qid));
+    } catch { signal?.throwIfAborted(); }
+  });
+  return { portraits, answered };
+}
+
 async function fetchEntities(qids: readonly string[], fetchImpl: FetchLike, signal: AbortSignal | undefined, limits: typeof WIKIDATA_LIMITS): Promise<{ entities: Map<string, WikidataEntity>; failed: Set<string> }> {
   const entities = new Map<string, WikidataEntity>(), failed = new Set<string>();
   await inPool(chunked([...new Set(qids)], limits.claimBatch), limits.pool, async chunk => {

@@ -268,13 +268,19 @@ export function corridorSpine(view: Pick<NetworkView, 'nodes' | 'chain' | 'close
   return [first.id, second.id];
 }
 
-// Who may get a Wikipedia portrait: only AI-supported people. A name shared with someone else could
-// otherwise put the wrong face on an unverified suggestion. Besides the people drawn, this covers the
-// ones only the readable list shows (for instance contacts folded behind a "+n" badge).
-export const portraitSubjects = (view: Pick<NetworkView, 'nodes'> & { list?: Pick<NetworkView['list'], 'endpoints' | 'people'> }) => {
-  const subjects = new Map<string, { id: string; name: string }>();
+// Who may get a portrait. AI-supported people get the one Wikipedia has under their name. An unverified person never does: a name shared with
+// someone else could put the wrong face on an unverified suggestion. The exception is an unverified person whose identity Wikidata has
+// confirmed (they have a `qid`): they get the picture Wikidata holds for exactly that item, so no namesake can turn up, and their `qid` in the
+// subject says the lookup goes through it. Unverified people without a `qid` (Wikidata has not been asked about them yet, or had no answer)
+// are not offered and keep their initials. Besides the people drawn, this covers the ones only the readable list shows (for instance
+// contacts folded behind a "+n" badge) and `others`: people who are not drawn but are listed (the unverified contacts of the selected person).
+export const portraitSubjects = (view: Pick<NetworkView, 'nodes'> & { list?: Pick<NetworkView['list'], 'endpoints' | 'people'> }, others: readonly ContactPerson[] = []) => {
+  const subjects = new Map<string, { id: string; name: string; qid?: string }>();
   for (const node of view.nodes) if (node.supported) subjects.set(node.id, { id: node.id, name: node.person.name });
   for (const person of [...(view.list?.endpoints ?? []), ...(view.list?.people ?? [])]) subjects.set(person.id, { id: person.id, name: person.name });
+  for (const person of [...view.nodes.filter(node => !node.supported).map(node => node.person), ...others]) {
+    if (person.qid && !subjects.has(person.id)) subjects.set(person.id, { id: person.id, name: person.name, qid: person.qid });
+  }
   return [...subjects.values()];
 };
 
@@ -291,6 +297,15 @@ export function personContacts(session: ConnectionSession, personId: string): { 
   const byName = (x: PersonContact, y: PersonContact) => x.other.name.localeCompare(y.other.name);
   result.accepted.sort(byName); result.unverified.sort(byName);
   return result;
+}
+
+// The people the inspector shows whether or not they are drawn: the unverified contacts of the selected person, and the two people of the
+// selected contact (picking a contact from a person's list drops the person, and an unverified contact is not drawn unless its chip is on).
+export function inspectedPeople(session: ConnectionSession, selection: NetworkSelection): ContactPerson[] {
+  const listed: ContactPerson[] = selection.person ? personContacts(session, selection.person).unverified.map(item => item.other) : [];
+  const contact = selection.edge ? session.candidates.find(candidate => edgeId(candidate) === selection.edge) : undefined;
+  if (contact) listed.push(...session.people.filter(person => person.id === contact.from || person.id === contact.to));
+  return listed;
 }
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;

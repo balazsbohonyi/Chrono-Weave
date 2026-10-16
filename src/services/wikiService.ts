@@ -2,6 +2,7 @@
 import { HistoricalFigure } from "../types";
 import { mapInputsToTitles } from "./wikiTitles";
 import { portraitStore } from "./portraitStore";
+import { portraitsByQid } from "./wikidataService";
 
 // Cache to avoid re-fetching details for the same person within the session
 const detailsCache = new Map<string, { description: string; imageUrl: string | null }>();
@@ -136,24 +137,49 @@ const askWikipediaForImages = async (names: string[], width: number): Promise<Wi
 // Portraits by name: what is remembered (see portraitStore) comes at once, and only the people never asked about, or asked too long ago, go to
 // Wikipedia. `onStored` is told about the remembered pictures as soon as they are known when others are still being asked for, so a few
 // newcomers never hold back the faces of everybody else. Misses are simply absent; so is anyone whose request failed (and that is not remembered).
-const fetchBatchWikipediaImages = async (names: string[], width = FIGURE_THUMBNAIL_WIDTH, onStored?: (found: Map<string, string>) => void): Promise<Map<string, string>> => {
-    const imageMap = new Map<string, string>();
-    const unique = [...new Set(names)];
+// The pictures found, by name (or by item). `unanswered` names the ones whose request failed: they are not "without a picture", so a caller that
+// keeps its own memory must not record them as such, and asks again next time.
+export type PortraitResult = Map<string, string> & { unanswered?: ReadonlySet<string> };
+
+const rememberedOrAsked = async (
+    keys: string[], width: number, ask: (unknown: string[]) => Promise<WikipediaAnswers>, onStored?: (found: Map<string, string>) => void
+): Promise<PortraitResult> => {
+    const imageMap: PortraitResult = new Map<string, string>();
+    const unique = [...new Set(keys)];
     if (unique.length === 0) return imageMap;
     const store = portraitStore();
     const known = await store.known(unique, width);
-    for (const [name, url] of known) if (url) imageMap.set(name, url);
-    const unknown = unique.filter(name => !known.has(name));
+    for (const [key, url] of known) if (url) imageMap.set(key, url);
+    const unknown = unique.filter(key => !known.has(key));
     if (unknown.length === 0) return imageMap;
     if (imageMap.size) onStored?.(new Map(imageMap));
-    const { found, answered } = await askWikipediaForImages(unknown, width);
-    store.record(width, new Map([...answered].map(name => [name, found.get(name) ?? null])));
-    for (const [name, url] of found) imageMap.set(name, url);
+    const { found, answered } = await ask(unknown);
+    store.record(width, new Map([...answered].map(key => [key, found.get(key) ?? null])));
+    for (const [key, url] of found) imageMap.set(key, url);
+    const unanswered = unknown.filter(key => !answered.has(key));
+    if (unanswered.length) imageMap.unanswered = new Set(unanswered);
     return imageMap;
+};
+const fetchBatchWikipediaImages = (names: string[], width = FIGURE_THUMBNAIL_WIDTH, onStored?: (found: Map<string, string>) => void): Promise<PortraitResult> =>
+    rememberedOrAsked(names, width, unknown => askWikipediaForImages(unknown, width), onStored);
+
+// Portraits by Wikidata item (QID), as small thumbnails, for people whose item is known but who are not AI-supported: the picture Wikidata holds for
+// exactly that item, so no namesake's face can turn up. Remembered like the others (as `qid:Q…`, apart from any name). Items with no portrait, and
+// items that could not be asked about, are simply absent.
+const QID_KEY = 'qid:';
+export const fetchPortraitsByQid = async (qids: string[], onStored?: (found: Map<string, string>) => void): Promise<PortraitResult> => {
+    const bare = (key: string) => key.slice(QID_KEY.length);
+    const byKey = await rememberedOrAsked(qids.map(qid => QID_KEY + qid), CONTACT_THUMBNAIL_WIDTH, async unknown => {
+        const { portraits, answered } = await portraitsByQid(unknown.map(bare), CONTACT_THUMBNAIL_WIDTH, (input, init) => fetch(input, init));
+        return { found: new Map([...portraits].map(([qid, url]) => [QID_KEY + qid, url])), answered: new Set([...answered].map(qid => QID_KEY + qid)) };
+    }, !onStored ? undefined : stored => onStored(new Map([...stored].map(([key, url]) => [bare(key), url]))));
+    const result: PortraitResult = new Map([...byKey].map(([key, url]) => [bare(key), url]));
+    if (byKey.unanswered) result.unanswered = new Set([...byKey.unanswered].map(bare));
+    return result;
 };
 
 // Portraits by name, for callers that have no HistoricalFigure (Six Degrees contacts), as small thumbnails. Misses are simply absent.
-export const fetchWikipediaImagesByName = (names: string[], onStored?: (found: Map<string, string>) => void): Promise<Map<string, string>> =>
+export const fetchWikipediaImagesByName = (names: string[], onStored?: (found: Map<string, string>) => void): Promise<PortraitResult> =>
   fetchBatchWikipediaImages(names, CONTACT_THUMBNAIL_WIDTH, onStored);
 
 type FigureDetail = { description: string; imageUrl: string | null };
@@ -213,8 +239,8 @@ export const fetchBatchFigureDetails = async (
               if (url) {
                   entry.imageUrl = url;
               }
-              // Update cache with the final result (desc + potential image)
-              detailsCache.set(fig.id, entry);
+              // Update cache with the final result (desc + potential image), unless the lookup failed: then it is asked again next time
+              if (!imageMap.unanswered?.has(fig.name)) detailsCache.set(fig.id, entry);
           }
       });
   } catch (e) {

@@ -7,7 +7,7 @@ import { useNetworkSimulation } from '../hooks/useNetworkSimulation';
 import type { LayoutMode } from '../services/connectionNetworkLayout';
 import { readNetworkViewPrefs, saveNetworkViewPrefs } from '../utils/networkViewPrefs';
 import {
-  buildNetworkView, corridorSpine, NO_FILTERS, portraitSubjects, years, type NetworkFilters, type NetworkSelection, type UnverifiedFilter,
+  buildNetworkView, corridorSpine, inspectedPeople, NO_FILTERS, portraitSubjects, years, type NetworkFilters, type NetworkSelection, type UnverifiedFilter,
 } from '../services/connectionNetworkView';
 import NetworkGraph, { type RevealRequest } from './connectionNetwork/NetworkGraph';
 import NetworkInspector from './connectionNetwork/NetworkInspector';
@@ -148,7 +148,9 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
   const links = useMemo(() => view?.edges.map(edge => ({ a: edge.from, b: edge.to })) ?? [], [view]);
   const { layout, kick } = useNetworkSimulation({ resetKey, inputs, links, bounds, mode, size, ready: measured, reducedMotion });
   // Everyone the lists show gets a portrait, not only the people currently drawn.
-  const portraits = useNetworkPortraits(useMemo(() => view ? portraitSubjects(view) : [], [view]));
+  // The people the inspector shows, drawn or not, are offered too (only those with a confirmed Wikidata item get a face: see `portraitSubjects`).
+  const portraits = useNetworkPortraits(useMemo(() => view && session ? portraitSubjects(view, inspectedPeople(session, selection)) : [],
+    [view, session, selection.person, selection.edge]));
 
   const syncPins = useCallback(() => setPinned(new Set(layout.pinned)), [layout]);
   // Entering the cluster or columns layout lets go of pins that held only a height; the pin list follows.

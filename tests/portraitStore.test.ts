@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { PortraitStore, PORTRAIT_LIMITS, setPortraitStore, type PortraitBackend, type PortraitEntry } from '../src/services/portraitStore';
-import { fetchBatchFigureDetails, fetchWikipediaImagesByName } from '../src/services/wikiService';
+import { fetchBatchFigureDetails, fetchPortraitsByQid, fetchWikipediaImagesByName } from '../src/services/wikiService';
 import { loadNetworkPortraits } from '../src/hooks/useNetworkPortraits';
 import { figure } from './helpers';
 
@@ -85,7 +85,13 @@ test('a database that fails or never answers leaves a working store of this page
 });
 
 // The Wikipedia API as the page sees it: a title query answers with pages, and the Wikidata API with a portrait file (or none).
-interface Api { requests: URL[]; wikipedia: (titles: string[]) => Response | Promise<Response>; wikidata: (entity: string) => Response | Promise<Response> }
+interface Api {
+  requests: URL[]; wikipedia: (titles: string[]) => Response | Promise<Response>; wikidata: (entity: string) => Response | Promise<Response>;
+  // The SPARQL service, asked with the items of a portraits query.
+  sparql: (qids: string[]) => Response | Promise<Response>;
+}
+const sparqlPortraits = (found: Record<string, string>) => Response.json({ results: { bindings: Object.entries(found).map(([qid, file]) => ({
+  item: { value: `http://www.wikidata.org/entity/${qid}` }, image: { value: `http://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(file)}` } })) } });
 const pageFor = (title: string, extra: object) => ({ title, ...extra });
 const answer = (pages: object[]) => Response.json({ query: { pages: Object.fromEntries(pages.map((page, index) => [index + 1, page])) } });
 async function withApi<T>(api: Partial<Api>, run: (api: Api) => Promise<T>): Promise<T> {
@@ -94,11 +100,13 @@ async function withApi<T>(api: Partial<Api>, run: (api: Api) => Promise<T>): Pro
     requests: [],
     wikipedia: titles => answer(titles.map(title => pageFor(title, { thumbnail: { source: `https://upload.example/thumb/a/ab/${title.replace(/ /g, '_')}.jpg/PX-${title}.jpg` } }))),
     wikidata: () => Response.json({ claims: {} }),
+    sparql: qids => sparqlPortraits(Object.fromEntries(qids.map(qid => [qid, `${qid}.jpg`]))),
     ...api,
   };
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = new URL(String(input));
     full.requests.push(url);
+    if (url.hostname === 'query.wikidata.org') return full.sparql(url.searchParams.get('query')!.match(/Q\d+/g) ?? []);
     return url.hostname.includes('wikidata') ? full.wikidata(url.searchParams.get('entity')!) : full.wikipedia((url.searchParams.get('titles') ?? '').split('|'));
   }) as typeof fetch;
   console.warn = () => {};
@@ -222,6 +230,103 @@ test('a big network is asked about in chunks of fifty, a few at a time, and ever
     assert.deepEqual(wikipediaRequests(api).map(url => url.searchParams.get('titles')!.split('|').length).sort(), [30, 50, 50, 50, 50]);
     assert.ok(most > 1 && most <= 3, `${most} at a time`);
   });
+});
+
+const sparqlRequests = (api: Api) => api.requests.filter(url => url.hostname === 'query.wikidata.org');
+
+test('portraits through the item: one request for many, remembered across a reload, apart from the same person looked up by name', async () => {
+  const { backend } = memoryBackend();
+  await withApi({ sparql: qids => sparqlPortraits(Object.fromEntries(qids.filter(qid => qid !== 'Q3').map(qid => [qid, `${qid} portrait.jpg`]))) }, async api => {
+    const first = new PortraitStore(backend); setPortraitStore(first);
+    const found = await fetchPortraitsByQid(['Q1', 'Q2', 'Q3']);
+    assert.deepEqual([...found.keys()].sort(), ['Q1', 'Q2'], 'an item without a portrait is absent');
+    assert.equal(found.get('Q1'), 'https://commons.wikimedia.org/wiki/Special:FilePath/Q1%20portrait.jpg?width=120');
+    assert.equal(sparqlRequests(api).length, 1); assert.equal(wikipediaRequests(api).length, 0, 'no name was looked up');
+    await first.flush();
+    setPortraitStore(new PortraitStore(backend));
+    assert.deepEqual([...await fetchPortraitsByQid(['Q1', 'Q2', 'Q3'])].sort(), [...found].sort());
+    assert.equal(sparqlRequests(api).length, 1, 'after a reload nobody is asked again, the item without a portrait included');
+    // A person called "Q1" is not the item Q1.
+    assert.equal((await fetchWikipediaImagesByName(['Q1'])).size, 1); assert.equal(wikipediaRequests(api).length, 1);
+  });
+});
+
+test('portraits through the item: a failed request is not "no portrait", and remembered items are handed over before the others are answered', async () => {
+  await withApi({ sparql: () => new Response('busy', { status: 503 }) }, async api => {
+    setPortraitStore(new PortraitStore());
+    assert.equal((await fetchPortraitsByQid(['Q1'])).size, 0);
+    api.sparql = qids => sparqlPortraits(Object.fromEntries(qids.map(qid => [qid, `${qid}.jpg`])));
+    assert.equal((await fetchPortraitsByQid(['Q1'])).size, 1);
+    assert.equal(sparqlRequests(api).length, 2, 'the first failure was asked again');
+    let release: () => void = () => {};
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const fast = api.sparql;
+    api.sparql = async qids => { await gate; return fast(qids); };
+    const early: string[][] = [];
+    const pending = fetchPortraitsByQid(['Q1', 'Q2'], found => early.push([...found.keys()]));
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.deepEqual(early, [['Q1']]);
+    release();
+    assert.deepEqual([...(await pending).keys()].sort(), ['Q1', 'Q2']);
+  });
+});
+
+test('Six Degrees portraits: unverified people with a confirmed item are looked up through it, everybody else by name, each kept apart', async () => {
+  const cache = new Map<string, string | null>(), byName: string[][] = [], byItem: string[][] = [];
+  const names = async (keys: string[]) => { byName.push(keys); return new Map(keys.map(key => [key, `https://img/name/${key}`])); };
+  const items = async (keys: string[]) => { byItem.push(keys); return new Map(keys.filter(key => key !== 'Q9').map(key => [key, `https://img/item/${key}`])); };
+  const people = [{ id: 'sd2-a', name: 'Supported Sam' }, { id: 'sd2-b', name: 'Albert Speer', qid: 'Q60' }, { id: 'sd2-c', name: 'No Portrait', qid: 'Q9' }];
+  const first = await loadNetworkPortraits(people, names, cache, undefined, items);
+  assert.deepEqual(byName, [['Supported Sam']]); assert.deepEqual(byItem, [['Q60', 'Q9']]);
+  assert.deepEqual([...first].sort(), [['sd2-a', 'https://img/name/Supported Sam'], ['sd2-b', 'https://img/item/Q60']]);
+  // Known people, the one without a portrait included, are not asked again.
+  await loadNetworkPortraits(people, names, cache, undefined, items);
+  assert.equal(byName.length + byItem.length, 2);
+  // Once Albert Speer is AI-supported (no item in the subject) he is looked up by name, as every supported person is.
+  const supported = await loadNetworkPortraits([{ id: 'sd2-b', name: 'Albert Speer' }], names, cache, undefined, items);
+  assert.deepEqual(byName[1], ['Albert Speer']); assert.equal(supported.get('sd2-b'), 'https://img/name/Albert Speer');
+});
+
+test('a lookup that failed is not kept as "no portrait" anywhere above the store: Six Degrees people and canvas figures are asked again', async () => {
+  await withApi({ sparql: () => new Response('busy', { status: 503 }), wikipedia: () => new Response('slow down', { status: 429 }) }, async api => {
+    setPortraitStore(new PortraitStore());
+    const cache = new Map<string, string | null>(), people = [{ id: 'by-name', name: 'Pat' }, { id: 'by-item', name: 'Speer', qid: 'Q60' }];
+    assert.equal((await fetchPortraitsByQid(['Q60'])).unanswered?.has('Q60'), true);
+    assert.equal((await loadNetworkPortraits(people, undefined, cache)).size, 0);
+    assert.deepEqual([...cache.keys()], [], 'neither the failed name nor the failed item was recorded as "no portrait"');
+    // The services are back: the same people are asked about again and now have their faces.
+    api.sparql = qids => sparqlPortraits(Object.fromEntries(qids.map(qid => [qid, `${qid}.jpg`])));
+    api.wikipedia = titles => answer(titles.map(title => pageFor(title, { thumbnail: { source: `https://upload.example/${title}.jpg` } })));
+    const result = await loadNetworkPortraits(people, undefined, cache);
+    assert.deepEqual([...result.keys()].sort(), ['by-item', 'by-name']);
+    assert.deepEqual([...cache.keys()].sort(), ['by-item|Q60', 'by-name']);
+    // A canvas figure whose lookup failed is not stuck without a portrait for the rest of the page either.
+    api.wikipedia = () => new Response('slow down', { status: 429 });
+    const canvasFigure = { ...figure, id: 'store-retry', name: 'Retry Person' };
+    assert.equal((await fetchBatchFigureDetails([canvasFigure])).get('store-retry')?.imageUrl, null);
+    api.wikipedia = titles => answer(titles.map(title => pageFor(title, { thumbnail: { source: `https://upload.example/${title}.jpg` } })));
+    assert.equal((await fetchBatchFigureDetails([canvasFigure])).get('store-retry')?.imageUrl, 'https://upload.example/Retry Person.jpg');
+    const asked = api.requests.length;
+    await fetchBatchFigureDetails([canvasFigure]);
+    assert.equal(api.requests.length, asked, 'once answered, it is cached');
+  });
+});
+
+test('Six Degrees portraits: the remembered ones of both kinds are handed over early, and a failing route does not take the other down', async () => {
+  const early: Array<Array<[string, string]>> = [], warn = console.warn;
+  console.warn = () => {};
+  try {
+    const names = async (keys: string[], onStored?: (found: Map<string, string>) => void) => { onStored?.(new Map([['Sam', 'https://img/sam']])); return new Map(keys.map(key => [key, `https://img/${key}`])); };
+    const items = async (keys: string[], onStored?: (found: Map<string, string>) => void) => { onStored?.(new Map([['Q60', 'https://img/q60']])); return new Map(keys.map(key => [key, `https://img/${key}`])); };
+    const people = [{ id: 'a', name: 'Sam' }, { id: 'b', name: 'Speer', qid: 'Q60' }];
+    await loadNetworkPortraits(people, names, new Map(), found => early.push([...found].sort()), items);
+    assert.deepEqual(early[0], [['a', 'https://img/sam']], 'the first early answer is only what that route knew');
+    assert.deepEqual(early[1], [['a', 'https://img/sam'], ['b', 'https://img/q60']], 'the second also has the first');
+    const cache = new Map<string, string | null>();
+    const result = await loadNetworkPortraits(people, names, cache, undefined, async () => { throw new Error('wikidata is down'); });
+    assert.deepEqual([...result.keys()], ['a']);
+    assert.equal(cache.has('b|Q60'), false, 'a failed lookup is not remembered as "no portrait"');
+  } finally { console.warn = warn; }
 });
 
 test('Six Degrees portraits: people remembered from earlier are handed over early, by person', async () => {

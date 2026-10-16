@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { CandidateContact, ConnectionSession, ContactPerson } from '../src/services/connectionGraph';
 import {
-  buildNetworkView, closestApproachLabel, corridorSpine, portraitSubjects, describeSide, lifespanGap, NO_FILTERS, NETWORK_FOLD_THRESHOLD,
+  buildNetworkView, closestApproachLabel, corridorSpine, edgeId, inspectedPeople, portraitSubjects, describeSide, lifespanGap, NO_FILTERS, NETWORK_FOLD_THRESHOLD,
 } from '../src/services/connectionNetworkView';
 
 const provenance = { provider: 'synthetic', model: 'synthetic', version: 2, assessedAt: 1 };
@@ -199,11 +199,47 @@ test('selection focus dims everything except the selection and its neighbours', 
   assert.equal(buildNetworkView(s).focus, null);
 });
 
-test('only AI-supported people are ever offered for portraits', () => {
+test('only AI-supported people are offered for a portrait by name; unverified people only when Wikidata has confirmed who they are', () => {
   const s = session([A, B, X, U, Z], [link('a', 'x'), link('x', 'u', 'unresolved'), link('x', 'z', 'proposed')]);
   const everything = buildNetworkView(s, { filters: { unresolved: true, proposed: true, blocked: true }, selection: { person: 'x' } });
   assert.ok(everything.nodes.some(node => node.id === 'u') && everything.nodes.some(node => node.id === 'z'));
-  assert.deepEqual(portraitSubjects(everything).map(subject => subject.id).sort(), ['a', 'b', 'x']);
+  assert.deepEqual(portraitSubjects(everything).map(subject => subject.id).sort(), ['a', 'b', 'x'], 'no item known for the unverified ones: initials');
+  assert.ok(portraitSubjects(everything).every(subject => subject.qid === undefined));
+});
+
+test('the inspector\'s people are offered for portraits even when not drawn: a selected person\'s unverified contacts, and both people of a selected contact', () => {
+  const withItem = (person: typeof U, qid: string) => ({ ...person, qid });
+  const s = session([A, B, X, withItem(U, 'Q12'), Z], [link('a', 'x'), link('x', 'u', 'unresolved'), link('x', 'z', 'proposed')]);
+  const subjectsFor = (selection: { person?: string; edge?: string }) => {
+    const view = buildNetworkView(s, { selection });
+    return portraitSubjects(view, inspectedPeople(s, selection)).map(subject => [subject.id, subject.qid]).sort();
+  };
+  const edge = s.candidates.find(candidate => candidate.to === 'u')!;
+  // Picking the contact from the person's list drops the person; the unverified contact is not drawn (its chip is off), but its people are shown.
+  const picked = buildNetworkView(s, { selection: { edge: edgeId(edge) } });
+  assert.ok(!picked.nodes.some(node => node.id === 'u'), 'u is not drawn once only the contact is selected');
+  assert.deepEqual(subjectsFor({ edge: edgeId(edge) }), [['a', undefined], ['b', undefined], ['u', 'Q12'], ['x', undefined]]);
+  assert.deepEqual(subjectsFor({ person: 'x' }), [['a', undefined], ['b', undefined], ['u', 'Q12'], ['x', undefined]]);
+  assert.deepEqual(subjectsFor({}), [['a', undefined], ['b', undefined], ['x', undefined]]);
+  assert.deepEqual(inspectedPeople(s, {}), []);
+});
+
+test('an unverified person whose Wikidata item is known is offered through the item, never by name; a supported one keeps the name', () => {
+  const withItem = (person: typeof U, qid: string) => ({ ...person, qid });
+  const s = session([withItem(A, 'Q10'), B, withItem(X, 'Q11'), withItem(U, 'Q12'), Z], [link('a', 'x'), link('x', 'u', 'unresolved'), link('x', 'z', 'proposed')]);
+  const everything = buildNetworkView(s, { filters: { unresolved: true, proposed: true, blocked: true } });
+  const subjects = portraitSubjects(everything);
+  assert.deepEqual(subjects.map(subject => [subject.id, subject.qid]).sort(), [['a', undefined], ['b', undefined], ['u', 'Q12'], ['x', undefined]],
+    'a and x are supported (by name, though they have an item); u is unverified with one; z has none and keeps its initials');
+  assert.equal(subjects.find(subject => subject.id === 'u')?.name, U.name);
+  // With the chips off the unverified person is not drawn, so nobody asks for them... unless the inspector lists them (`others`).
+  const quiet = buildNetworkView(s, { selection: { person: 'x' } });
+  assert.ok(quiet.nodes.some(node => node.id === 'u'), 'the selected person\'s own unverified contacts are drawn as context');
+  const hidden = buildNetworkView(s);
+  assert.deepEqual(portraitSubjects(hidden).map(subject => subject.id).sort(), ['a', 'b', 'x']);
+  assert.deepEqual(portraitSubjects(hidden, [withItem(U, 'Q12'), Z]).map(subject => [subject.id, subject.qid]).sort(), [['a', undefined], ['b', undefined], ['u', 'Q12'], ['x', undefined]]);
+  // A person who is in `others` but already offered by name is not offered twice.
+  assert.equal(portraitSubjects(hidden, [withItem(X, 'Q11')]).filter(subject => subject.id === 'x').length, 1);
 });
 
 test('the corridor spine runs from A to B: the chain when there is one, else each endpoint to the closest approach, else just the two', () => {
