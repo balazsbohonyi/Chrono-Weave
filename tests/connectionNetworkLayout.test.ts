@@ -559,6 +559,21 @@ test('categories layout: a big crowd of three fields packs into a block wider th
   assert.equal(overlapping, 0);
 });
 
+test('categories layout: contacts between pods never pull anybody out of their own pod, even in a crowd of a thousand', () => {
+  // The faint tie along contacts used by the other arranged layouts pulled people at a pod's edge across its border once the crowd
+  // was big and well connected; the pods are strict containers, so the category layout has no such tie.
+  const fields = ['SCIENTISTS', 'WRITERS', 'ARTISTS', 'THINKERS', 'BUSINESS', 'MILITARY'], random = seededRandom(11);
+  const crowd: LayoutInput[] = [fieldWorld[0], fieldWorld[3], ...Array.from({ length: 1000 }, (_, index) => person(`c${index}`, fields[Math.floor(random() * random() * fields.length)], 1300 + Math.floor(random() * 700)))];
+  const contacts = crowd.slice(2).flatMap(item => Array.from({ length: 4 }, () => ({ a: item.id, b: crowd[2 + Math.floor(random() * 1000)].id })).filter(link => link.a !== link.b));
+  const layout = new NetworkLayout(seededRandom(11));
+  layout.setSize(1500, 700); layout.setBounds(1452, 1889); layout.setMode('category'); layout.setGraph(crowd, contacts); layout.settle();
+  const strays = crowd.filter(item => item.endpoint === null).filter(item => {
+    const pod = layout.categories.find(guide => guide.category === item.category)!, at = layout.position(item.id)!;
+    return at.x < pod.x || at.x > pod.x + pod.width || at.y < pod.y || at.y > pod.y + pod.height;
+  });
+  assert.deepEqual(strays.map(item => item.id), []);
+});
+
 test('categories plan: the pods partition one block edge to edge, with no hanging corners, however uneven the categories are', () => {
   for (const counts of [[46, 38, 3], [120, 1], [30, 30, 30, 5, 2, 1], [7], [12, 12, 12, 12], [200, 90, 60, 40, 25, 12, 5, 3, 1]]) {
     const { width, height, places } = partitionPods(counts, 100);

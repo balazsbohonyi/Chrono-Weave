@@ -949,13 +949,14 @@ export class NetworkLayout {
     const time = this.mode === 'time', arranged = this.arranged;
     const cx = this.width / 2, cy = this.height / 2;
     const sim = this.simulation;
-    // The cluster and columns layouts are steered by their plan alone: no pull to the middle, no repulsion, only a faint tie along contacts.
+    // The arranged layouts are steered by their plan alone: no pull to the middle, no repulsion, only a faint tie along contacts. The
+    // category layout has not even that: its pods are containers, and a tie to contacts in other pods pulled people at a pod's edge out of it.
     sim.force('x', arranged ? null : forceX<LayoutNode>(node => time ? this.xOf(node.year) : cx).strength(time ? 0.45 : 0.02));
     sim.force('y', arranged ? null : forceY<LayoutNode>(cy).strength(time ? 0.04 : 0.05));
     sim.force('plan', arranged ? this.planForce : null);
     sim.force('collide', forceCollide<LayoutNode>(node => node.radius + LABEL_ROOM).strength(0.9));
     sim.force('charge', time || arranged ? null : forceManyBody<LayoutNode>().strength(-320).distanceMax(500));
-    sim.force('link', forceLink<LayoutNode, Link>(this.links).id(node => node.id).distance(time ? 70 : 120).strength(time ? TIME_LINK_STRENGTH : arranged ? 0.005 : 0.5));
+    sim.force('link', this.mode === 'category' ? null : forceLink<LayoutNode, Link>(this.links).id(node => node.id).distance(time ? 70 : 120).strength(time ? TIME_LINK_STRENGTH : arranged ? 0.005 : 0.5));
     sim.velocityDecay(0.45);
   }
 }
