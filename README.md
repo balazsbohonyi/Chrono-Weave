@@ -62,6 +62,18 @@ History stays ordered by creation date, newest first. Reopening a canvas saves t
 - **Visual Highlighting**: Newly discovered figures are visually distinguished from existing ones
 - **Automatic Relationships**: New figures are automatically connected to the source figure with relationship visualization
 
+### Six Degrees: Connect Two People
+
+- **Connect to?**: Pick another canvas person or type a name. Attempt any historical span with up to 20 intermediate people; the result reports the chain found, not a globally shortest historical route.
+- **Personal contacts**: Every accepted link needs overlapping lifespans and a concrete interaction. Exact direct opponents in a named battle or campaign also qualify; broad war membership and influence through works do not.
+- **What is this?**: A round **?** next to the Six Degrees titles (explorer header, reveal stage, Connection tab and the picker banner) opens one dialog explaining the original Six Degrees of Separation idea and how this app differs: chains across centuries, where every link joins people alive at the same time.
+- **Live exploration**: A separate network overlay shows proposed, checking, AI-supported, unresolved and blocked contacts. Pan, zoom, fit and inspect stored evidence without adding exploratory people to the canvas.
+- **Explicit continuation**: Searches run for up to three minutes per segment. Stop, close, Escape, canvas/provider changes and other relationship actions stop work. Paused searches can be resumed explicitly, including after reload; they never restart automatically.
+- **Shared knowledge**: Accepted AI assessments are reusable across canvases and models in a dedicated local IndexedDB database. If saving is unavailable, exploration remains usable in this session and the overlay explains the limitation.
+- **Successful chains**: Missing people are woven in, then the existing amber thread and camera reveal play in timeline or gallery layout. The Connection tab stores compact evidence, dedicated lazy **Why?** narratives and versioned **Recent connections**. Old Six Degrees paths start fresh while their canvas people stay protected.
+
+The solver uses the configured Gemini, OpenRouter or Ollama model without historical-source retrieval. Live discovery improvement still requires reviewed old/new comparisons.
+
 ### 📖 Deep Dive Biographies
 - **Read Biography**: Click to view detailed AI-generated biographical information
 - **Famous Quotes**: Discover iconic quotes from historical figures

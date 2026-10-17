@@ -64,6 +64,7 @@
     pointer-events: none;
     box-shadow: 0 4px 12px rgb(var(--color-shadow) / 15%);
 }
+.ui-tooltip.is-multiline { max-width: min(260px, calc(100vw - 16px)); white-space: normal; text-align: left; }
 
 .canvas-header {
     position: fixed;
@@ -314,7 +315,6 @@ input[type=number] {
 /* Keep font descenders inside the clipped name line boxes. */
 .gallery-card h2 { line-height: 1.3; }
 .gallery-focused { border-color: rgb(var(--color-timeline-search)); box-shadow: 0 0 0 3px rgb(var(--color-timeline-search)), 0 8px 28px rgb(var(--color-shadow) / 0.2); }
-.gallery-new:not(.gallery-focused):not(.relationship-source) { box-shadow: 0 0 0 2px rgb(var(--color-accent-focus)), 0 8px 28px rgb(var(--color-shadow) / 0.2); }
 @media (max-width: 680px) {
   .relationship-scroll { padding: 68px 20px 40px; }
   .relationship-heading h1 { font-size: 22px; }
@@ -322,7 +322,7 @@ input[type=number] {
   .relationship-top { gap: 48px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .relationship-card { animation: none !important; opacity: 1 !important; }
+  .relationship-card:not(.gallery-card) { animation: none !important; opacity: 1 !important; }
 }
 
 /* =========================================================================
@@ -1448,4 +1448,117 @@ input[type=number] {
   }
   .launcher-overlay .animate-spin { animation: none !important; }
   .launcher-card-caption .launcher-card-desc { transform: none !important; }
+}
+
+/* =========================================================================
+   Six Degrees: connecting two people through personal contacts
+   ========================================================================= */
+.connection-thread-line { fill: none; stroke: rgb(var(--color-connection)); stroke-linecap: round; stroke-linejoin: round; }
+
+/* Connected people are marked by a crisp outline and a number, never a glow. Everyone else is ghosted. */
+.connection-node { outline: 2px solid rgb(var(--color-connection)); outline-offset: 1px; }
+.connection-node-current { outline-width: 3px; outline-offset: 2px; }
+.gallery-card { transition: box-shadow 150ms, opacity 500ms ease, filter 500ms ease; }
+@media (prefers-reduced-motion: reduce) { .gallery-card { transition: none; } }
+.gallery-connected { overflow: visible; }
+/* The outline sits on the card's own 1px border, and the category corner follows the rounded corner now that the card no longer clips. */
+.gallery-connected:not(.gallery-focused):not(.relationship-source) { outline: 3px solid rgb(var(--color-connection)); outline-offset: -1px; }
+.gallery-current:not(.gallery-focused):not(.relationship-source) { outline-width: 4px; }
+.gallery-connected .figure-card-corner { border-top-right-radius: 11px; }
+.connection-badge { display: inline-grid; place-items: center; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 999px; background: rgb(var(--color-connection)); color: rgb(var(--color-connection-contrast)); font: 800 13px/1 system-ui, sans-serif; letter-spacing: 0; pointer-events: none; }
+.connection-badge-inline { margin-right: 8px; flex-shrink: 0; }
+.connection-badge-corner { position: absolute; top: -13px; left: -13px; z-index: 2; box-shadow: 0 1px 3px rgb(var(--color-shadow) / 0.35); }
+
+.connection-picker {
+    position: fixed; left: 50%; z-index: 55; width: min(720px, calc(100vw - 48px)); transform: translateX(-50%);
+    display: flex; flex-direction: column; gap: 10px; padding: 14px 18px; border-radius: 14px;
+    border: 1px solid rgb(var(--color-border) / 50%); background: rgb(var(--color-surface) / 80%);
+    backdrop-filter: blur(24px); box-shadow: 0 8px 28px rgb(var(--color-shadow) / 18%);
+}
+.connection-picker-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.connection-picker-text { font-size: 14px; color: rgb(var(--color-content-body)); }
+.connection-picker-text strong { color: rgb(var(--color-content-primary)); }
+.connection-picker-row { display: flex; gap: 8px; align-items: center; }
+.connection-picker-input {
+    flex: 1; min-width: 0; padding: 8px 12px; font-size: 15px; border-radius: 8px;
+    border: 1px solid rgb(var(--color-border-strong)); background: rgb(var(--color-surface)); color: rgb(var(--color-content-primary));
+}
+.connection-picker-input:focus-visible { outline: 2px solid rgb(var(--color-accent-focus)); outline-offset: 1px; }
+.connection-picker-input[aria-invalid="true"] { border-color: rgb(var(--color-danger-marker)); }
+.connection-picker-button {
+    padding: 8px 16px; font-size: 14px; font-weight: 700; border-radius: 8px; white-space: nowrap;
+    background: rgb(var(--color-accent-solid)); color: rgb(var(--color-on-accent));
+}
+.connection-picker-button:hover:not(:disabled) { background: rgb(var(--color-accent-solid-hover)); }
+.connection-picker-button:disabled { opacity: 0.5; cursor: default; }
+.connection-picker-button:focus-visible { outline: 2px solid rgb(var(--color-accent-focus)); outline-offset: 2px; }
+.connection-picker-cancel { background: rgb(var(--color-surface)); color: rgb(var(--color-accent-text-hover)); border: 1px solid rgb(var(--color-border-strong)); }
+.connection-picker-cancel:hover:not(:disabled) { background: rgb(var(--color-surface-muted)); }
+.connection-picker-suggestions { list-style: none; margin: 0; padding: 4px; border-radius: 8px; border: 1px solid rgb(var(--color-border)); background: rgb(var(--color-surface)); }
+.connection-picker-suggestion { display: flex; justify-content: space-between; gap: 12px; padding: 6px 10px; border-radius: 6px; font-size: 14px; color: rgb(var(--color-content-primary)); cursor: pointer; }
+.connection-picker-suggestion:hover, .connection-picker-suggestion.is-highlighted { background: rgb(var(--color-accent-soft) / 60%); }
+.connection-picker-suggestion.is-unavailable { opacity: 0.45; cursor: not-allowed; }
+.connection-picker-dates { font-family: monospace; font-size: 12px; color: rgb(var(--color-card-muted)); white-space: nowrap; }
+.connection-picker-error { font-size: 13px; font-weight: 600; color: rgb(var(--color-danger-text)); }
+
+.connection-panel { display: flex; flex-direction: column; gap: 16px; }
+/* The connection on show, pinned above the chain: laid out like a row of the recent connections below it. */
+.connection-header { display: flex; align-items: center; gap: 12px; padding: 8px 10px 8px 12px; border-radius: 10px; background: rgb(var(--color-surface-card) / 70%); border: 1px solid rgb(var(--color-card-border)); }
+.connection-header-pair .net-portrait + .net-portrait { margin-left: -15px; }
+.connection-headline { flex: 1; min-width: 0; font-size: 16px; font-weight: 700; line-height: 1.3; overflow-wrap: anywhere; color: rgb(var(--color-content-primary)); }
+/* The person the camera is on carries the same amber as the thread that joins the chain. `div.` beats the card's own utilities. */
+.connection-chain div.connection-card-active { border-color: rgb(var(--color-connection)); box-shadow: 0 0 0 2px rgb(var(--color-connection)), 0 6px 20px rgb(var(--color-connection) / .18); }
+.connection-close { display: grid; place-items: center; width: 30px; height: 30px; flex-shrink: 0; border-radius: 8px; color: rgb(var(--color-content-muted)); }
+.connection-close:hover { color: rgb(var(--color-accent-text)); background: rgb(var(--color-accent-soft) / 50%); }
+.connection-close:focus-visible, .connection-link-why:focus-visible, .connection-recent-main:focus-visible::after, .connection-open-exploration:focus-visible { outline: 2px solid rgb(var(--color-accent-focus)); outline-offset: 2px; }
+.connection-chain { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.connection-link { display: flex; gap: 14px; align-items: stretch; padding: 0 0 0 28px; min-height: 56px; }
+/* The SVG is taken out of the flow so its intrinsic height cannot make the link taller than its text. */
+.connection-link-thread { position: relative; width: 3px; align-self: stretch; flex-shrink: 0; }
+.connection-link-thread svg { position: absolute; inset: 0; width: 3px; height: 100%; overflow: visible; }
+
+/* Round portraits, alone or two overlapping as a pair (the explorer's lists and the Connection tab). */
+.net-portrait { display: inline-flex; flex: none; align-items: center; justify-content: center; border-radius: 50%; overflow: hidden; font-weight: 700; border: 2px solid rgb(var(--color-surface)); box-shadow: 0 0 0 1px rgb(var(--color-border-strong)); }
+.net-portrait.is-tentative { opacity: .7; border-style: dashed; }
+.net-portrait img { width: 100%; height: 100%; object-fit: cover; object-position: top; }
+.net-pair { display: inline-flex; flex: none; }
+.net-pair .net-portrait + .net-portrait { margin-left: -11px; }
+
+.connection-link-body { flex: 1; min-width: 0; padding: 10px 0; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.connection-link-evidence { font-size: 13px; line-height: 1.5; color: rgb(var(--color-content-body)); }
+/* An amber tint over the card colour, so the pill stays solid over the stage's blurred canvas as well as on the sidebar. */
+.connection-link-why { display: inline-flex; align-items: center; padding: 3px 12px; font-size: 12px; font-weight: 700; line-height: 1.35; letter-spacing: .01em; border-radius: 9999px; cursor: pointer;
+  color: rgb(var(--color-connection-text)); border: 1px solid rgb(var(--color-connection) / 60%);
+  background: linear-gradient(rgb(var(--color-connection) / 13%), rgb(var(--color-connection) / 13%)), rgb(var(--color-surface-card));
+  transition: background-color 150ms, border-color 150ms, box-shadow 150ms; }
+.connection-link-why:hover { border-color: rgb(var(--color-connection)); box-shadow: 0 1px 6px rgb(var(--color-connection) / .25);
+  background: linear-gradient(rgb(var(--color-connection) / 26%), rgb(var(--color-connection) / 26%)), rgb(var(--color-surface-card)); }
+.connection-empty { font-size: 14px; line-height: 1.5; color: rgb(var(--color-content-muted)); }
+.connection-recent h4 { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: rgb(var(--color-content-muted)); margin-bottom: 8px; }
+.connection-recent ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.connection-recent-entry { position: relative; width: 100%; display: flex; align-items: center; gap: 12px; padding: 8px 12px; text-align: left; font-size: 14px; border-radius: 8px; color: rgb(var(--color-content-primary)); background: rgb(var(--color-surface-card) / 70%); border: 1px solid rgb(var(--color-card-border)); }
+.connection-recent-entry:hover:not(.is-busy) { background: rgb(var(--color-surface-card-hover)); border-color: rgb(var(--color-accent-border-strong)); }
+.connection-recent-entry.is-current { border-color: rgb(var(--color-accent-marker)); }
+.connection-recent-entry.is-busy { opacity: 0.6; }
+/* The main button carries the pair and the names, and its overlay makes the whole card its click target; what is positioned above it (the icon) stays separately clickable. */
+.connection-recent-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.connection-recent-main::after { content: ''; position: absolute; inset: 0; border-radius: 8px; }
+.connection-recent-main:disabled { cursor: default; }
+.connection-open-exploration { position: relative; z-index: 1; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; background: none; color: rgb(var(--color-card-muted)); cursor: pointer; transition: color 150ms; }
+.connection-open-exploration:hover:not(:disabled) { color: rgb(var(--color-content-primary)); }
+.connection-open-exploration:disabled { cursor: default; }
+.connection-recent-names { flex: 1; min-width: 0; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+/* The number of degrees is the point of an entry, so it gets the thread's amber as a pill. */
+.connection-recent-degrees { flex-shrink: 0; display: inline-flex; align-items: baseline; gap: 4px; padding: 2px 10px; border-radius: 9999px; font-size: 12px; font-weight: 700; color: rgb(var(--color-connection)); background: rgb(var(--color-connection) / 12%); border: 1px solid rgb(var(--color-connection) / 40%); }
+.connection-recent-degrees b { font-size: 15px; font-weight: 800; line-height: 1.2; }
+
+@media (prefers-reduced-motion: reduce) {
+    .connection-node-current, .gallery-current { animation: none !important; }
+}
+
+/* The sidebar leaves with a little wind-up and an elastic settle, so a connection that plays on the stage can send it away
+   without a hard cut. Opening keeps the plain ease from its utility classes. */
+#canvas-sidebar.translate-x-full { transition-duration: 650ms; transition-timing-function: cubic-bezier(.6, -.3, .3, 1.12); }
+@media (prefers-reduced-motion: reduce) {
+  #canvas-sidebar.translate-x-full { transition-duration: 150ms; transition-timing-function: ease-in-out; }
 }

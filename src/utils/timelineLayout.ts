@@ -1,4 +1,5 @@
-import { HistoricalFigure, DiscoveryCluster, ClusterPlacement } from '../types';
+import { HistoricalFigure, DiscoveryCluster, ClusterPlacement, LayoutData } from '../types';
+import type { CameraBounds } from './canvasCamera';
 import { formatYear } from './formatters';
 import { isTimelineFigureVisible } from './timelineFigures';
 import { placeClusterBars } from './discoveryClusters';
@@ -596,3 +597,14 @@ export function calculateTimelineLayout(figures: HistoricalFigure[], clusters: D
 }
 
 export type TimelineLayoutResult = ReturnType<typeof calculateTimelineLayout>;
+
+// World-space box around a figure's bar and labels, used to point the camera at it.
+// The vertical centre sits 60px below the row top, where the bar and its labels are centred.
+export function timelineFigureBounds({ figure, level }: Pick<LayoutData, 'figure' | 'level'>, startYear: number): CameraBounds {
+    return {
+        left: (figure.birthYear - startYear) * BASE_PIXELS_PER_YEAR,
+        top: level * ROW_HEIGHT + 60,
+        width: Math.max((figure.deathYear - figure.birthYear) * BASE_PIXELS_PER_YEAR, 4),
+        height: 120,
+    };
+}

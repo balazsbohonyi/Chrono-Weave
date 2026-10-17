@@ -38,6 +38,14 @@ export function parseJsonResponse(content: string): unknown {
   throw new SyntaxError('The model did not return valid JSON.');
 }
 
+// Counts the correction rounds sent because a model reply did not validate. Monotonic and process-wide:
+// a caller reads the count before and after one serial request and takes the difference. Other generations
+// running at the same time, or one that finishes after its caller gave up, can leak in, so it is a
+// best-effort diagnostic and never an input to any decision.
+let correctionRounds = 0;
+export const noteValidationRetry = (): void => { correctionRounds++; };
+export const validationRetryCount = (): number => correctionRounds;
+
 export async function generateValidatedJson<T>(
   prompt: string, generate: (prompt: string) => Promise<string>, validate: (value: unknown) => T, signal?: AbortSignal,
 ): Promise<T> {
@@ -53,6 +61,7 @@ export async function generateValidatedJson<T>(
       const detail = error instanceof Error ? error.message : 'Invalid model response.';
       if (attempt === 1) throw new Error(`The model returned unusable data after a retry: ${detail}`);
       correction = buildCorrectionPrompt(detail);
+      noteValidationRetry();
     }
   }
   throw new Error('The model did not return usable JSON.');

@@ -25,6 +25,15 @@ export const RELATIONSHIP_SUMMARY_MAX_SENTENCES = 3;
 // Refresh older positive assessments whose prose used the earlier brief style.
 export const RELATIONSHIP_NARRATIVE_VERSION = 1;
 export const DEEP_DIVE_SUMMARY_MAX_WORDS = 60;
+// Six Degrees: a chain of personal contacts moves roughly one adult lifetime
+// per link, so these limits decide which pairs are reachable at all.
+export const MAX_PATH_INTERMEDIATES = 20;
+export const MAX_RECENT_CONNECTIONS = 20;
+export const PATH_CATALOG_LIMIT = 150;
+// Canvas people whose lives fall this close to the span between the endpoints are offered as candidates.
+export const PATH_CATALOG_PADDING_YEARS = 50;
+// The whole camera reveal is capped so very long chains do not drag on; shorter ones play at their natural pace.
+export const CONNECTION_REVEAL_MAX_MS = 16000;
 export const DEEP_DIVE_SECTION_TITLES = [
   'Early Life', 'Major Achievements', 'Key Relationships', 'Historical Legacy',
 ] as const;

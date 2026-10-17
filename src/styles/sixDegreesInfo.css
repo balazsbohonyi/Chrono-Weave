@@ -1,0 +1,77 @@
+/* The Six Degrees explanation: a centred glass dialog above the explorer (180) and below tooltips (200). */
+.close-button.six-info-button.is-small { width: 26px; height: 26px; box-shadow: none; }
+.six-info-button { flex: none; }
+/* No button around it: only the icon, muted like the close X beside it. */
+.six-info-button.is-plain { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 8px; background: none; box-shadow: none; color: rgb(var(--color-content-muted)); cursor: pointer; transition: color 150ms, background-color 150ms; }
+.six-info-button.is-plain:hover { color: rgb(var(--color-accent-text)); background: rgb(var(--color-accent-soft) / 50%); }
+.stage-people .six-info-button.is-plain { pointer-events: auto; }
+.six-info-button.is-plain:focus-visible { outline: 2px solid rgb(var(--color-accent-focus)); outline-offset: 2px; }
+.six-info-link { padding: 0; border: 0; background: none; font: inherit; font-weight: 600; color: rgb(var(--color-accent-text)); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.six-info-link:hover { color: rgb(var(--color-accent-text-hover)); }
+.six-info-link:focus-visible { outline: 2px solid rgb(var(--color-accent-focus)); outline-offset: 2px; border-radius: 4px; }
+
+.sdi-backdrop { position: fixed; inset: 0; z-index: 190; display: flex; align-items: center; justify-content: center; padding: 16px;
+  background: rgb(var(--color-surface) / 60%); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); }
+.sdi-dialog { position: relative; width: 100%; max-width: 680px; max-height: min(90vh, 880px); display: flex; flex-direction: column; outline: none; color: rgb(var(--color-content-body)); }
+/* The panel clips its own corners; the close button sits outside it, over the dialog's top right corner, like the other dialogs'. */
+.sdi-panel { display: flex; flex-direction: column; min-height: 0; border-radius: 16px; border: 1px solid rgb(var(--color-border)); background: rgb(var(--color-surface)); box-shadow: 0 24px 60px rgb(var(--color-shadow) / 28%); overflow: hidden; }
+.sdi-close { position: absolute; top: -12px; right: -12px; z-index: 50; }
+.sdi-header { flex: none; padding: 22px 32px 18px; border-bottom: 1px solid rgb(var(--color-border)); background: rgb(var(--color-surface-dialog-header) / 80%); }
+.sdi-scroll { overflow-y: auto; padding: 8px 32px 32px; }
+.sdi-kicker { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: .15em; font-weight: 700; color: rgb(var(--color-accent-marker)); }
+.sdi-title { margin: 6px 0 0; font-size: 26px; line-height: 1.2; font-weight: 700; color: rgb(var(--color-content-primary)); }
+.sdi-section { margin-top: 22px; }
+.sdi-section h3 { margin: 0 0 6px; font-size: 17px; font-weight: 700; color: rgb(var(--color-content-primary)); }
+.sdi-section p { margin: 0 0 8px; font-size: 15px; line-height: 1.6; }
+
+.sdi-diagrams { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 12px 0 14px; }
+.sdi-diagrams figure { margin: 0; padding: 10px 10px 8px; border-radius: 12px; border: 1px solid rgb(var(--color-border) / 60%); background: rgb(var(--color-surface-muted) / 45%); }
+.sdi-diagrams svg { display: block; width: 100%; height: auto; }
+.sdi-diagrams figcaption { margin-top: 4px; font-size: 12px; line-height: 1.35; text-align: center; color: rgb(var(--color-content-secondary)); }
+.sdi-line, .sdi-axis { stroke: rgb(var(--color-content-muted)); stroke-width: 1.5; }
+.sdi-dot { fill: rgb(var(--color-connection) / 55%); }
+.sdi-end { fill: rgb(var(--color-connection)); }
+.sdi-label { font-size: 8px; fill: rgb(var(--color-content-secondary)); }
+
+.sdi-example { margin-top: 12px; padding: 14px 16px; border-radius: 12px; border: 1px solid rgb(var(--color-connection) / 40%); background: rgb(var(--color-connection) / 8%); }
+.sdi-example p { margin: 0 0 8px; }
+.sdi-chain { list-style: none; margin: 0 0 8px; padding: 0; }
+.sdi-chain li { display: flex; flex-direction: column; }
+.sdi-person { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 15px; color: rgb(var(--color-content-primary)); }
+.sdi-person small { font-size: 12px; color: rgb(var(--color-content-secondary)); }
+.sdi-link { margin: 4px 0 4px 6px; padding-left: 12px; border-left: 2px dashed rgb(var(--color-connection)); font-size: 13px; font-style: italic; color: rgb(var(--color-content-secondary)); }
+.sdi-section p.sdi-note { margin: 0; font-size: 13px; color: rgb(var(--color-content-secondary)); }
+
+@media (max-width: 520px) {
+  .sdi-header { padding: 18px 20px 14px; }
+  .sdi-scroll { padding: 4px 20px 24px; }
+  .sdi-diagrams { grid-template-columns: 1fr; }
+}
+
+/* The layout explanation reuses the dialog above; these are its own pieces. */
+.ldi-title { display: flex; align-items: center; gap: 10px; }
+.ldi-title svg { flex: none; color: rgb(var(--color-accent-marker)); }
+.ldi-summary { margin: 0 0 4px; font-size: 16px; line-height: 1.5; color: rgb(var(--color-content-primary)); }
+.sdi-diagrams.ldi-diagram { grid-template-columns: 1fr; margin: 14px 0 4px; }
+.ldi-diagram figure { padding: 8px 12px; }
+.ldi-diagram svg { max-height: 150px; }
+.ldi-a { --ldi: var(--color-side-a); }
+.ldi-b { --ldi: var(--color-side-b); }
+.ldi-n { --ldi: var(--color-content-muted); }
+.ldi-end { fill: rgb(var(--ldi)); stroke: rgb(var(--color-surface)); stroke-width: 2; }
+.ldi-dot { fill: rgb(var(--ldi) / 55%); }
+.ldi-line { stroke: rgb(var(--color-content-muted) / 70%); stroke-width: 1.4; }
+.ldi-axis { stroke: rgb(var(--color-content-muted)); stroke-width: 1.5; }
+.ldi-band-a { fill: rgb(var(--color-side-a) / 22%); }
+.ldi-band-b { fill: rgb(var(--color-side-b) / 22%); }
+.ldi-ring { fill: none; stroke: rgb(var(--ldi) / 55%); stroke-width: 1.5; stroke-dasharray: 3 5; }
+.ldi-column { fill: rgb(var(--ldi) / 8%); stroke: rgb(var(--ldi) / 45%); stroke-width: 1.2; stroke-dasharray: 3 5; }
+.ldi-pod { fill: rgb(var(--color-surface-muted) / 70%); stroke: rgb(var(--color-border)); stroke-width: 1.2; }
+.ldi-spine { stroke: rgb(var(--color-connection) / 45%); stroke-width: 10; stroke-linecap: round; }
+.ldi-label { font-size: 8px; font-weight: 700; fill: rgb(var(--color-content-secondary)); }
+.ldi-chips { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 10px 0 0; padding: 0; list-style: none; font-size: 13px; color: rgb(var(--color-content-secondary)); }
+.ldi-chips li { display: flex; align-items: center; gap: 8px; }
+.ldi-swatch { width: 22px; height: 14px; border-radius: 4px; border: 1px solid rgb(var(--color-border)); }
+.ldi-swatch.is-a { background: rgb(var(--color-side-a) / 40%); }
+.ldi-swatch.is-b { background: rgb(var(--color-side-b) / 40%); }
+.ldi-swatch.is-both { background: linear-gradient(90deg, rgb(var(--color-side-a) / 40%), rgb(var(--color-side-b) / 40%)); }
