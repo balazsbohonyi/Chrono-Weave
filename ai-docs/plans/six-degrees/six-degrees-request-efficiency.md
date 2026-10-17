@@ -69,7 +69,7 @@ Golden trace: the existing worlds are byte-identical. Of the three worlds added 
 ### What to look for when testing by hand
 
 Compare against the old behavior with `session.diagnostics` (or the Network tab): fewer assessment requests per search, batches near the provider's size, one discovery request per round instead of one per end, no repeated identical questions after another search added accepted neighbors, and no search aborting because one item of an assessment reply was malformed. Watch for the risks the plan named: a chain found one or two discovery rounds later than before (the fill rule's delay), lazier answers late in a 16-pair batch, and larger discovery replies.
-Source analysis: `ai-docs/guides/six-degrees-requests/optimizing-six-degrees-requests.md` (the option letters A to I below are that guide's). Its section 9 is the validation outline this plan expands.
+Source analysis: `optimizing-six-degrees-requests.md`, since deleted from `ai-docs/guides/six-degrees-requests/` (recover it from git history; the option letters A to I below are that guide's). Its section 9 was the validation outline this plan expands.
 
 ## Objective
 

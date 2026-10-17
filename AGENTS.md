@@ -1,208 +1,41 @@
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+# ChronoWeave
 
-## Project Overview
+Interactive historical timeline: AI-generated figures and events on a canvas (time on X, collision-avoiding layout levels on Y), with relationship tracing, discovery and Six Degrees of Separation chains across centuries. React 19 + Vite 6 + TypeScript; Tailwind from the CDN in `index.html`; AI through Gemini, OpenRouter or Ollama; images and descriptions from Wikipedia/Wikidata.
 
-**ChronoWeave** is an interactive historical timeline visualization app built with React, Vite, and AI-powered insights. It displays historical figures and events in an interactive canvas, with relationship tracing and contextual discovery features powered by either Google Gemini or OpenRouter APIs.
+## Commands
 
-## Quick Start Commands
+- `npm run dev` (port 3000), `npm run build`, `npm run preview`
+- Checks before calling work done: `bun test` (about a minute), `npm run typecheck`, `npm run build`.
+- Narrow year ranges (e.g. 1400-1500) make manual AI testing quick.
+- Measure performance on a production build; React dev mode inflates render cost several times.
 
-```bash
-# Install dependencies
-npm install
+## Configuration
 
-# Development server (runs on http://localhost:3000)
-npm run dev
+`.env.example` documents every variable (`PROVIDER` = `gemini` | `openrouter` | `ollama`, `API_KEY`, `MODEL`, `OLLAMA_*`). Runtime settings from the Settings dialog (`chrono_provider`, `chrono_api_key`, `chrono_model` in localStorage, read in `src/utils/providerConfig.ts`) take precedence over env files. `OLLAMA_API_KEY` stays server-side in the Vite relay (`server/ollamaRelay`) and never enters the bundle.
 
-# Production build
-npm run build
+## Architecture
 
-# Preview production build
-npm run preview
-```
+- `src/App.tsx` orchestrates canvas state and passes callbacks down; feature logic lives in `src/hooks/` (`useFigureActions`, `useConnection`, …).
+- AI providers implement `IAIService` (`src/types.ts`): `geminiService.ts`, `openRouterService.ts`, `ollamaService.ts`. Shared prompts live in `src/services/prompts.ts`, Six Degrees prompts and parsers in `connectionAI.ts`, the request queue and rate-limit backoff (`enqueueTaskWithRetry`) in `utils.ts`, JSON validation and correction rounds in `jsonResponse.ts`. Logs are prefixed `[Gemini]` / `[OpenRouter]`.
+- A new provider: implement `IAIService`, add it to `createAIService` in `src/services/aiService.ts` and to `SettingsDialog.tsx`.
+- A new category: `FigureCategory` in `types.ts`; `CATEGORY_LIST`, `CATEGORY_COLORS` and `CATEGORY_BAR_TEXT_COLORS` in `constants.ts`; `--color-category-*` in both themes of `src/styles/tokens.css`; the order in `src/utils/galleryLayout.ts`.
+- Caches: relationship explanations `chrono_rel_${sourceId}_${targetId}` and deep dives `chrono_deepdive_${id}` in localStorage, cleared per canvas by `CACHE_PREFIXES` in `src/utils/canvasHistory.ts`.
+- Docs and plans live in `ai-docs/`. The timeline layout algorithm is described in `ai-docs/guides/timeline-layout-algorithm.md` and `ai-docs/PLACEMENT_ALGORITHM.md`.
 
-### Environment Setup
+## Six Degrees
 
-Set `PROVIDER`, `API_KEY`, and optionally `MODEL` in `.env.local` (development) or `.env.production` (production). The app supports both Google Gemini and OpenRouter APIs. Settings can also be configured at runtime via the Settings dialog, which takes precedence over environment variables.
+Before changing Six Degrees (`src/services/connection*.ts`, `wikidata*`, `wikiTitles`, `portraitStore`/`portraitSize`/`wikiService` portraits, `ConnectionExplorer`, `src/components/connectionNetwork/`, `useConnection`), read `ai-docs/guides/six-degrees-internals.md`: AI operations and the Why dialog, persistence, search, Wikidata identity, portraits, explorer graph and sidebar. Update it in the same change when that behavior changes.
 
-## Architecture Overview
+Guardrails:
 
-### Project Structure
+- `tests/connectionRequestTrace.golden.json` pins the request sequence of the fake worlds. Counting and diagnostics never change batching, limits, prompts or retries; regenerate the trace only for a deliberate behavior change.
+- `SEARCH_LIMITS` is tunable, but keep the 21-link bound, AI-only assessment, cross-model reuse and explicit continuation rules.
+- The general Map, Expand, Follow a Figure, biography and relationship prompts, semantics and caches stay as they are; Six Degrees uses its own operations.
+- Legacy `chrono_path_` / `chrono_contact_` records are retired, never deleted, and never shown as new connections. Migration runs before Follow a Figure pruning.
+- Wikidata is never a `task()`: it moves no request counter, its failures never fail a search, it never re-keys ids and never modifies the canvas.
+- Portraits looked up through `portraitStore` stay there, never written back onto `ContactPerson` or `HistoricalFigure` (a canvas figure's own `imageUrl` is fine).
+- Virtualized rows have fixed heights: change `ROW_HEIGHT` / `DETAIL_ROW_HEIGHT` and `.net-vlist` together.
 
-Source code lives under `src/`:
-- `src/App.tsx` — root component and state orchestrator
-- `src/main.tsx` — application entry point
-- `src/types.ts` — shared TypeScript types and interfaces
-- `src/constants.ts` — configuration constants
-- `src/components/` — UI components
-- `src/services/` — AI and data-fetching services
-- `src/contexts/` — React context providers (e.g. `EnvironmentContext.tsx`)
-- `src/hooks/` — custom React hooks (e.g. `useFigureActions.tsx`)
-- `src/utils/` — utility functions (`colors.ts`, `formatters.ts`)
-- `src/styles/` — global CSS (`globals.css`)
+## Git commits
 
-Documentation and plans live under `ai-docs/plans/`.
-
-### Core Layers
-
-1. **UI Layer** (`src/App.tsx` + `src/components/`)
-   - Main orchestrator managing all state and user interactions
-   - State includes: figure data, selections, search results, relationship tracing, discoveries
-   - Handles AI service switching between Gemini and OpenRouter
-
-2. **AI Service Layer** (`src/services/geminiService.ts`, `src/services/openRouterService.ts`)
-   - Both implement the `IAIService` interface defined in `src/types.ts`
-   - Core methods:
-     - `fetchHistoricalFigures()`: Generate figures for a time range
-     - `fetchRelatedFigures()`: Find relationships between figures
-     - `discoverRelatedFigures()`: Expand timeline with new related figures
-     - `fetchRelationshipExplanation()`: General relationship explanation and its existing caches. The legacy `{ contactOnly: true }` contract remains available; the new Six Degrees engine and Why action do not use it
-     - `fetchFigureDeepDive()`: Generate detailed biography/quotes
-     - `fetchConnectionPath()`: One bounded Six Degrees seed proposal; failure falls through to graph exploration
-     - `resolveFigure()`: Identify one typed name as a person, or `null`
-     - `discoverPersonalContacts()`, `assessPersonalContacts()`, `explainPersonalContact()`: Dedicated Six Degrees operations in Gemini, OpenRouter and Ollama, with provider-neutral prompts/parsers in `connectionAI.ts`. Only independently accepted contacts enter a chain; exact opponents in a named battle/campaign qualify.
-     - `testConnection()`: Validate API credentials and model availability
-
-3. **Data Fetching** (`src/services/wikiService.ts`)
-   - Fetches figure images and descriptions from Wikipedia
-   - Used for supplementing AI-generated data with real information
-
-4. **Canvas Rendering** (`src/components/TimelineCanvas.tsx`)
-   - Main visualization using canvas rendering (not SVG)
-   - Handles figure positioning in 2D space (time on X-axis, layout levels on Y-axis)
-   - Manages hover/click interactions and relationship line drawing
-   - Uses a layout algorithm to avoid bar overlaps
-
-### Key Concepts
-
-- **Figures**: Historical people or events with birth/death years and category (ARTISTS, SCIENTISTS, etc.)
-- **Relationship Tracing**: User clicks a figure to see connected figures visualized as relationship bars
-- **Discovery**: Expand the timeline by discovering new figures related to an existing one
-- **Layout Levels**: Figures are distributed across Y-axis levels using a collision-avoidance algorithm
-- **Caching**: Relationship explanations and deep dives are cached in `localStorage` using keys like `chrono_rel_${sourceId}_${targetId}`
-
-## State Management Pattern
-
-App.tsx manages most state directly with `useState`. Key state groups:
-
-- **Timeline Data**: `figures`, `config` (start/end years)
-- **Selection State**: `selectedYear`, `selectedFigures`, `highlightedFigureIds`
-- **Interaction State**: `relationshipState`, `popoverState`, `isSidebarCollapsed`
-- **Discovery State**: `discoverySourceId`, `knownRelationships`
-- **UI State**: `selectedCategories`, `isLegendOpen`, `isSettingsOpen`
-
-State updates are passed down as callbacks to child components (ControlPanel, TimelineCanvas, Sidebar, etc.).
-
-## Important Implementation Details
-
-### Figures Generation
-- Figures are generated by AI in chunks (per century) for the requested time range
-- Each figure has a unique `id` based on name, year range, and index
-- The `shortDescription` field is AI-generated during fetch and may be different from Wikipedia data
-
-### Relationship Discovery Process
-1. User hovers over a figure and clicks the action bar's "Discover" button
-2. App filters existing figure names to avoid duplicates
-3. AI generates new related figures with birth/death years
-4. New figures are added to the main figures array
-5. Relationship state updates to show connections between source and newly discovered figures
-6. Toast notification lists newly discovered figures
-
-### Layout Algorithm
-- Figures are positioned on a 2D canvas to avoid overlaps
-- Y-position (level) is determined by collision detection
-- `figureLevels` Map tracks figure ID → layout level for sidebar sorting
-- When building a new timeline, all layout levels are recalculated
-
-### Performance Considerations
-- Figure details (images, descriptions) are fetched lazily via `fetchBatchFigureDetails()`
-- Relationship explanations are cached in localStorage to avoid redundant AI calls
-- Canvas rendering uses context for performance (not re-rendering React components for every figure)
-- Portraits: figures store 400px Wikimedia thumbnails; every display passes the URL through `sizedPortrait(url, boxCssPixels, zoom)` (`src/utils/portraitSize.ts`), which asks Wikimedia for the smallest standard width covering the box at the current zoom and pixel ratio (never wider than stored). Six Degrees contact portraits are fetched at 120px directly. Hundreds of oversized pictures overflow the browser's decoded-image cache and make every repaint decode them again.
-- Portrait lookups are remembered across page loads: every portrait goes through `fetchBatchWikipediaImages` (`wikiService.ts`), which asks `portraitStore()` (`src/services/portraitStore.ts`, IndexedDB database `chronoweave-portraits`, key `width|name`, a URL or a miss, memory-only where there is no IndexedDB) first and sends only the unknown or expired names to Wikipedia (hits expire after 90 days, misses after 7), in chunks of 50, three at a time. Only a real answer is stored: a failed request, a non-OK status, a reply without pages or an unreachable Wikidata fallback is "unanswered" (`askWikipediaForImages` returns `answered`) and is asked again next time, never recorded as "no picture". The widths are kept apart (400 canvas, 120 Six Degrees). `fetchBatchFigureDetails`, `fetchWikipediaImagesByName` and `loadNetworkPortraits` take an `onStored` callback that hands over the remembered portraits before the newcomers are answered (the gallery, sidebar, Connection tab and explorer hooks use it), and a figure that already has `imageUrl` is not looked up. The URLs are deliberately not stored on `ContactPerson` or `HistoricalFigure`: that would need whitelisting in `recoverKnowledge`, surviving `merge` and `mergeResolvedIdentity`, and writing the canvas back on every portrait. Tests inject a store with `setPortraitStore`.
-- Who gets a Six Degrees face (`portraitSubjects`, `connectionNetworkView.ts`): AI-supported people by name, as above; an unverified person never by name (a namesake's face could land on a person the search does not trust), except when Wikidata has confirmed who they are, i.e. they have a `qid` (see the identity note): then the subject carries the `qid` and `fetchPortraitsByQid` (`wikiService.ts`; one SPARQL `wdt:P18` query per 50 items, `portraitsByQid` in `wikidataService.ts`) gives the picture Wikidata holds for exactly that item, remembered in the same store as `qid:Q…` at 120px. Unverified people without a `qid` (Wikidata not asked yet, or no answer) and items without a P18 keep the dashed initials disc (`NetworkPortrait` with `tentative`, which only styles: whether a url exists is decided by the subjects). The Inspector's "Unverified around this person" rows show it too, and `ConnectionExplorer` offers the selected person's unverified contacts even when they are not drawn. `loadNetworkPortraits` keeps the two routes apart (`id` vs `id|qid` in its cache), so a person who becomes AI-supported is then looked up by name.
-
-## Component Structure
-
-All components are in `src/components/`:
-
-- **TimelineCanvas**: Main visualization, canvas-based rendering
-- **ControlPanel**: Top controls (year range, search, settings, legend toggle)
-- **Sidebar**: Left panel showing figures for selected year or global list
-- **RelationshipPopover**: Modal showing relationship/deep-dive information
-- **SettingsDialog**: Configure AI provider (Gemini vs OpenRouter)
-- **Legend**: Category filter legend (toggles category visibility)
-- **Toast**: Notification system
-- **ActionBar**: Hover toolbar with Discover/Trace/Inspect buttons
-- **FloatingToolbar**: Secondary interaction toolbar
-- **ConnectionExplorer**: Six Degrees live contact-network overlay (graph, inspector, footer)
-- **SixDegreesInfo**: "?" button and dialog explaining Six Degrees of Separation and this app's twist (chains across centuries)
-- **LayoutInfo**: the "?" button (last in the explorer graph's bottom-left toolbar) opens a dialog explaining the layout in use: timeline strips and placement by mid-life, rings, columns, categories, corridor, free. `LAYOUT_INFO` holds the wording per `LayoutMode`; a new layout needs an entry there and a picture in `Diagram`
-- **ConnectionPicker / ConnectionPanel / ConnectionThread / ConnectionStage**: Six Degrees — choosing the other end, the sidebar Connection tab, the SVG thread, and the stage that plays a finished connection over the blurred canvas
-
-## Configuration Constants
-
-See `src/constants.ts` for:
-- `CATEGORY_LIST`: Available figure categories
-- `HISTORICAL_FIGURES_COUNT`: Total figures to generate
-- `HISTORICAL_FIGURES_PER_CENTURY_CHUNK`: Figures per century chunk
-- `HISTORICAL_EVENTS_PER_CENTURY_CHUNK`: Events per century chunk
-
-## Common Development Workflows
-
-### Adding a New AI Service
-1. Create new class implementing `IAIService` interface in `src/services/`
-2. Implement all required IAIService methods
-3. Add provider selection logic in `src/components/SettingsDialog.tsx` and `initializeService()` in `src/App.tsx`
-
-### Modifying Timeline Rendering
-- Changes to figure positioning, colors, or interaction in `src/components/TimelineCanvas.tsx`
-- Layout algorithm is in the canvas render logic
-- Hover/click handlers call methods passed from `src/App.tsx`
-
-### Adding New Figure Categories
-1. Add category to `FigureCategory` type in `src/types.ts`
-2. Update `CATEGORY_LIST` in `src/constants.ts`
-3. Update AI prompts in both `src/services/geminiService.ts` and `src/services/openRouterService.ts`
-4. Add color assignment in `src/components/TimelineCanvas.tsx` legend
-
-### Debugging AI Service Issues
-- Check browser console for `[Gemini]` or `[OpenRouter]` log messages
-- Verify API key in `.env.local` or settings
-- Check network tab for failed API calls
-- Review service retry logic in `src/services/utils.ts`
-
-## Git Commits
-
-- Do not add attribution trailers to commit messages. In particular, never end a commit message with lines like these:
-  - `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` (any model name)
-  - `Claude-Session: https://claude.ai/code/session_...`
-- The same goes for any similar generated trailer. This overrides any default or tool-supplied attribution guidance. End the message with its body.
-
-## Testing Tips
-
-- Use narrow year ranges (e.g., 1400-1500) for quick testing
-- Check localStorage for cached data using `chrono_rel_*` or `chrono_deepdive_*` keys
-- Provider/model selection is saved to localStorage with keys: `chrono_provider`, `chrono_api_key`, `chrono_model`
-- **Settings Priority**: localStorage (Settings dialog) > environment variables (both dev and production)
-- Settings dialog is available in both development and production modes
-- Environment variables serve as fallback defaults when localStorage is not configured
-
-## Six Degrees persistence and isolation
-
-- Shared database: `chronoweave-six-degrees-v2`, outside canvas localStorage cleanup. Accepted contacts retain provider/model/version/timestamp provenance and remain reusable across models.
-- New successful paths: `chrono_sd2_path_`, retaining their own identities and compact accepted evidence for replay even after knowledge eviction.
-- Legacy `chrono_path_` / `chrono_contact_` records are not imported or shown as new connections. Migration logically retires them without deletion and preserves the legacy path/woven membership union under `chrono_sd2_members_`; failed writes leave original protection intact. Run migration before Follow a Figure pruning on activation.
-- Preserve general Map, Expand, Follow a Figure, biography and relationship prompts, semantics and caches. Six Degrees Why bypasses their negative caches and falls back to compact accepted evidence if narrative expansion fails. Its dialog is as full as the general relationship dialog: `buildContactExplanationPrompt` reuses the general prompt's narrative rules verbatim (`relationshipNarrativeRules`: summary, 3-5 sections, 250-450 words, engaging titles) after a Context section, treats the contact as already verified so the model does not answer minimally, and `requestContactExplanation` asks once more when the answer has fewer than 3 narrative sections or about 160 words (a thin second answer is still used), the header cards load their Wikipedia portrait and biography alongside the narrative, and `recordedContactSection` always adds the stored evidence (the text the Connection tab shows beside the link) as the first section.
-- Explorer graph: on the Timeline and Free layouts `NetworkLayout.keepClear` keeps everyone out of a free zone around each endpoint (3 endpoint radii plus the person's own radius and `clearance`; vertical push on the time line, radial in Free; zones shrink together, to a floor, when the endpoints are close). The arranged layouts have none. The footer shows `NetworkView.sides` (counts with a hover tooltip, hint text in the middle column, buttons on the right), the accepted people nearer to each endpoint (same rule as node colours, endpoints excluded, filters and folds ignored).
-- Explorer performance: the graph layout runs in a worker (`src/workers/networkLayout.worker.ts` hosting `NetworkLayout` through `networkLayoutHost.ts`); `RemoteNetworkLayout` mirrors it on the main thread (people, time axis, optimistic pins, latest frame, the dragged person at the pointer) behind `NetworkLayoutHandle`, one frame request in flight, and `createNetworkLayout` falls back to an in-thread `NetworkLayout` where there is no `Worker` (tests). People without a position yet stay hidden. `NetworkGraph` renders lines and people as memoized layers (camera, clock and axis changes do not re-render them) and paints positions directly; edges are `<path>`s (one `d` each). From `LARGE_DRAWING` drawn items the `is-large` class turns off the opacity fade on dimming: those per-element SVG transitions were what made selecting someone stutter. Measure performance on a production build, not the dev server (React dev mode inflates render cost several times).
-- Explorer lists: the People / Contacts tabs of `NetworkInspector` are windowed, since they hold hundreds or thousands of rows. `buildListRows` (`inspectorRows.ts`) turns a tab into one flat array of rows (person, contact, group header, empty message; the Unverified groups are header rows that fold their members in and out, `openGroups`, and only an open group is sorted and listed) and `VirtualList` puts only the rows near the viewport in the document (rows `position: absolute` at a summed offset, `overscan` rows beyond the viewport, `aria-setsize`/`aria-posinset` on each `<li>`, natural Tab order). Heights are fixed per kind (`ROW_HEIGHT`, the 6px gap included) instead of measured, so scrolling does no layout reads and nothing jumps; the text is clamped to fit (one line, two for a contact's "A ↔ B", full text in the button's `title`). Changing a row's look means changing `ROW_HEIGHT` and `.net-vlist` together. The list returns to the top when `resetKey` (exploration, tab, search) changes; otherwise the row at the top stays where it is when rows are inserted above it (people found while a search runs). A hidden scroller (the selected person's detail view, the closed bottom sheet) measures zero and keeps its last position until the `ResizeObserver` sees it again. The person detail view is windowed the same way, with two tabs (`DetailTab`: AI-supported / Unverified; a person who is not AI-supported has only the second, `detailTabFor`; each person starts on the first) instead of two lists one below the other: `buildDetailRows`, `DETAIL_ROW_HEIGHT`, scroller `.net-detail-scroll`, `resetKey` includes the selected person and the tab.
-- Legend: every chip is a switch, the AI-supported one included (`showAccepted` in `buildNetworkView`, default on). Off, the graph draws the endpoints, the people and contacts of the chips that are on, whatever is selected, and the lit chain (`highlightChain` or `chain`: a just-found or solved connection) with its people; the inspector's lists, counts and side counts do not change with it. A found or solved connection adds a lime "Connection" chip, also a switch (`showChain`, default on, reset per exploration): off, the chain is no longer lit, dimming the rest or kept drawn when the AI-supported contacts are off, and the graph reads like an ordinary exploration. While the chain is lit in a solved connection the AI-supported swatch is neutral (`is-neutral`, as the faded accepted lines are); otherwise it is amber like the lines.
-- Timeline layout: a person stands at the middle of their lifetime (`xOf(year)`, a soft pull) and `keepInLife` (after every `tick`) never lets them leave the lifetime: each `LayoutInput` carries `reach`, half the lifespan in years, and x is held within `year ± reach` while the crowd makes room above and below instead. The person being dragged is free; endpoints are fixed. People who leave the graph reheat the time line and the free layout too, so whoever they had pushed aside goes back.
-- Clicking lines: `edgeDrawOrder` (`connectionNetworkView.ts`) draws the lines faded by a selection first, then the focused ones (a selected person's lines, the selected contact), the lit chain last of each, so where lines cross a click lands on the one on top, the one being looked at; those lines also have a wider hit area (`.net-edge-hit`). People are drawn over all lines. Panning: a drag that starts on a line pans the canvas like one on empty space (lines cover a crowded graph); the pointer is captured only once it has moved past `DRAG_SLOP`, because a captured pointer would swallow the click that selects the line, and a click on a line never clears the selection. People and the "+n" badges still take their own gestures.
-- Explorer sidebar navigation: Back always returns to the previous step. Opening a contact from a person's lists pushes the person (with the detail tab and scroll the reader had) onto `ConnectionExplorer`'s `history` (`selectionHistory.ts`: `pushStep`, `backLabel`); selecting on the graph or clearing starts the history over. `back()` pops it (re-selects the person, bumps `restored` so `NetworkInspector` reopens their list on the same tab and `VirtualList` at the same scroll row), and with nothing to pop clears the selection (main lists: their tab and search persist, the scroll is kept by `VirtualList` across being hidden). The button says where it goes (`← Alpha`, `← People`, `← Contacts`) and Esc does the same step before it clears a search, un-maximizes or closes; the sheet's × still clears everything. The top of the sidebar is kept compact so the lists get the height: one stats line, the hint as the tooltip of a "?", the endpoints as two chips, a small person head.
-- Saved sessions: a checkpoint never refuses a long search. `fitSession` cuts one over `KNOWLEDGE_LIMITS.sessionPeople`/`sessionPairs` (5000/12000) down to fit, keeping endpoints, the accepted network, time, rounds and counters and dropping blocked, then proposed, then unresolved contacts (and people with none left) first; before that, sessions over 1024 people / 4096 contacts silently stopped saving and reopening showed an older copy. The running session carries a transient `saveIssue` (`'trimmed'`, or `'failed'` when saving worked before but the write failed), shown as a warning in the explorer's status area and never saved.
-- Reopening a made connection: the icon on a Recent connections card (and on Paused explorations, where the whole card opens it too) calls `useConnection.openSavedExploration`, which uses `finishedExploration` (the saved search of the pair when the store still holds every link of the chain, otherwise a small one rebuilt from the saved path's `identityIds`/`people`/`contacts`). The explorer opens with `solved` (not `success`): the whole network is shown and explorable, nothing is dimmed or framed, the degrees badge replaces the arrow between the endpoint portraits, Reveal replaces the phase text in the header and plays the connection on the canvas (`revealSolved`), the search buttons are gone, and `chain` forces which route is the solved one. Its edges and rings are lime (`--color-chain-path`), also with the lines hidden (then only the chain's lines are drawn); with the lines shown every other line recedes to 30% (`is-solved`); the just-found `success` state keeps its centred banner, dimming and framing, with the same lime.
-- Search leans on time gaps: `temporalGap` (connectionGraph.ts) is the smallest distance in years between a person each endpoint's side has reached, when no pair from the two sides overlaps in time (null otherwise: then a contact, not a period, is missing). `selectFrontier` puts the people nearest that gap first (within 30 years of the best, expanded fewer than 3 times, nearest first), then rotates as before; with a gap of 40+ years `findConnection` also passes `gap: { fromYear, toYear }` to `discoverPersonalContacts`, and `buildContactDiscoveryPrompt` adds a preference for contacts whose lives reach into that period (never a reason to invent one). Per-request cost and the golden request trace are unchanged by it; the fake worlds never exercise it, `tests/connectionGap.test.ts` does.
-- Defaults in `SEARCH_LIMITS` are tunable; keep the selected 21-link bound, AI-only assessment, cross-model reuse and explicit continuation rules intact. Full tests, typecheck/build and T3 preview workflows are documented in the refactor plan.
-- Request accounting: `ConnectionSession.diagnostics` carries optional counters, absent in sessions saved before them and whitelisted again in `recoverSession`. Per segment: `requests` by kind (`seed`, `direct` = the endpoint check's assessment request, `assess`, `discover`, `identity`; they sum to `tasks`), `assessBatches` and `discoverSources` (sizes per request, in order), `pairAsks` by reason (`fresh`, `focused`, `contextChange`) and `validationRetries` (best-effort correction rounds, a delta of the counter in `jsonResponse.ts` around `task()`); `total` is the whole session. Counting must never change batching, limits, prompts or retries: `tests/connectionRequestTrace.golden.json` pins the request sequence of the fake worlds; change it only for a deliberate behavior change.
-- Wikidata identity (`src/services/wikidataService.ts`, `wikiTitles.ts`): a person entering the store is resolved to a Wikidata item: the name as a Wikipedia title (redirect-aware, so "Robert Oppenheimer" and "J. Robert Oppenheimer" are one item), else `wbsearchentities`; the statements come from one SPARQL query per 50 QIDs (one row per statement; SPARQL numbers BCE years astronomically, `historicalYear` converts to the app's no-year-zero convention). A QID is accepted only for a human whose Wikidata years are within `DUPLICATE_DATE_TOLERANCE_YEARS` (10) of the proposed ones (or, when one of the two years is within `NEAR_MATCH_YEARS` (2), the other within `NEAR_MATCH_TOLERANCE_YEARS` (25): a model that got one end of a life wrong, such as Pierre Bourdieu as 1919 instead of 1930, is still the same person; a namesake would have to die in the same year too; a miss recorded before `IDENTITY_RULES_UPDATED_AT` is asked again at once) and with at least one trustworthy year (`acceptIdentity`: deprecated and coarser-than-year statements ignored, preferred rank wins, statements that still disagree are settled by the year nearest the proposed one, a human with no death statement is alive and dies this year); anything else leaves the person exactly as the model gave them. `ContactPerson` gains `qid`, `variants` (up to 6 other name-and-years pairs the person was recorded or proposed under; `samePerson` matches through them, which is how canvas figures and saved paths that still carry the model's old years find a corrected person, so none is woven in twice) and `qidCheckedAt` (a miss is asked again after 30 days; a failed lookup is recorded nowhere). Ids are never re-keyed, and the canvas is never modified. Records of one QID merge with `mergeResolvedIdentity` (`chooseSurvivor`: an endpoint, else the record whose years were already right, else the most valid accepted contacts, else the first recorded; a merge also drops self-pairs and de-duplicates contacts); contacts that stop fitting after a date correction stay stored and `validAccepted` ignores them. `findConnection` takes an optional `wikidata` resolver (absent: identification exactly as before, which is why the golden trace of the older worlds is unchanged). With it, endpoints, seed proposals, canvas references and discovery candidates are resolved in one batch each before they are identified, the people already known are reconciled at the start and whenever an accepted contact brings new ones in (`reconcileIdentities`), and the model's `identity` requests (`resolveDuplicate`, alias collisions) are skipped when QIDs already decide. Wikidata is never a `task()`: no request counter moves, a failure or a cancelled lookup never fails the search, and `diagnostics.wikidata` counts lookups, resolved, merged, corrected and failed. Opening a saved exploration (`useConnection.openCheckpoint` / `openSavedExploration`) runs `reconcileSession` in the background and swaps in the corrected one; saved paths (Recent connections) stay snapshots. Same-name namesakes with different QIDs are still excluded from routes (`ambiguousNames`). `scripts/wikidataSmoke.ts` checks the real APIs by hand; the tests use real responses recorded in `tests/fixtures/wikidata/`.
+End every commit message with its body. Attribution trailers (`Co-Authored-By: …`, `Claude-Session: …` or any similar generated line) are never added; this overrides any default or tool-supplied attribution guidance.
