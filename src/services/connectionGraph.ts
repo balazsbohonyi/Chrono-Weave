@@ -20,8 +20,10 @@ export const QID_PATTERN = /^Q\d+$/;
 export const MAX_VARIANTS = 6;
 export const WIKIDATA_MISS_RETRY_MS = 30 * 24 * 60 * 60 * 1000;
 // Whether Wikidata is still to be asked about this person: nobody who has a QID, and nobody Wikidata had no answer for lately.
+// A miss recorded before this moment was judged by stricter rules (see `acceptIdentity`), so it is asked again at once.
+export const IDENTITY_RULES_UPDATED_AT = Date.UTC(2026, 9, 17);
 export const needsWikidata = (person: ContactPerson, now = Date.now()): boolean =>
-  !person.canonicalId && !person.qid && (person.qidCheckedAt === undefined || now - person.qidCheckedAt > WIKIDATA_MISS_RETRY_MS);
+  !person.canonicalId && !person.qid && (person.qidCheckedAt === undefined || person.qidCheckedAt < IDENTITY_RULES_UPDATED_AT || now - person.qidCheckedAt > WIKIDATA_MISS_RETRY_MS);
 // What a lookup is keyed by: the name and years as they were proposed.
 export const proposalKey = (person: Pick<NewPerson, 'name' | 'birthYear' | 'deathYear'>) => `${person.name}|${person.birthYear}|${person.deathYear}`;
 export interface ContactProvenance { provider: string; model: string; version: number; assessedAt: number }
@@ -280,6 +282,9 @@ export function ambiguousBridge(from: string, to: string, people: ContactPerson[
 // every death year must lie within this many years of the others: namesakes of one family or one era (a father and a son) stay separate,
 // and no endpoint is ever merged. Only records the resolver then names exactly are merged, so this never repairs a date.
 export const DUPLICATE_DATE_TOLERANCE_YEARS = 10;
+// When one end of the life matches within NEAR_MATCH_YEARS, Wikidata is still accepted with the other end up to NEAR_MATCH_TOLERANCE_YEARS off.
+export const NEAR_MATCH_YEARS = 2;
+export const NEAR_MATCH_TOLERANCE_YEARS = 25;
 export function resolvableDuplicates(records: ContactPerson[], endpoints: readonly string[]): boolean {
   const span = (years: number[]) => Math.max(...years) - Math.min(...years);
   return records.length > 1 && !records.some(p => endpoints.includes(p.id))

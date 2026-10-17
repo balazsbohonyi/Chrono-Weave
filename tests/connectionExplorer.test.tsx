@@ -221,3 +221,15 @@ test('the graph offers a bare maximize icon that hides the side panel, and start
   assert.match(css, /\.connection-explorer-body\.is-maximized\s*\{\s*grid-template-columns:\s*minmax\(0,\s*1fr\)/);
   assert.match(css, /\.connection-explorer-body\.is-maximized\s*>\s*\.connection-explorer-inspection\s*\{\s*display:\s*none/);
 });
+
+test('the AI-supported legend chip is a switch like the others; a solved connection shows it neutral, with a lime chip for the chain', () => {
+  const session = build(people => [{ from: people[0].id, to: people[2].id, status: 'accepted', claim: '', assessment: { pair: [people[0].id, people[2].id], verdict: 'accepted', interactionType: 'meeting', evidence: 'They met.', provenance } },
+    { from: people[2].id, to: people[1].id, status: 'accepted', claim: '', assessment: { pair: [people[2].id, people[1].id], verdict: 'accepted', interactionType: 'meeting', evidence: 'They met.', provenance } }], true);
+  const legend = (markup: string) => markup.slice(markup.indexOf('aria-label="Contact filters"'), markup.indexOf('</div>', markup.indexOf('aria-label="Contact filters"')));
+  const plain = legend(render(session));
+  assert.match(plain, /<button type="button" aria-pressed="true" class="net-chip is-accepted  is-on">/);
+  assert.doesNotMatch(plain, /is-neutral|is-chain/);
+  const solved = legend(render(session, { solved: { degrees: 2 }, chain: [session.people[0].id, session.people[2].id, session.people[1].id], onReveal: () => {} }));
+  assert.match(solved, /class="net-chip is-accepted is-neutral is-on"/);
+  assert.match(solved, /<button type="button" aria-pressed="true" class="net-chip is-chain is-on"><i aria-hidden="true"><\/i>Connection<\/button>/);
+});

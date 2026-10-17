@@ -18,11 +18,13 @@ export type LayoutMode = 'time' | 'free' | 'cluster' | 'columns' | 'category' | 
 // endpoint keeps that out as well.
 export interface LayoutInput {
   id: string; year: number; endpoint: 0 | 1 | null; radius: number; clearance?: number;
+  // How many years either side of `year` (the middle of the lifetime) are still inside it: on the time line a person is kept within them.
+  reach?: number;
   side?: Side; distance?: number | null; parent?: string | null; category?: string; spine?: number | null;
 }
 export interface LayoutLinkInput { a: string; b: string }
 export interface LayoutNode extends SimulationNodeDatum {
-  id: string; year: number; endpoint: 0 | 1 | null; radius: number; clearance: number; side: Side; distance: number | null; parent: string | null;
+  id: string; year: number; endpoint: 0 | 1 | null; radius: number; clearance: number; reach: number | null; side: Side; distance: number | null; parent: string | null;
   category: string; spine: number | null;
 }
 // The round space kept free around an endpoint on the time line and in the free layout.
@@ -667,14 +669,14 @@ export class NetworkLayout {
     for (const input of inputs) {
       const existing = this.nodes.get(input.id);
       const side = input.side ?? 'none', distance = input.distance ?? null, parent = input.parent ?? null, category = input.category ?? '', spine = input.spine ?? null;
-      const clearance = input.clearance ?? 0;
+      const clearance = input.clearance ?? 0, reach = input.reach ?? null;
       if (existing) {
         regrouped ||= existing.side !== side || existing.distance !== distance || existing.parent !== parent || existing.category !== category || existing.spine !== spine
           || existing.radius !== input.radius;
-        Object.assign(existing, { year: input.year, radius: input.radius, clearance, endpoint: input.endpoint, side, distance, parent, category, spine });
+        Object.assign(existing, { year: input.year, radius: input.radius, clearance, reach, endpoint: input.endpoint, side, distance, parent, category, spine });
         continue;
       }
-      this.nodes.set(input.id, { id: input.id, year: input.year, endpoint: input.endpoint, radius: input.radius, clearance, side, distance, parent, category, spine });
+      this.nodes.set(input.id, { id: input.id, year: input.year, endpoint: input.endpoint, radius: input.radius, clearance, reach, side, distance, parent, category, spine });
       fresh.add(input.id);
       added = true;
     }
@@ -702,7 +704,8 @@ export class NetworkLayout {
     if (crowd || (firstPeople && added)) this.seat(fresh);
     // People leaving re-plan an arranged layout as much as people arriving do (a legend chip switched off leaves the pods, rings or
     // columns that remain partitioned anew), so everybody who stays is pushed toward the new places, not left at rest on the old ones.
-    else if (added || ((regrouped || removed) && this.arranged)) this.reheat(this.arranged ? 0.55 : 0.35);
+    // On the time line and in the free layout they leave room: whoever they had pushed aside (off its year) goes back, instead of staying where it was left.
+    else if (added || removed || (regrouped && this.arranged)) this.reheat(this.arranged ? 0.55 : 0.35);
     this.emit();
   }
 
@@ -719,7 +722,18 @@ export class NetworkLayout {
   }
 
   // One step of the simulation, then everybody is put back out of the endpoints' free zones.
-  private tick() { this.simulation.tick(); this.keepClear(); }
+  private tick() { this.simulation.tick(); this.keepClear(); this.keepInLife(); }
+
+  // On the time line the place along the axis is a year, so nobody drifts (pushed by the crowd or pulled by a contact) out of the lifetime
+  // they stand for: at its edge they stop, and the crowd makes room above or below instead. The person being dragged goes where the pointer does.
+  private keepInLife() {
+    if (this.mode !== 'time') return;
+    for (const node of this.nodes.values()) {
+      if (node.endpoint !== null || node.reach === null || node.x === undefined || node.fx != null || this.dragging === node.id) continue;
+      const middle = this.xOf(node.year), room = node.reach * this.pixelsPerYear;
+      if (node.x < middle - room) { node.x = middle - room; node.vx = 0; } else if (node.x > middle + room) { node.x = middle + room; node.vx = 0; }
+    }
+  }
 
   // Runs to rest in one go. Used for reduced motion and by the tests.
   settle(maxTicks = 400) {

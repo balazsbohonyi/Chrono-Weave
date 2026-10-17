@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  applyWikidata, canvasPerson, chooseSurvivor, figurePerson, identifyPerson, needsWikidata, proposalKey, reconcileIdentities, samePerson, validAccepted, WIKIDATA_MISS_RETRY_MS,
+  applyWikidata, canvasPerson, chooseSurvivor, figurePerson, identifyPerson, IDENTITY_RULES_UPDATED_AT, needsWikidata, proposalKey, reconcileIdentities, samePerson, validAccepted, WIKIDATA_MISS_RETRY_MS,
   type ConnectionSession, type ContactAssessment, type ContactKnowledge, type ContactPerson,
 } from '../src/services/connectionGraph';
 import type { WikidataOutcome } from '../src/services/wikidataService';
@@ -189,4 +189,10 @@ test('applying an identity that changes nothing adds no variant', () => {
   assert.equal(applyWikidata(p, J), false);
   assert.equal(p.variants, undefined);
   assert.equal(p.qid, 'Q132537');
+});
+
+test('a miss recorded before the identity rules were widened is asked again at once, a later one only after a month', () => {
+  const { wrong } = oppenheimers();
+  assert.equal(needsWikidata({ ...wrong, qidCheckedAt: IDENTITY_RULES_UPDATED_AT - 1 }, IDENTITY_RULES_UPDATED_AT + 1000), true);
+  assert.equal(needsWikidata({ ...wrong, qidCheckedAt: IDENTITY_RULES_UPDATED_AT + 1 }, IDENTITY_RULES_UPDATED_AT + 1000), false);
 });

@@ -4,7 +4,7 @@ import { readNetworkViewPrefs, saveNetworkViewPrefs } from '../../utils/networkV
 import { axisTicks, podTitle, podTitleSize, POD_TITLE_MAX_SIZE, TICK_MIN_SPACING, type CategoryGuide, type ColumnGuide, type CorridorGuide, type LayoutMode, type OrbitRing } from '../../services/connectionNetworkLayout';
 import type { NetworkLayoutHandle } from '../../services/remoteNetworkLayout';
 import {
-  closestApproachLabel, describeSide, initials, STATUS_LABELS, truncateName, type NetworkEdge, type NetworkFold, type NetworkNode, type NetworkSelection, type NetworkView,
+  closestApproachLabel, describeSide, edgeDrawOrder, initials, STATUS_LABELS, truncateName, type NetworkEdge, type NetworkFold, type NetworkNode, type NetworkSelection, type NetworkView,
 } from '../../services/connectionNetworkView';
 import { formatYear } from '../../utils/formatters';
 import { createWheelClassifier } from '../../utils/wheelGesture';
@@ -42,6 +42,8 @@ interface Props {
   success: { degrees: number } | null;
   // A connection that was already made, reopened to explore: nothing is dimmed or framed and its chain is lime, lines on or off (Reveal is in the header).
   solved?: { degrees: number } | null;
+  // Whether the chain of a found or solved connection is lit (lime); off, it looks like any other AI-supported contacts.
+  showChain?: boolean;
   onReveal: () => void;
   // Set when the search stopped on its own limit and can be carried on from where it is.
   resume?: { onResume: () => void; reason: 'time' | 'work' } | null;
@@ -188,7 +190,7 @@ const LARGE_DRAWING = 250;
 // so the simulation never re-renders the explorer. The camera is a transform over screen-sized content.
 const NetworkGraph: React.FC<Props> = ({
   view, endpointNames, nameOf, layout, kick, pinned, mode, onModeChange, size, onSize, selection, onSelect, portraits, narrow, reducedMotion,
-  success, solved = null, onReveal, resume = null, reveal, onPinsChange, onToggleFold, legend, maximized, onToggleMaximize, onOpenLayoutInfo,
+  success, solved = null, showChain = true, onReveal, resume = null, reveal, onPinsChange, onToggleFold, legend, maximized, onToggleMaximize, onOpenLayoutInfo,
 }) => {
   const uid = useId().replace(/:/g, '');
   const svg = useRef<SVGSVGElement>(null);
@@ -363,13 +365,17 @@ const NetworkGraph: React.FC<Props> = ({
 
   // One finger or mouse pans the background, two fingers pinch; a tap on empty space clears the selection.
   const pointers = useRef(new Map<number, Point>());
-  const pan = useRef<{ camera: Camera; origin: Point; moved: boolean; pinch?: { distance: number } } | null>(null);
+  // `fromLine`: the gesture began on a line, which is still a click (select it) unless the pointer moves, and then it pans.
+  const pan = useRef<{ camera: Camera; origin: Point; moved: boolean; fromLine?: boolean; pinch?: { distance: number } } | null>(null);
   const onBackgroundDown = (event: React.PointerEvent<SVGSVGElement>) => {
-    if ((event.target as Element).closest('[data-net-interactive]')) return;
+    // People and the "+n" badges take the gesture (a person is dragged). A line takes the click only: lines cover a crowded graph, so a drag that
+    // starts on one still has to pan, and the pointer is captured for it only once it has moved (a captured pointer would swallow the click).
+    const target = event.target as Element, onLine = !!target.closest('[data-edge]');
+    if (target.closest('[data-net-interactive]') && !onLine) return;
     pointers.current.set(event.pointerId, local(event));
-    capture(event.currentTarget, event.pointerId);
+    if (!onLine) capture(event.currentTarget, event.pointerId);
     const points = [...pointers.current.values()];
-    pan.current = { camera: cameraRef.current, origin: points[0], moved: pan.current?.moved ?? false,
+    pan.current = { camera: cameraRef.current, origin: points[0], moved: pan.current?.moved ?? false, fromLine: onLine && points.length === 1,
       pinch: points.length > 1 ? { distance: Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y) } : undefined };
   };
   const onBackgroundMove = (event: React.PointerEvent<SVGSVGElement>) => {
@@ -384,14 +390,17 @@ const NetworkGraph: React.FC<Props> = ({
       return;
     }
     const at = points[0];
-    if (Math.hypot(at.x - current.origin.x, at.y - current.origin.y) > DRAG_SLOP) current.moved = true;
+    if (!current.moved && Math.hypot(at.x - current.origin.x, at.y - current.origin.y) > DRAG_SLOP) {
+      current.moved = true;
+      if (current.fromLine) capture(event.currentTarget, event.pointerId);
+    }
     if (current.moved) { userMoved.current = true; apply({ ...current.camera, x: current.camera.x + at.x - current.origin.x, y: current.camera.y + at.y - current.origin.y }); }
   };
   const onBackgroundUp = (event: React.PointerEvent<SVGSVGElement>) => {
     pointers.current.delete(event.pointerId);
     const current = pan.current;
     if (!pointers.current.size) {
-      if (current && !current.moved && event.type === 'pointerup') onSelect({});
+      if (current && !current.moved && !current.fromLine && event.type === 'pointerup') onSelect({});
       pan.current = null;
     } else if (current) {
       const [remaining] = [...pointers.current.values()];
@@ -436,7 +445,7 @@ const NetworkGraph: React.FC<Props> = ({
 
   const successChain = success && view.chain;
   // The chain of a solved connection stays drawn, lime, even with the lines off (only the chain's own lines are kept then, like the lit chain of a search that just succeeded).
-  const coloredChain = successChain || (solved ? view.chain : null);
+  const coloredChain = showChain ? successChain || (solved ? view.chain : null) : null;
   const chainNodes = useMemo(() => coloredChain ? new Set(coloredChain.nodeIds) : null, [coloredChain]);
   const chainEdges = useMemo(() => coloredChain ? new Set(coloredChain.edgeIds) : null, [coloredChain]);
   const [bandA, bandB] = [0, 1].map(index => view.nodes.find(node => node.endpoint === index)?.person);
@@ -448,9 +457,10 @@ const NetworkGraph: React.FC<Props> = ({
   const drawnEdges = useMemo(() => {
     const chainEdge = (edge: NetworkEdge) => !!chainEdges?.has(edge.id);
     const shownEdges = showLines ? view.edges : view.edges.filter(edge => edge.id === selection.edge || chainEdge(edge));
-    // A colored chain is drawn last, over the crowd of other lines.
-    return chainEdges ? [...shownEdges.filter(edge => !chainEdge(edge)), ...shownEdges.filter(chainEdge)] : shownEdges;
-  }, [view.edges, showLines, selection.edge, chainEdges]);
+    // The faded lines go underneath, then the rest, and a colored chain is drawn last, over the crowd: a click where lines cross lands on the
+    // one on top, which is the one the reader is looking at (a selected person's lines, not the faded ones behind them).
+    return edgeDrawOrder(shownEdges, view.focus, chainEdges);
+  }, [view.edges, view.focus, showLines, selection.edge, chainEdges]);
   // The endpoints are drawn last, on top of everybody else, so a crowd never covers them.
   const drawnNodes = useMemo(() => [...view.nodes].sort((x, y) => Number(x.endpoint !== null) - Number(y.endpoint !== null)), [view.nodes]);
   const pinnedCount = pinned.size;
@@ -478,7 +488,7 @@ const NetworkGraph: React.FC<Props> = ({
   }, [drawnNodes, drawnEdges, rings, columns, corridor, closestVisible, mode, paint]);
 
   // With a solved connection's lines on, every other line steps back (see the stylesheet) so the lime chain stands out.
-  return <div className={['net-graph', success && 'is-success', solved && showLines && view.chain && 'is-solved', drawnNodes.length + drawnEdges.length >= LARGE_DRAWING && 'is-large'].filter(Boolean).join(' ')}>
+  return <div className={['net-graph', success && 'is-success', solved && showChain && showLines && view.chain && 'is-solved', drawnNodes.length + drawnEdges.length >= LARGE_DRAWING && 'is-large'].filter(Boolean).join(' ')}>
     <div className="net-stage">
     <svg ref={svg} className="net-svg" role="group" aria-label="Live contact graph"
       onPointerDown={onBackgroundDown} onPointerMove={onBackgroundMove} onPointerUp={onBackgroundUp} onPointerCancel={onBackgroundUp}>
@@ -497,7 +507,8 @@ const NetworkGraph: React.FC<Props> = ({
           {rings.map(ring => <g key={`${ring.anchor}-${ring.hops}`} className={`net-orbit is-side-${ring.side}`}
             ref={el => { const key = `${ring.anchor}-${ring.hops}`; if (el) ringEls.current.set(key, { anchor: ring.anchor, el }); else ringEls.current.delete(key); }}>
             <circle r={ring.radius} />
-            <text x={(ring.side === 'a' ? 1 : -1) * (ring.radius + 6)} y={-5} textAnchor={ring.side === 'a' ? 'start' : 'end'}>{ring.hops} {ring.hops === 1 ? 'link' : 'links'}</text>
+            {/* The labels of the two endpoints' rings meet between them and used to print over each other: A's stand above the line through the endpoints, B's below it. */}
+            <text x={(ring.side === 'a' ? 1 : -1) * (ring.radius + 6)} y={ring.side === 'a' ? -5 : 15} textAnchor={ring.side === 'a' ? 'start' : 'end'}>{ring.hops} {ring.hops === 1 ? 'link' : 'links'}</text>
           </g>)}
         </g>}
         {columnar && <g className="net-columns" aria-hidden="true">

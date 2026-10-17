@@ -34,7 +34,7 @@ export function useNetworkSimulation({ resetKey, inputs, links, bounds, mode, si
     frame.current = requestAnimationFrame(run);
   }, [layout]);
 
-  const signature = useMemo(() => JSON.stringify([inputs.map(input => [input.id, input.year, input.endpoint, input.radius, input.clearance, input.side, input.distance, input.parent, input.category, input.spine]), links.map(link => [link.a, link.b])]),
+  const signature = useMemo(() => JSON.stringify([inputs.map(input => [input.id, input.year, input.endpoint, input.radius, input.clearance, input.reach, input.side, input.distance, input.parent, input.category, input.spine]), links.map(link => [link.a, link.b])]),
     [inputs, links]);
   useLayoutEffect(() => {
     if (!ready) return;

@@ -1,4 +1,4 @@
-import { DUPLICATE_DATE_TOLERANCE_YEARS, QID_PATTERN, proposalKey } from './connectionGraph';
+import { DUPLICATE_DATE_TOLERANCE_YEARS, NEAR_MATCH_TOLERANCE_YEARS, NEAR_MATCH_YEARS, QID_PATTERN, proposalKey } from './connectionGraph';
 import { mapInputsToTitles, type TitleChanges } from './wikiTitles';
 
 // Wikidata as the source of truth for who a Six Degrees person is: a stable QID (two records with one QID are one person) and the
@@ -70,7 +70,9 @@ export function pickYear(claims: readonly WikidataClaim[], proposed: number, min
   return years.reduce((best, year) => Math.abs(year - proposed) < Math.abs(best - proposed) || (Math.abs(year - proposed) === Math.abs(best - proposed) && year < best) ? year : best);
 }
 
-// The guards: a human, years within the tolerance of what was proposed, and a lifespan that overlaps it. A person with no trustworthy year
+// The guards: a human, years within the tolerance of what was proposed (or, when one of the two years is all but exact, the other within a
+// wider one: a model that gets one end of a life right and the other badly wrong is still describing the same person, and somebody else
+// with the same name would have to die in the same year as well), and a lifespan that overlaps it. A person with no trustworthy year
 // at all in Wikidata proves nothing about who this is, so it is not accepted either. A human with no death statement at all is alive:
 // the app counts that as dying this year. Null when the entity cannot be this person.
 export function acceptIdentity(proposed: ProposedLifespan, entity: WikidataEntity, now = new Date().getFullYear(),
@@ -82,7 +84,9 @@ export function acceptIdentity(proposed: ProposedLifespan, entity: WikidataEntit
   const death = statedDeath ?? (alive ? now : undefined);
   const birthYear = birth ?? proposed.birthYear, deathYear = death ?? proposed.deathYear;
   if (birthYear === 0 || deathYear === 0 || birthYear > deathYear || deathYear > now) return null;
-  if (Math.abs(birthYear - proposed.birthYear) > tolerance || Math.abs(deathYear - proposed.deathYear) > tolerance) return null;
+  const offBirth = Math.abs(birthYear - proposed.birthYear), offDeath = Math.abs(deathYear - proposed.deathYear);
+  const near = tolerance >= DUPLICATE_DATE_TOLERANCE_YEARS && ((offBirth <= NEAR_MATCH_YEARS && offDeath <= NEAR_MATCH_TOLERANCE_YEARS) || (offDeath <= NEAR_MATCH_YEARS && offBirth <= NEAR_MATCH_TOLERANCE_YEARS));
+  if ((offBirth > tolerance || offDeath > tolerance) && !near) return null;
   if (birthYear > proposed.deathYear || deathYear < proposed.birthYear) return null;
   return { qid: entity.qid, birthYear, deathYear };
 }

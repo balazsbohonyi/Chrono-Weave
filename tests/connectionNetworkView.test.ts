@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { CandidateContact, ConnectionSession, ContactPerson } from '../src/services/connectionGraph';
 import {
-  buildNetworkView, closestApproachLabel, corridorSpine, edgeId, inspectedPeople, portraitSubjects, describeSide, lifespanGap, NO_FILTERS, NETWORK_FOLD_THRESHOLD,
+  buildNetworkView, closestApproachLabel, corridorSpine, edgeDrawOrder, edgeId, inspectedPeople, portraitSubjects, describeSide, lifespanGap, NO_FILTERS, NETWORK_FOLD_THRESHOLD,
 } from '../src/services/connectionNetworkView';
 
 const provenance = { provider: 'synthetic', model: 'synthetic', version: 2, assessedAt: 1 };
@@ -257,4 +257,57 @@ test('the corridor spine runs from A to B: the chain when there is one, else eac
   const joined = buildNetworkView(session([A, B, X, Y], [link('a', 'x'), link('x', 'y'), link('y', 'b')]));
   assert.deepEqual(corridorSpine(joined), joined.chain!.nodeIds);
   assert.deepEqual(corridorSpine(joined), ['a', 'x', 'y', 'b']);
+});
+
+test('with the AI-supported contacts off, the others can be looked at alone: endpoints, the chips that are on, whatever is selected, and the lit chain', () => {
+  const s = session([A, B, X, Y, U, Z], [link('a', 'x'), link('x', 'y'), link('y', 'b'), link('a', 'u', 'unresolved'), link('x', 'z', 'proposed')]);
+  // Nothing but the endpoints (the chain exists but is not lit in an ordinary exploration).
+  const plain = buildNetworkView(s, { showAccepted: false });
+  assert.deepEqual(ids(plain), ['a', 'b']); assert.equal(plain.edges.length, 0);
+  // An unresolved chip adds only its contact: x stays hidden although it is an AI-supported person.
+  const unresolved = buildNetworkView(s, { showAccepted: false, filters: { ...NO_FILTERS, unresolved: true } });
+  assert.deepEqual(ids(unresolved), ['a', 'b', 'u']); assert.deepEqual(unresolved.edges.map(edge => edge.status), ['unresolved']);
+  // A proposed contact between two AI-supported people brings both of them back, with just that line.
+  const proposed = buildNetworkView(s, { showAccepted: false, filters: { ...NO_FILTERS, proposed: true } });
+  assert.deepEqual(ids(proposed), ['a', 'b', 'x', 'z']); assert.deepEqual(proposed.edges.map(edge => edge.status), ['proposed']);
+  // The lit chain (a search that just succeeded, or a solved connection) stays, with its people and its lines.
+  for (const lit of [{ highlightChain: true }, { chain: ['a', 'x', 'y', 'b'] }]) {
+    const view = buildNetworkView(s, { showAccepted: false, ...lit });
+    assert.deepEqual(ids(view), ['a', 'b', 'x', 'y']); assert.equal(view.edges.length, 3);
+    assert.deepEqual(view.chain?.nodeIds, ['a', 'x', 'y', 'b']);
+  }
+  // What is selected is drawn: an AI-supported person, or a contact with both of its people.
+  assert.deepEqual(ids(buildNetworkView(s, { showAccepted: false, selection: { person: 'x' } })), ['a', 'b', 'x', 'z']);
+  const edge = buildNetworkView(s, { showAccepted: false, selection: { edge: edgeId(link('x', 'y')) } });
+  assert.deepEqual(ids(edge), ['a', 'b', 'x', 'y']); assert.equal(edge.edges.length, 1);
+});
+
+test('the lists and counts do not depend on what is drawn: switching the AI-supported contacts off changes neither', () => {
+  const s = session([A, B, X, U], [link('a', 'x'), link('x', 'b'), link('a', 'u', 'unresolved')]);
+  const on = buildNetworkView(s), off = buildNetworkView(s, { showAccepted: false });
+  assert.deepEqual(off.counts, on.counts);
+  assert.deepEqual(off.list.contacts.accepted.map(edge => edge.id), on.list.contacts.accepted.map(edge => edge.id));
+  assert.deepEqual(off.list.people.map(person => person.id), on.list.people.map(person => person.id));
+  assert.deepEqual(off.sides, on.sides);
+});
+
+test('the lit chain can be switched off too: with the AI-supported contacts off nothing of it stays, and a just-found chain stops dimming the rest', () => {
+  const s = session([A, B, X, Y], [link('a', 'x'), link('x', 'y'), link('y', 'b')]);
+  for (const lit of [{ highlightChain: true }, { chain: ['a', 'x', 'y', 'b'] }]) {
+    const view = buildNetworkView(s, { showAccepted: false, showChain: false, ...lit });
+    assert.deepEqual(ids(view), ['a', 'b']); assert.equal(view.edges.length, 0);
+  }
+  // With the AI-supported contacts on, everything is drawn either way; only the dimming of the others goes.
+  const on = buildNetworkView(s, { showChain: true, highlightChain: true }), off = buildNetworkView(s, { showChain: false });
+  assert.ok(on.focus); assert.equal(off.focus, null); assert.equal(off.nodes.length, on.nodes.length);
+});
+
+test('lines are drawn faded first, then the rest, the lit chain last of each: a click where lines cross lands on the one the reader is looking at', () => {
+  const edges = ['e1', 'e2', 'e3', 'e4', 'e5', 'e6'].map(id => ({ id }));
+  const focus = { edges: new Set(['e2', 'e5']) }, chain = new Set(['e3', 'e5']);
+  // Outside the focus: e1, e3 (chain), e4, e6; inside: e2, e5 (chain).
+  assert.deepEqual(edgeDrawOrder(edges, focus, chain).map(edge => edge.id), ['e1', 'e4', 'e6', 'e3', 'e2', 'e5']);
+  // Nothing selected: the order is kept, except that the chain goes last.
+  assert.deepEqual(edgeDrawOrder(edges, null, chain).map(edge => edge.id), ['e1', 'e2', 'e4', 'e6', 'e3', 'e5']);
+  assert.deepEqual(edgeDrawOrder(edges, null, null).map(edge => edge.id), ['e1', 'e2', 'e3', 'e4', 'e5', 'e6']);
 });

@@ -705,3 +705,36 @@ test('the arranged layouts all let go of pins and the same graph always settles 
     assert.equal(layout.categories.length + (layout.corridor ? 1 : 0), 0);
   }
 });
+
+test('time line: people who leave give their room back, and whoever they had pushed off its year goes back instead of staying where it was left', () => {
+  const rnd = seededRandom(5);
+  const crowd = (n: number, prefix: string): LayoutInput[] => Array.from({ length: n }, (_, i) => ({ id: `${prefix}${i}`, year: 1500 + Math.floor(rnd() * 450), endpoint: null, radius: 22 }));
+  const ends: LayoutInput[] = [{ id: 'a', year: 1520, endpoint: 0, radius: 32 }, { id: 'b', year: 1900, endpoint: 1, radius: 32 }];
+  const base = crowd(150, 'p'), extra = crowd(40, 'u');
+  const chain = (list: LayoutInput[]) => { const sorted = [...list].sort((x, y) => x.year - y.year); return [{ a: 'a', b: sorted[0].id }, { a: 'b', b: sorted[sorted.length - 1].id }, ...sorted.slice(1).map((person, i) => ({ a: sorted[i].id, b: person.id }))]; };
+  const layout = new NetworkLayout();
+  layout.setSize(1100, 700); layout.setBounds(1520, 1900);
+  const show = (list: LayoutInput[]) => { layout.setGraph([...ends, ...list], chain(list)); layout.settle(2000); };
+  const offYear = () => base.reduce((sum, person) => sum + Math.abs(at(layout, person.id).x - layout.xOf(person.year)), 0) / base.length;
+  show(base); const alone = offYear();
+  show([...base, ...extra]); const crowded = offYear();
+  show(base); const after = offYear();
+  assert.ok(crowded > alone, 'the newcomers do push people aside');
+  assert.ok(after < alone + 1, `back to ${after.toFixed(1)}px from the year (it was ${alone.toFixed(1)} before, ${crowded.toFixed(1)} while crowded)`);
+});
+
+test('time line: nobody leaves the lifetime they stand for, however crowded, and the crowd makes room above and below instead', () => {
+  const rnd = seededRandom(9);
+  const people: LayoutInput[] = Array.from({ length: 900 }, (_, i) => ({ id: `p${i}`, year: 1400 + Math.floor((rnd() + rnd() + rnd()) / 3 * 600), endpoint: null, radius: 22, reach: 20 + Math.floor(rnd() * 25) }));
+  const ends: LayoutInput[] = [{ id: 'a', year: 1945, endpoint: 0, radius: 32 }, { id: 'b', year: 1990, endpoint: 1, radius: 32 }];
+  const sorted = [...people].sort((x, y) => x.year - y.year);
+  const links = [{ a: 'a', b: sorted[sorted.length - 2].id }, { a: 'b', b: sorted[sorted.length - 1].id }, ...sorted.slice(1).map((person, i) => ({ a: sorted[i].id, b: person.id }))];
+  const layout = new NetworkLayout();
+  layout.setSize(1300, 800); layout.setBounds(1900, 2026); layout.setGraph([...ends, ...people], links); layout.settle(3000);
+  const outside = people.filter(person => Math.abs(at(layout, person.id).x - layout.xOf(person.year)) / layout.pixelsPerYear > person.reach! + 0.01);
+  assert.deepEqual(outside.map(person => person.id), []);
+  // Without the limit the same crowd does push some people out of their lifetimes (so the test says something).
+  const free = new NetworkLayout();
+  free.setSize(1300, 800); free.setBounds(1900, 2026); free.setGraph([...ends, ...people.map(({ reach, ...person }) => person)], links); free.settle(3000);
+  assert.ok(people.some(person => Math.abs(at(free, person.id).x - free.xOf(person.year)) / free.pixelsPerYear > person.reach!), 'the crowd pushes people out of their lifetimes when nothing holds them');
+});

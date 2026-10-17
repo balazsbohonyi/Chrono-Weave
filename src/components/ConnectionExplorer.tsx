@@ -11,6 +11,7 @@ import {
 } from '../services/connectionNetworkView';
 import NetworkGraph, { type RevealRequest } from './connectionNetwork/NetworkGraph';
 import NetworkInspector from './connectionNetwork/NetworkInspector';
+import { pushStep, type DetailMemory, type Step } from './connectionNetwork/selectionHistory';
 import NetworkLegend from './connectionNetwork/NetworkLegend';
 import NetworkPortrait from './connectionNetwork/NetworkPortrait';
 import { createPortal } from 'react-dom';
@@ -92,6 +93,9 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
   const reducedMotion = useMediaQuery(REDUCED_MOTION_QUERY);
   const [selection, setSelection] = useState<NetworkSelection>(NO_SELECTION);
   const [filters, setFilters] = useState<NetworkFilters>(NO_FILTERS);
+  const [showAccepted, setShowAccepted] = useState(true);
+  // The lit chain of a found or solved connection; switching it off shows the graph as an ordinary exploration.
+  const [showChain, setShowChain] = useState(true);
   const [mode, setMode] = useState<LayoutMode>(() => readNetworkViewPrefs().mode);
   useEffect(() => saveNetworkViewPrefs({ mode }), [mode]);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
@@ -113,23 +117,30 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
   const openLayoutInfo = useCallback(() => setLayoutInfoOpen(true), []);
   const closeLayoutInfo = useCallback(() => setLayoutInfoOpen(false), []);
 
-  const select = useCallback((next: NetworkSelection) => {
+  // The steps the inspector's Back returns through: what was selected before a contact was opened from a person's list. Selecting on the
+  // graph (or clearing) starts over; `restored` tells the inspector that Back returned to a person, so their lists come back as left.
+  const [history, setHistory] = useState<readonly Step[]>([]);
+  const [restored, setRestored] = useState<{ n: number; person?: string; detail?: DetailMemory } | null>(null);
+  const apply = useCallback((next: NetworkSelection) => {
     setSelection(next);
     setExpanded(previous => previous.size ? new Set() : previous);
     if (!next.person && !next.edge) setSheetOpen(false);
   }, []);
-  // From the inspector: also bring the thing into view when it is off-screen.
-  const selectFromPanel = useCallback((next: NetworkSelection) => {
-    select(next);
+  const select = useCallback((next: NetworkSelection) => { setHistory(previous => previous.length ? [] : previous); setRestored(null); apply(next); }, [apply]);
+  // From the inspector: also bring the thing into view when it is off-screen, and remember where it was opened from.
+  const selectFromPanel = useCallback((next: NetworkSelection, detail?: DetailMemory) => {
+    if (selection.person || selection.edge) setHistory(previous => pushStep(previous, { selection, detail }));
+    setRestored(null);
+    apply(next);
     setReveal(previous => ({ n: (previous?.n ?? 0) + 1, ...next }));
-  }, [select]);
+  }, [apply, selection]);
 
   // A different exploration starts clean; the same one keeps its selection, filters and pins across batches.
   const resetKey = session?.key ?? '';
-  useEffect(() => { setSelection(NO_SELECTION); setExpanded(new Set()); setPinned(new Set()); setReveal(null); setSheetOpen(false); setQuery(''); }, [resetKey]);
+  useEffect(() => { setSelection(NO_SELECTION); setExpanded(new Set()); setPinned(new Set()); setReveal(null); setSheetOpen(false); setQuery(''); setHistory([]); setRestored(null); setShowChain(true); }, [resetKey]);
 
-  const view = useMemo(() => session ? buildNetworkView(session, { filters, selection, expanded, pinned, highlightChain: !!success, chain: chain ?? undefined }) : null,
-    [session, filters, selection, expanded, pinned, success, chain]);
+  const view = useMemo(() => session ? buildNetworkView(session, { filters, showAccepted, showChain, selection, expanded, pinned, highlightChain: !!success && showChain, chain: chain ?? undefined }) : null,
+    [session, filters, showAccepted, showChain, selection, expanded, pinned, success, chain]);
 
   const endpoints = useMemo(() => view?.nodes.filter(node => node.endpoint !== null).map(node => node.person) ?? [], [view]);
   const bounds = useMemo<[number, number]>(() => endpoints.length
@@ -140,7 +151,7 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
     return view?.nodes.map(node => {
       const radius = nodeRadius(node.endpoint !== null, narrow);
       return {
-        id: node.id, year: midpoint(node.person), endpoint: node.endpoint, radius, clearance: folded.has(node.id) ? foldBadgeReach(radius) : 0,
+        id: node.id, year: midpoint(node.person), reach: (node.person.deathYear - node.person.birthYear) / 2, endpoint: node.endpoint, radius, clearance: folded.has(node.id) ? foldBadgeReach(radius) : 0,
         side: node.side, distance: node.distance, parent: node.parent, category: node.person.category, spine: spine.get(node.id) ?? null,
       };
     }) ?? [];
@@ -165,11 +176,20 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
 
   const dismissSheet = useCallback(() => { setSheetOpen(false); select(NO_SELECTION); }, [select]);
   // From a person or contact back to the lists. Unlike clearing by tapping the graph, this keeps the sheet open on narrow screens.
-  const backToList = useCallback(() => { setSelection(NO_SELECTION); setExpanded(previous => previous.size ? new Set() : previous); setSheetOpen(narrow); }, [narrow]);
-  // Esc peels back one layer at a time: selection -> clear, a search -> clear, a maximized graph -> restore, otherwise close.
+  // One step back: to the person a contact was opened from (selected again, as it was left), otherwise to the main lists.
+  const back = useCallback(() => {
+    const previous = history[history.length - 1];
+    setHistory(history.slice(0, -1));
+    setExpanded(known => known.size ? new Set() : known);
+    if (!previous) { setSelection(NO_SELECTION); setRestored(null); setSheetOpen(narrow); return; }
+    setSelection(previous.selection);
+    setRestored(known => ({ n: (known?.n ?? 0) + 1, person: previous.selection.person, detail: previous.detail }));
+    setReveal(known => ({ n: (known?.n ?? 0) + 1, ...previous.selection }));
+  }, [history, narrow]);
+  // Esc peels back one layer at a time: a contact -> its person -> the lists, a search -> clear, a maximized graph -> restore, otherwise close.
   const escape = useRef<() => void>(() => {});
   escape.current = () => {
-    if (hasSelection || sheetOpen) dismissSheet(); else if (query) setQuery(''); else if (maximized) setMaximized(false); else onClose();
+    if (hasSelection) back(); else if (sheetOpen) dismissSheet(); else if (query) setQuery(''); else if (maximized) setMaximized(false); else onClose();
   };
   const toggleMaximized = useCallback(() => setMaximized(on => !on), []);
   const onEscape = useCallback(() => escape.current(), []);
@@ -189,7 +209,11 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
   const endpointIds = session?.endpoints ?? ['', ''];
   const endpointNames = useMemo<[string, string]>(() => [name(endpointIds[0]), name(endpointIds[1])], [name, endpointIds[0], endpointIds[1]]);
   const endpointPerson = (index: 0 | 1) => peopleById.get(endpointIds[index]);
-  const legend = useMemo(() => view && <NetworkLegend filters={filters} counts={view.counts} onToggle={toggleFilter} narrow={narrow} />, [view, filters, toggleFilter, narrow]);
+  const toggleAccepted = useCallback(() => setShowAccepted(on => !on), []);
+  const toggleChain = useCallback(() => setShowChain(on => !on), []);
+  const legend = useMemo(() => view && <NetworkLegend filters={filters} counts={view.counts} onToggle={toggleFilter} narrow={narrow} showAccepted={showAccepted} onToggleAccepted={toggleAccepted} solved={!!solved && showChain}
+    chain={!!(success || solved) && !!view.chain} showChain={showChain} onToggleChain={toggleChain} />,
+    [view, filters, toggleFilter, narrow, showAccepted, toggleAccepted, solved, success, showChain, toggleChain]);
   const stopReason = session?.diagnostics.stopReason;
   const stable = stopReason === 'work-budget' || stopReason === 'time-budget';
   // A search that stopped on its own limit invites the person to carry on, instead of leaving them to find the footer button.
@@ -267,13 +291,13 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
         {view
           ? <NetworkGraph view={view} endpointNames={endpointNames} nameOf={name} layout={layout} kick={kick} pinned={pinned} mode={mode} onModeChange={setMode}
             size={size} onSize={resize} selection={selection} onSelect={select} portraits={portraits} narrow={narrow} reducedMotion={reducedMotion}
-            success={success} solved={solved} onReveal={onReveal} resume={resume} reveal={reveal} onPinsChange={syncPins} onToggleFold={toggleFold} legend={legend}
+            success={success} solved={solved} showChain={showChain} onReveal={onReveal} resume={resume} reveal={reveal} onPinsChange={syncPins} onToggleFold={toggleFold} legend={legend}
             maximized={maximized} onToggleMaximize={narrow ? undefined : toggleMaximized} onOpenLayoutInfo={openLayoutInfo} />
           : <div className="net-graph"><p className="net-empty">Preparing the contact network…</p></div>}
         {failure && <SearchFailureNotice message={failure} onResume={onContinue} onDismiss={() => setDismissedError(failureKey)} />}
       </section>
       <NetworkInspector session={session} view={view} selection={selection} portraits={portraits} pinned={pinned} narrow={narrow}
-        open={sheetOpen || hasSelection} onSelect={selectFromPanel} onUnpin={unpin} onDismiss={dismissSheet} onBackToList={backToList} query={query} onQueryChange={setQuery} />
+        open={sheetOpen || hasSelection} onSelect={selectFromPanel} onUnpin={unpin} onDismiss={dismissSheet} onBack={back} history={history} restored={restored} query={query} onQueryChange={setQuery} />
     </div>
     <footer className="connection-explorer-footer">
       <div className="ce-footer-info" role="group" aria-label="People found on each side">{view && session && <>{sideCount(0)}{sideCount(1)}</>}</div>

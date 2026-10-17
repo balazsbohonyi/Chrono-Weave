@@ -75,7 +75,8 @@ test('the guards: a human, within ten years of what was proposed, overlapping, a
   const socrates = entities.get('Q913')!, lopez = entities.get('Q40715')!, newton = entities.get('Q935')!;
   assert.deepEqual(acceptIdentity({ name: 'Socrates', birthYear: -470, deathYear: -399 }, socrates, 2026), { qid: 'Q913', birthYear: -470, deathYear: -399 });
   assert.equal(acceptIdentity({ name: 'Socrates', birthYear: -480, deathYear: -399 }, socrates, 2026)?.birthYear, -470, 'ten years off is still accepted');
-  assert.equal(acceptIdentity({ name: 'Socrates', birthYear: -481, deathYear: -399 }, socrates, 2026), null, 'eleven is not');
+  assert.equal(acceptIdentity({ name: 'Socrates', birthYear: -481, deathYear: -399 }, socrates, 2026)?.birthYear, -470, 'eleven off is accepted when the death year is exact (see the near-match test)');
+  assert.equal(acceptIdentity({ name: 'Socrates', birthYear: -481, deathYear: -390 }, socrates, 2026), null, 'eleven off on both ends is not');
   assert.equal(acceptIdentity({ name: 'Isaac Newton', birthYear: 1800, deathYear: 1860 }, newton, 2026), null, 'another person with the same name');
   assert.equal(acceptIdentity({ name: 'Newton', birthYear: 1642, deathYear: 1727 }, entity({ human: false, births: [claim(1642)] }), 2026), null, 'not a human');
   assert.equal(acceptIdentity({ name: 'X', birthYear: 1642, deathYear: 1727 }, entity({ qid: 'nope', births: [claim(1642)], deaths: [claim(1727)] }), 2026), null);
@@ -216,4 +217,20 @@ test('nothing asked, nothing sent', async () => {
   const { fetchImpl, calls } = fakeFetch();
   assert.equal((await createWikidataResolver({ fetch: fetchImpl }).resolve([])).size, 0);
   assert.equal(calls.length, 0);
+});
+
+test('near match: one end of the life all but exact lets the other be far off, so a model that got a birth year wrong is still the same person', () => {
+  const bourdieu = entity({ qid: 'Q156268', births: [claim(1930)], deaths: [claim(2002)] });
+  // The real case: 1919 against 1930 (eleven years) with the death year right.
+  assert.deepEqual(acceptIdentity({ name: 'Pierre Bourdieu', birthYear: 1919, deathYear: 2002 }, bourdieu, 2026), { qid: 'Q156268', birthYear: 1930, deathYear: 2002 });
+  assert.equal(acceptIdentity({ name: 'Pierre Bourdieu', birthYear: 1930, deathYear: 2001 }, bourdieu, 2026)?.deathYear, 2002);
+  // It works the other way round, and has limits: two years on the exact end, twenty-five on the other.
+  assert.equal(acceptIdentity({ name: 'Pierre Bourdieu', birthYear: 1930, deathYear: 1977 }, bourdieu, 2026)?.deathYear, 2002, 'death off by 25 with an exact birth');
+  assert.equal(acceptIdentity({ name: 'Pierre Bourdieu', birthYear: 1930, deathYear: 1976 }, bourdieu, 2026), null, 'and 26 is too far');
+  assert.ok(acceptIdentity({ name: 'Pierre Bourdieu', birthYear: 1905, deathYear: 2000 }, bourdieu, 2026), '25 off on birth, 2 off on death');
+  assert.equal(acceptIdentity({ name: 'Pierre Bourdieu', birthYear: 1904, deathYear: 2002 }, bourdieu, 2026), null, '26 off is too far');
+  assert.equal(acceptIdentity({ name: 'Pierre Bourdieu', birthYear: 1919, deathYear: 1998 }, bourdieu, 2026), null, 'eleven and four: neither end is near');
+  assert.equal(acceptIdentity({ name: 'Pierre Bourdieu', birthYear: 1919, deathYear: 1960 }, bourdieu, 2026), null, 'somebody else with the same name, who died long before');
+  // A tighter tolerance than the default (a caller's choice) is not widened.
+  assert.equal(acceptIdentity({ name: 'Pierre Bourdieu', birthYear: 1919, deathYear: 2002 }, bourdieu, 2026, 5), null);
 });

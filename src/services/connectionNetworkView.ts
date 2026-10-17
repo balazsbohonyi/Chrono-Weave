@@ -53,6 +53,11 @@ export interface NetworkCounts { people: number; contacts: number; unresolved: n
 
 export interface NetworkViewOptions {
   filters?: NetworkFilters;
+  // Whether the AI-supported contacts (and the people only they bring in) are drawn; default yes. Off, the graph keeps the endpoints, the
+  // people and contacts of the filters that are on, whatever is selected, and the chain when it is lit (`highlightChain` or `chain`).
+  showAccepted?: boolean;
+  // Whether the lit chain (see `highlightChain`, `chain`) is kept drawn when the AI-supported contacts are off; default yes.
+  showChain?: boolean;
   selection?: NetworkSelection;
   // Hosts whose folded leaves are shown.
   expanded?: ReadonlySet<string>;
@@ -85,6 +90,12 @@ export interface NetworkView {
   };
 }
 
+// The order lines are drawn in, which is also which one a click lands on where lines cross (the one drawn last is on top): the faded ones
+// (outside the focus of a selection) first, then the others, and the lit chain last of each. The order inside each group is kept.
+export function edgeDrawOrder<T extends { id: string }>(edges: readonly T[], focus: { edges: ReadonlySet<string> } | null, chainEdges: ReadonlySet<string> | null): T[] {
+  const rank = (edge: T) => (focus && !focus.edges.has(edge.id) ? 0 : 2) + (chainEdges?.has(edge.id) ? 1 : 0);
+  return edges.map((edge, index) => ({ edge, index, rank: rank(edge) })).sort((x, y) => x.rank - y.rank || x.index - y.index).map(item => item.edge);
+}
 export const edgeId = (contact: Pick<CandidateContact, 'from' | 'to'>) => pairKey(contact.from, contact.to);
 
 // Years between two lifespans; overlapping lifespans are 0 apart.
@@ -102,7 +113,7 @@ function distancesFrom(start: string, adjacency: Map<string, string[]>, parents?
 }
 
 export function buildNetworkView(session: ConnectionSession, options: NetworkViewOptions = {}): NetworkView {
-  const { filters = NO_FILTERS, selection = {}, expanded = new Set<string>(), pinned = new Set<string>(),
+  const { filters = NO_FILTERS, showAccepted = true, showChain = true, selection = {}, expanded = new Set<string>(), pinned = new Set<string>(),
     threshold = NETWORK_FOLD_THRESHOLD, highlightChain = false, chain: knownChain } = options;
   const byId = new Map(session.people.map(person => [person.id, person]));
   const [first, second] = session.endpoints;
@@ -134,7 +145,10 @@ export function buildNetworkView(session: ConnectionSession, options: NetworkVie
 
   // Which unverified contacts are drawn: those whose chip is on, plus the selected person's own.
   const shown = new Map<string, { candidate: CandidateContact; contextual: boolean }>();
-  for (const c of accepted) shown.set(edgeId(c), { candidate: c, contextual: false });
+  // With the AI-supported contacts off, only what the reader is looking at or the lit chain keeps its line.
+  const litChain = showChain && chain && (highlightChain || (knownChain && knownChain.length >= 2)) ? chain : null;
+  const keepsLine = (c: CandidateContact) => showAccepted || edgeId(c) === selection.edge || !!litChain?.edgeIds.includes(edgeId(c));
+  for (const c of accepted) if (keepsLine(c)) shown.set(edgeId(c), { candidate: c, contextual: false });
   for (const c of known) {
     const filter = filterOf(c.status);
     if (!filter) continue;
@@ -143,7 +157,11 @@ export function buildNetworkView(session: ConnectionSession, options: NetworkVie
     else if (touchesSelection) shown.set(edgeId(c), { candidate: c, contextual: true });
   }
 
-  const visible = new Set(supported);
+  const visible = new Set(showAccepted ? supported : [first, second].filter(id => byId.has(id)));
+  if (!showAccepted) {
+    for (const id of litChain?.nodeIds ?? []) visible.add(id);
+    if (selection.person && byId.has(selection.person)) visible.add(selection.person);
+  }
   const chipPeople = new Set<string>();
   for (const { candidate, contextual } of shown.values()) {
     visible.add(candidate.from); visible.add(candidate.to);
@@ -229,8 +247,9 @@ export function buildNetworkView(session: ConnectionSession, options: NetworkVie
   const byName = (x: ContactPerson, y: ContactPerson) => x.name.localeCompare(y.name);
   const contacts: NetworkView['list']['contacts'] = { accepted: [], unresolved: [], proposed: [], blocked: [] };
   // The readable list is complete: contacts of people folded behind a "+n" badge are still listed.
-  for (const { candidate, contextual } of shown.values()) if (candidate.status === 'accepted') {
-    contacts.accepted.push({ id: edgeId(candidate), from: candidate.from, to: candidate.to, status: candidate.status, candidate, contextual });
+  // (Complete whatever is drawn: the lists do not change with the AI-supported switch.)
+  for (const candidate of accepted) {
+    contacts.accepted.push({ id: edgeId(candidate), from: candidate.from, to: candidate.to, status: candidate.status, candidate, contextual: false });
   }
   for (const edge of edges) if (filterOf(edge.status)) contacts[filterOf(edge.status)!].push(edge);
   return {
