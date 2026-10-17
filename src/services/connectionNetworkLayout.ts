@@ -48,6 +48,22 @@ export const TICK_MIN_SPACING = 140;
 const TIME_LINK_STRENGTH = 0.03;
 const DEFAULT_SIZE = { width: 900, height: 600 };
 const ALPHA_MIN = 0.02;
+// The time line is dense, and its crowd keeps sliding for a long while after the heat has dropped to ALPHA_MIN, so stopping there
+// left people mid-slide (and a drag, which restarts the slide, looked like everybody jumping). Past ALPHA_MIN it keeps ticking, on
+// collisions alone, until nobody moves more than REST_SPEED pixels per tick, for at most REST_MAX_TICKS.
+const REST_SPEED = 0.1;
+const REST_MAX_TICKS = 300;
+// How hot a drag keeps the simulation: the time line stays as calm as at rest (no global heat), so only the neighbours react.
+const DRAG_ALPHA = { calm: 0, other: 0.25 };
+// A person dropped on the time line goes back to their year at this share of the distance per tick (a force of their own: reheating
+// the simulation for it would pull the whole, settled crowd toward its years again).
+const HOMING_PULL = 0.12;
+const HOMING_DONE = 1;
+const HOMING_MAX_TICKS = 150;
+// On the time line everybody is drawn, at this share of the distance per tick, back to the place they rested at before anybody was
+// dragged past them (`anchors`, kept from one drag to the next until the graph or the layout changes): the crowd gives way to the
+// dragged person and closes up behind them, and what an endpoint pushed aside goes back when the endpoint is moved away again.
+const ANCHOR_PULL = 0.06;
 // This many people arriving at once (or the very first people) are seated before they are drawn instead of animating.
 const SEAT_THRESHOLD = 6;
 const SEAT_MAX_TICKS = 400;
@@ -90,11 +106,16 @@ const ZONE_MIN_SCALE = 0.5;
 
 // Pushes a person whose disc (plus `reach`) enters `zone` out to its rim: straight away from the endpoint, or (`vertical`, the time
 // line, where the place along the axis is a year) straight up or down to the rim. Null when the person is already clear.
-// `bias` (1 or -1) picks the side when the person is exactly on the endpoint's middle line.
-export function pushOutOfZone(point: Point, zone: Pick<FreeZone, 'x' | 'y' | 'radius'>, reach: number, vertical: boolean, bias = 1): Point | null {
+// `bias` (1 or -1) picks the side when the person is exactly on the endpoint's middle line; `side` (vertical only) forces it and `toward` (otherwise) is the place to push
+// out in the direction of, instead of straight away from the middle.
+export function pushOutOfZone(point: Point, zone: Pick<FreeZone, 'x' | 'y' | 'radius'>, reach: number, vertical: boolean, bias = 1, side?: 1 | -1, toward?: Point): Point | null {
   const min = zone.radius + reach, dx = point.x - zone.x, dy = point.y - zone.y, distance = Math.hypot(dx, dy);
   if (distance >= min) return null;
-  if (vertical) return { x: point.x, y: zone.y + (dy === 0 ? bias : Math.sign(dy)) * Math.sqrt(min * min - dx * dx) };
+  if (vertical) return { x: point.x, y: zone.y + (side ?? (dy === 0 ? bias : Math.sign(dy))) * Math.sqrt(min * min - dx * dx) };
+  if (toward && (toward.x !== zone.x || toward.y !== zone.y)) {
+    const length = Math.hypot(toward.x - zone.x, toward.y - zone.y);
+    return { x: zone.x + (toward.x - zone.x) / length * min, y: zone.y + (toward.y - zone.y) / length * min };
+  }
   if (distance === 0) return { x: zone.x + bias * min, y: zone.y };
   return { x: zone.x + dx / distance * min, y: zone.y + dy / distance * min };
 }
@@ -612,7 +633,21 @@ export class NetworkLayout {
   setBounds(start: number, end: number) { this.bounds = [Math.min(start, end), Math.max(start, end)]; this.updateDomain(); }
   get yearDomain(): [number, number] { return this.domain; }
   get alpha() { return this.simulation.alpha(); }
-  get active() { return this.dragging !== null || this.simulation.alpha() > ALPHA_MIN; }
+  get active() { return this.running; }
+  private extraTicks = 0;
+  // Whether another tick is due: while dragging, while hot, or while the crowd is still on the move after cooling.
+  private get running() { return this.dragging !== null || this.simulation.alpha() > ALPHA_MIN || this.homing.size > 0 || (this.extraTicks < REST_MAX_TICKS && this.restless()); }
+  // The layouts in which the crowd is steered by forces and rests anchored (not by a plan): the time line and the free layout.
+  private get calm() { return this.mode === 'time' || this.mode === 'free'; }
+  // Whether anybody still moves faster than REST_SPEED (an average would hide the few who are still on their way back).
+  private restless() {
+    if (!this.calm) return false;
+    for (const node of this.nodes.values()) {
+      if (node.fx != null && node.fy != null) continue;
+      if (Math.hypot(node.vx ?? 0, node.vy ?? 0) > REST_SPEED) return true;
+    }
+    return false;
+  }
   // The guide rings of the cluster layout; empty in the other layouts. The same array until the plan changes.
   get rings(): OrbitRing[] { return this.plan?.rings ?? NO_RINGS; }
   // The column bands of the columns layout; empty in the other layouts. The same array until the plan changes.
@@ -638,7 +673,7 @@ export class NetworkLayout {
   setMode(mode: LayoutMode) {
     if (mode === this.mode) return;
     const wasTime = this.mode === 'time';
-    this.mode = mode;
+    this.mode = mode; this.anchors = null;
     // A drop in the free layouts pins both axes; in time mode only the height survives the switch.
     for (const id of [...this.pinned]) {
       const node = this.nodes.get(id); if (!node || node.endpoint !== null) continue;
@@ -680,6 +715,7 @@ export class NetworkLayout {
       fresh.add(input.id);
       added = true;
     }
+    if (added || removed) this.anchors = null;
     this.updateDomain();
     this.neighbours = neighbours;
     this.replan();
@@ -715,7 +751,8 @@ export class NetworkLayout {
   subscribe(listener: () => void) { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
 
   step(): boolean {
-    if (this.dragging === null && this.simulation.alpha() <= ALPHA_MIN) return false;
+    if (!this.running) return false;
+    if (this.dragging === null && this.simulation.alpha() <= ALPHA_MIN) this.extraTicks++;
     this.tick();
     this.emit();
     return true;
@@ -738,20 +775,21 @@ export class NetworkLayout {
   // Runs to rest in one go. Used for reduced motion and by the tests.
   settle(maxTicks = 400) {
     let ticks = 0;
-    while (ticks < maxTicks && this.simulation.alpha() > ALPHA_MIN) { this.tick(); ticks++; }
+    while (ticks < maxTicks && this.running) { if (this.dragging === null && this.simulation.alpha() <= ALPHA_MIN) this.extraTicks++; this.tick(); ticks++; }
     this.emit();
     return ticks;
   }
 
-  reheat(alpha = 0.3) { this.simulation.alpha(Math.max(this.simulation.alpha(), alpha)); }
+  reheat(alpha = 0.3) { this.simulation.alpha(Math.max(this.simulation.alpha(), alpha)); this.extraTicks = 0; if (this.dragging === null) this.anchors = null; }
 
   dragStart(id: string) {
     const node = this.nodes.get(id); if (!node) return;
     this.dragging = id;
+    if (this.calm) this.anchorCrowd(id);
     node.fx = this.movesAlongX(node) ? node.x : this.home(node).x;
     node.fy = node.y;
-    this.simulation.alphaTarget(0.25);
-    this.reheat(0.25);
+    this.simulation.alphaTarget(DRAG_ALPHA[this.calm ? 'calm' : 'other']);
+    this.reheat(DRAG_ALPHA[this.calm ? 'calm' : 'other']);
   }
   // Only on the time line do the two endpoints slide just vertically (their place on the axis is theirs); in the free layouts they go anywhere.
   dragTo(id: string, x: number, y: number) {
@@ -763,12 +801,42 @@ export class NetworkLayout {
   dragEnd(id: string) {
     const node = this.nodes.get(id); if (this.dragging === id) this.dragging = null;
     this.simulation.alphaTarget(0);
-    if (!node) return;
+    if (!node) { this.anchors = null; return; }
     this.pinned.add(id);
     // In time mode the dropped height stays and the year pulls the node back across.
     if (this.mode === 'time' && node.endpoint === null) node.fx = null;
-    this.reheat(0.2);
+    if (this.calm) {
+      if (this.mode === 'time' && node.endpoint === null) { this.homing.add(id); this.homingTicks = 0; }
+      this.extraTicks = -REST_MAX_TICKS; // what a drag moved takes longer to close up than the crowd does to settle
+    } else this.reheat(0.2);
   }
+  private homing = new Set<string>();
+  private homingTicks = 0;
+  private homeForce = () => {
+    if (this.homing.size && ++this.homingTicks > HOMING_MAX_TICKS) this.homing.clear();
+    for (const id of this.homing) {
+      const node = this.nodes.get(id);
+      if (!node || node.x === undefined || this.dragging === id) { this.homing.delete(id); continue; }
+      const dx = this.xOf(node.year) - node.x;
+      if (Math.abs(dx) <= HOMING_DONE) { this.homing.delete(id); this.anchors?.set(id, { x: node.x, y: node.y! }); continue; }
+      node.vx = (node.vx ?? 0) + dx * HOMING_PULL;
+    }
+  };
+  // Where everybody rests on the time line (people new to the map are added when a drag starts; the dragged person has none).
+  private anchors: Map<string, Point> | null = null;
+  private anchorCrowd(except: string) {
+    this.anchors ??= new Map();
+    for (const node of this.nodes.values()) if (node.x !== undefined && node.y !== undefined && !this.anchors.has(node.id)) this.anchors.set(node.id, { x: node.x, y: node.y });
+    this.anchors.delete(except);
+  }
+  private anchorForce = () => {
+    const anchors = this.anchors; if (!anchors) return;
+    for (const [id, at] of anchors) {
+      const node = this.nodes.get(id);
+      if (!node || node.x === undefined || node.y === undefined || node.fx != null || node.fy != null || this.dragging === id || this.homing.has(id)) continue;
+      node.vx = (node.vx ?? 0) + (at.x - node.x) * ANCHOR_PULL; node.vy = (node.vy ?? 0) + (at.y - node.y) * ANCHOR_PULL;
+    }
+  };
   unpin(id: string) {
     const node = this.nodes.get(id); if (!node) return;
     this.pinned.delete(id);
@@ -879,7 +947,11 @@ export class NetworkLayout {
       for (let pass = 0; pass < 2; pass++) {
         let settled = true;
         for (const zone of zones) {
-          const out = pushOutOfZone({ x, y }, zone, node.radius + node.clearance, vertical, tieBreak(node.id));
+          // An endpoint that has been let go may have been carried past somebody (a fast drag jumps over people): they are put back on
+          // the side they rest on (in the free layout: in the direction of their place), instead of staying trapped behind it.
+          const rest = this.dragging === null ? this.anchors?.get(node.id) : undefined;
+          const out = pushOutOfZone({ x, y }, zone, node.radius + node.clearance, vertical, tieBreak(node.id),
+            vertical && rest && rest.y !== zone.y ? (rest.y < zone.y ? -1 : 1) : undefined, vertical ? undefined : rest);
           if (out) { x = out.x; y = out.y; moved = true; settled = false; }
         }
         if (settled) break;
@@ -992,7 +1064,9 @@ export class NetworkLayout {
     sim.force('x', arranged ? null : forceX<LayoutNode>(node => time ? this.xOf(node.year) : cx).strength(time ? 0.45 : 0.02));
     sim.force('y', arranged ? null : forceY<LayoutNode>(cy).strength(time ? 0.04 : 0.05));
     sim.force('plan', arranged ? this.planForce : null);
-    sim.force('collide', forceCollide<LayoutNode>(node => node.radius + LABEL_ROOM).strength(0.9));
+    sim.force('home', time ? this.homeForce : null);
+    sim.force('anchor', this.calm ? this.anchorForce : null);
+    sim.force('collide', forceCollide<LayoutNode>(node => node.radius + LABEL_ROOM).strength(0.9).iterations(this.calm ? 2 : 1));
     sim.force('charge', time || arranged ? null : forceManyBody<LayoutNode>().strength(-320).distanceMax(500));
     sim.force('link', this.mode === 'category' ? null : forceLink<LayoutNode, Link>(this.links).id(node => node.id).distance(time ? 70 : 120).strength(time ? TIME_LINK_STRENGTH : arranged ? 0.005 : 0.5));
     sim.velocityDecay(0.45);

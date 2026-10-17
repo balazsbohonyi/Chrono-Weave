@@ -723,7 +723,7 @@ test('time line: people who leave give their room back, and whoever they had pus
   assert.ok(after < alone + 1, `back to ${after.toFixed(1)}px from the year (it was ${alone.toFixed(1)} before, ${crowded.toFixed(1)} while crowded)`);
 });
 
-test('time line: nobody leaves the lifetime they stand for, however crowded, and the crowd makes room above and below instead', () => {
+test('time line: nobody leaves the lifetime they stand for, however crowded, and the crowd makes room above and below instead', { timeout: 60000 }, () => {
   const rnd = seededRandom(9);
   const people: LayoutInput[] = Array.from({ length: 900 }, (_, i) => ({ id: `p${i}`, year: 1400 + Math.floor((rnd() + rnd() + rnd()) / 3 * 600), endpoint: null, radius: 22, reach: 20 + Math.floor(rnd() * 25) }));
   const ends: LayoutInput[] = [{ id: 'a', year: 1945, endpoint: 0, radius: 32 }, { id: 'b', year: 1990, endpoint: 1, radius: 32 }];
@@ -737,4 +737,81 @@ test('time line: nobody leaves the lifetime they stand for, however crowded, and
   const free = new NetworkLayout();
   free.setSize(1300, 800); free.setBounds(1900, 2026); free.setGraph([...ends, ...people.map(({ reach, ...person }) => person)], links); free.settle(3000);
   assert.ok(people.some(person => Math.abs(at(free, person.id).x - free.xOf(person.year)) / free.pixelsPerYear > person.reach!), 'the crowd pushes people out of their lifetimes when nothing holds them');
+});
+
+test('time line: dragging a person through a packed crowd moves the people beside them and no others, and the crowd closes up behind', { timeout: 60000 }, () => {
+  const rnd = seededRandom(7);
+  const people: LayoutInput[] = Array.from({ length: 1200 }, (_, i) => ({ id: `p${i}`, year: Math.round(1400 + Math.sqrt(rnd()) * 620), endpoint: null, radius: 20, reach: 20 + rnd() * 30 }));
+  const ends: LayoutInput[] = [{ id: 'a', year: 1889, endpoint: 0, radius: 32, reach: 28 }, { id: 'b', year: 1452, endpoint: 1, radius: 32, reach: 33 }];
+  const links = people.map((person, i) => ({ a: person.id, b: i % 7 === 0 ? 'a' : people[Math.floor(rnd() * Math.max(1, i))].id }));
+  const layout = new NetworkLayout(seededRandom(3));
+  layout.setSize(1300, 800); layout.setBounds(1452, 1889); layout.setGraph([...ends, ...people], links); layout.settle(3000);
+  const ids = people.map(person => person.id).filter(id => id !== 'p10'), before = new Map(ids.map(id => [id, { ...at(layout, id) }]));
+  const overlapping = () => {
+    let count = 0;
+    for (let i = 0; i < ids.length; i++) for (let j = i + 1; j < ids.length; j++) {
+      const p = at(layout, ids[i]), q = at(layout, ids[j]);
+      if (Math.hypot(p.x - q.x, p.y - q.y) < 36) count++;
+    }
+    return count;
+  };
+  const baseline = overlapping();
+  const moved = (limit: number) => ids.filter(id => Math.hypot(at(layout, id).x - before.get(id)!.x, at(layout, id).y - before.get(id)!.y) > limit).length;
+  const path: Array<{ x: number; y: number }> = [];
+  layout.dragStart('p10');
+  for (let step = 0; step < 40; step++) { const to = { x: layout.xOf(1900) - step * 8, y: 200 + step * 6 }; path.push(to); layout.dragTo('p10', to.x, to.y); layout.step(); layout.step(); }
+  const far = ids.filter(id => path.every(to => Math.hypot(before.get(id)!.x - to.x, before.get(id)!.y - to.y) > 400));
+  const farMoved = far.filter(id => Math.hypot(at(layout, id).x - before.get(id)!.x, at(layout, id).y - before.get(id)!.y) > 15).length;
+  assert.ok(moved(15) > 0, 'the people beside the dragged one give way');
+  assert.ok(farMoved <= 2, `${farMoved} of ${far.length} people far from the drag moved`);
+  layout.dragEnd('p10'); layout.settle(3000);
+  const shifted = ids.filter(id => Math.hypot(at(layout, id).x - before.get(id)!.x, at(layout, id).y - before.get(id)!.y) > 15);
+  assert.ok(shifted.length < ids.length * 0.05, `${shifted.length} of ${ids.length} people were left displaced by one drag and drop (the crowd closes up behind it)`);
+  assert.ok(overlapping() <= baseline + 2, `${overlapping()} overlapping pairs after the drop, ${baseline} before`);
+});
+
+test('time line: people an endpoint pushed aside go back when the endpoint is moved away again', { timeout: 60000 }, () => {
+  const rnd = seededRandom(5);
+  const people: LayoutInput[] = Array.from({ length: 1200 }, (_, i) => ({ id: `p${i}`, year: Math.round(1400 + Math.sqrt(rnd()) * 620), endpoint: null, radius: 20, reach: 20 + rnd() * 30 }));
+  const ends: LayoutInput[] = [{ id: 'a', year: 1889, endpoint: 0, radius: 32, reach: 28 }, { id: 'b', year: 1452, endpoint: 1, radius: 32, reach: 33 }];
+  const links = people.map((person, i) => ({ a: person.id, b: i % 7 === 0 ? 'a' : people[Math.floor(rnd() * Math.max(1, i))].id }));
+  const layout = new NetworkLayout(seededRandom(3));
+  layout.setSize(1300, 800); layout.setBounds(1452, 1889); layout.setGraph([...ends, ...people], links); layout.settle(3000);
+  const start = at(layout, 'a').y, ids = people.map(person => person.id), before = new Map(ids.map(id => [id, { ...at(layout, id) }]));
+  const drag = (to: number) => {
+    layout.dragStart('a');
+    const from = at(layout, 'a').y;
+    for (let step = 1; step <= 40; step++) { layout.dragTo('a', layout.xOf(1889), from + (to - from) * step / 40); layout.step(); layout.step(); }
+    layout.dragEnd('a'); layout.settle(3000);
+  };
+  const away = () => ids.filter(id => Math.hypot(at(layout, id).x - before.get(id)!.x, at(layout, id).y - before.get(id)!.y) > 15).length;
+  drag(start - 700);
+  assert.ok(away() > 0, 'the endpoint pushes people aside on its way');
+  drag(start);
+  assert.ok(away() < ids.length * 0.02, `${away()} of ${ids.length} people stayed where the endpoint had pushed them`);
+});
+
+test('free layout: the people beside a dragged one give way, and what an endpoint pushed aside goes back when it is moved away', { timeout: 60000 }, () => {
+  const rnd = seededRandom(5);
+  const people: LayoutInput[] = Array.from({ length: 700 }, (_, i) => ({ id: `p${i}`, year: Math.round(1400 + Math.sqrt(rnd()) * 620), endpoint: null, radius: 20 }));
+  const ends: LayoutInput[] = [{ id: 'a', year: 1889, endpoint: 0, radius: 32 }, { id: 'b', year: 1452, endpoint: 1, radius: 32 }];
+  const links = people.map((person, i) => ({ a: person.id, b: i % 7 === 0 ? 'a' : people[Math.floor(rnd() * Math.max(1, i))].id }));
+  const layout = new NetworkLayout(seededRandom(3));
+  layout.setSize(1300, 800); layout.setBounds(1452, 1889); layout.setMode('free'); layout.setGraph([...ends, ...people], links); layout.settle(3000);
+  const ids = people.map(person => person.id), before = new Map(ids.map(id => [id, { ...at(layout, id) }]));
+  const away = (limit: number) => ids.filter(id => Math.hypot(at(layout, id).x - before.get(id)!.x, at(layout, id).y - before.get(id)!.y) > limit).length;
+  const drag = (id: string, to: { x: number; y: number }) => {
+    layout.dragStart(id);
+    const from = at(layout, id);
+    for (let step = 1; step <= 40; step++) { layout.dragTo(id, from.x + (to.x - from.x) * step / 40, from.y + (to.y - from.y) * step / 40); layout.step(); layout.step(); }
+    return from;
+  };
+  const home = { ...at(layout, 'a') };
+  drag('a', { x: layout.width / 2, y: layout.height / 2 });
+  const during = away(15);
+  assert.ok(during > 0, 'the endpoint pushes people aside on its way through the crowd');
+  assert.ok(during < ids.length * 0.5, `${during} of ${ids.length} people moved during the drag`);
+  layout.dragEnd('a'); layout.settle(3000);
+  drag('a', home); layout.dragEnd('a'); layout.settle(3000);
+  assert.ok(away(15) < ids.length * 0.03, `${away(15)} of ${ids.length} people stayed where the endpoint had pushed them`);
 });

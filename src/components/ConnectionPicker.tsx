@@ -73,7 +73,7 @@ const ConnectionPicker: React.FC<Props> = ({ source, figures, error, initialDraf
     <div data-connection-picker className="connection-picker" style={{ top: topOffset }} role="region" aria-label="Choose who to connect">
       <div className="connection-picker-heading">
         <p className="connection-picker-text">
-          Connecting from <strong>{source.name}</strong>: pick a person on the canvas or type a name. Esc to cancel.
+          Connecting from <strong>{source.name}</strong>: pick a person on the canvas or type a name. <kbd>Esc</kbd> to cancel.
         </p>
         {onOpenInfo && <SixDegreesInfoButton onOpen={onOpenInfo} plain />}
       </div>
