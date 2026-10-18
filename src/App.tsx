@@ -13,7 +13,7 @@ import RelationshipPopover from './components/RelationshipPopover';
 import RelationshipOverlay, { RelationshipOverlayState } from './components/RelationshipOverlay';
 import { CATEGORY_LIST, KEEP_DISCOVERY_CLUSTERS } from './constants';
 import { addDiscoveryCluster, emptyClusters } from './utils/discoveryClusters';
-import { activateCanvas, CanvasCache, createCanvasSnapshot, defaultCanvasView, loadCanvasHistory, saveCanvasHistory } from './utils/canvasHistory';
+import { activateCanvas, CanvasCache, createCanvasSnapshot, defaultCanvasView, isTimeSpanCanvas, loadCanvasHistory, saveCanvasHistory } from './utils/canvasHistory';
 import Toast from './components/Toast';
 import ProgressOverlay from './components/ProgressOverlay';
 import SettingsDialog from './components/SettingsDialog';
@@ -417,6 +417,13 @@ const App: React.FC = () => {
             }
         }
     }, [ensureWeaveProvider, commitCanvas]);
+
+    // A strict time span that already has a canvas (the current one or one in history) opens that canvas instead of weaving it again.
+    const findTimeSpanCanvas = useCallback((start: number, end: number): (() => void) | null => {
+        if (figures.length && isTimeSpanCanvas(config, start, end)) return closeLauncher;
+        const canvas = history.find(snapshot => isTimeSpanCanvas(snapshot.config, start, end));
+        return canvas ? () => commitCanvas(canvas) : null;
+    }, [figures.length, config, history, closeLauncher, commitCanvas]);
 
     const suggestWeaveTopic = useCallback(async (excludedTopics: string[], broadenTopic?: string) => {
         ensureWeaveProvider();
@@ -1022,6 +1029,7 @@ const App: React.FC = () => {
                 onClose={closeLauncher}
                 onSubmit={buildTimeline}
                 onSurprise={suggestWeaveTopic}
+                findTimeSpanCanvas={findTimeSpanCanvas}
                 onOpenSettings={() => { closeLauncher(); setIsSettingsOpen(true); }}
             />}
 

@@ -25,8 +25,9 @@ The app uses Google Gemini, OpenRouter, or Ollama to generate historical data an
 
 ### Canvas Launcher
 
-- **Weave New Canvas**: Choose from six illustrated cards to build a timeline by year range, era, person, region, theme, or a custom prompt
-- **Guided Prompts**: Open a card for its input form and clickable examples, where available
+- **Weave New Canvas**: Choose from six strategy cards to build a timeline by year range, era, person, region, theme, or a custom prompt
+- **Guided Prompts**: Open a card for its input form and clickable examples, or switch strategy with the tabs above the form
+- **Era Band**: For a strict time span, drag the window or its edges across an era band, click an era to fill in its years, or pick a quick preset. A time span that already has a canvas offers to open it instead of weaving it again, and time-span canvases are titled with their years and eras
 - **Surprise Me**: Get a screened AI suggestion about a recognizable historical subject, review its years and categories, then weave it or spin again
 - **Topic-aware Timelines**: AI interprets your prompt to determine the historical period and relevant categories
 - **Preserved Canvas**: Your existing timeline stays in place until a new build succeeds
@@ -35,7 +36,7 @@ The app uses Google Gemini, OpenRouter, or Ollama to generate historical data an
 
 Keep up to **20 previous canvases plus the current canvas**, saved automatically in this browser's localStorage and retained across reloads.
 
-- **History Controls**: Use the stacked horizontal lines on the left of the canvas, or the vertical ticks below the launcher's header at the top right
+- **History Controls**: Use the stacked horizontal lines on the left of the canvas, or the vertical ticks in the launcher's header at the top right
 - **Quick Previews**: Hover or focus a marker to see its prompt, prompting type, historical duration and year range, positive figure/event counts, created date, and unique verified connection count. Long prompts end with an ellipsis
 - **Restore Your Exploration**: Click or tap a marker to restore its figures, events, discoveries, cached biographies and relationships, canvas layout, zoom, pan, filters, search, and sidebar state
 - **Keyboard Navigation**: Use arrow keys to move between markers, Home/End to jump to the first/last entry, and Enter to open a canvas
@@ -130,19 +131,19 @@ Choose a card based on how you want to explore history:
 | **Follow a Figure** | A historical person's name | `Ada Lovelace` |
 | **Region & Culture** | A region, empire, or culture | `Viking Age Scandinavia` |
 | **Theme or Discipline** | A field, movement, or idea | `Early History of Computing` |
-| **Freeform / Custom** | A prompt combining places, periods, people, or ideas | `Women pioneers in medicine before 1900` |
+| **Freeform** | A prompt combining places, periods, people, or ideas | `Women pioneers in medicine before 1900` |
 
-1. Open a card and enter your years or prompt. For topic cards, you can click an example to fill the input and edit it.
+1. Open a card and enter your years or prompt. For topic cards, you can click an example to fill the input and edit it. For **Strict Time Span**, type the years or drag the era band.
 2. Click **Weave**. The app validates the request before generating the timeline. For topic prompts, AI infers the year range and relevant categories; **Strict Time Span** keeps your entered years and permits all categories. Use whole-number years, with negative numbers for BCE dates (for example, `-500` for 500 BCE), and an end year later than the start year. Future years are not accepted.
 3. If validation or generation fails, the form shows an error so you can revise the request and try again. A successful build becomes the current canvas, archives the previous canvas in history, and is saved locally, including its topic and category scope.
 
 The canvas adds space around the requested period for readability; this padding does not broaden the historical subject. Topic timelines offer only the relevant category filters, and **Expand Timeline** continues to respect the original topic.
 
-Use **Back** or **Escape** to return from a card's form to the card grid before submitting. Closing the launcher during validation or generation cancels the build and preserves your existing timeline. Settings is disabled while validation or generation is in progress.
+Use **Back** or **Escape** to return from a card's form to the card grid before submitting, or the tabs above the form to switch strategy. Closing the launcher during validation or generation cancels the build and preserves your existing timeline. Settings is disabled while validation or generation is in progress.
 
 ### Surprise Me
 
-Click **Surprise Me** below the cards to request a historical suggestion. Review its topic, year range, and categories, then click **Weave** to build it or **Spin Again** for another suggestion. Requesting a suggestion does not start a timeline build. Use the suggestion panel's close button or **Escape** to collapse it before weaving.
+Click **Surprise Me** below the cards to request a historical suggestion. Review its topic, year range, and categories, then click **Weave this** to build it or **Spin again** for another suggestion. Requesting a suggestion does not start a timeline build. Use the suggestion panel's close button or **Escape** to collapse it before weaving.
 
 Suggestions favor familiar eras, major developments, established disciplines, and famous people with known connections across world regions. They use the subject's natural historical span, including short periods with rich coverage, rather than arbitrary narrow date slices. The AI must supply five to eight named examples fitting the suggested years and categories before the topic is shown. This lightweight coverage check happens in the suggestion request; it does not generate or verify a full canvas.
 

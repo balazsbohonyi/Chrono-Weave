@@ -1,0 +1,473 @@
+/* Weave launcher: frosted glass panes over a thread field on a paper ground.
+   Its palette is its own and is scoped to .lx-root; the app's data-theme on <html> switches it. */
+
+/* ---------- tokens ---------- */
+.lx-root {
+  --btn-radius: 10px;
+  color-scheme: light;
+  --bg: 244 236 216;
+  --bg-2: 233 222 194;
+  --surface: 255 252 244;
+  --ink: 28 25 23;
+  --ink-2: 68 61 54;
+  --ink-3: 120 110 98;
+  --line: 120 100 70;
+  --accent: 51 102 204; /* blue-600 with the saturation taken down: it read too loud on parchment */
+  --accent-2: 109 40 217;
+  --on-accent: 255 255 255;
+  --danger: 185 28 28;
+  --thread-1: 30 64 175;
+  --thread-2: 109 40 217;
+  --thread-3: 13 148 136;
+  --thread-4: 180 83 9;
+  --thread-5: 14 116 144;
+  --thread-label: 120 96 66;
+  --thread-mode: ink;
+  --glass: 255 252 244;
+  --glass-a: 0.55;
+  --shadow: 60 40 10;
+  --sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --display: var(--sans);
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --spring: cubic-bezier(.2, .9, .25, 1.15);
+  --out: cubic-bezier(.16, 1, .3, 1);
+
+  /* glass panes, with a lit rim so the edges read */
+  --card-c: var(--accent); --pane-a: .32; --pane-blur: 4px; --pane-radius: 16px;
+  --pane-border: rgb(var(--line) / .22);
+  --pane-sheen: linear-gradient(180deg, rgb(255 255 255 / .24), rgb(255 255 255 / 0) 40%);
+  /* light catching the cut edge: bright top lip, softer sides, faint bottom return */
+  --pane-edge: inset 0 1px 0 rgb(255 255 255 / .95), inset 1px 0 0 rgb(255 255 255 / .45), inset -1px 0 0 rgb(255 255 255 / .3),
+    inset 0 -1px 0 rgb(255 255 255 / .25), inset 0 0 0 2px rgb(255 255 255 / .12);
+  --pane-shadow: 0 1px 2px rgb(var(--shadow) / .07), 0 14px 30px -18px rgb(var(--shadow) / .32);
+  --card-shadow-hi: 0 2px 4px rgb(var(--shadow) / .08), 0 22px 44px -12px rgb(var(--shadow) / .30), 0 60px 90px -44px rgb(var(--shadow) / .42);
+  --pane-halo: 0 0 10px rgb(var(--bg) / .8);
+  --pane-fill: var(--pane-sheen), rgb(var(--glass) / var(--pane-a));
+}
+:root[data-theme="dark"] .lx-root {
+  color-scheme: dark;
+  --bg: 7 11 24;
+  --bg-2: 15 23 42;
+  --surface: 30 41 59;
+  --ink: 241 245 249;
+  --ink-2: 203 213 225;
+  --ink-3: 148 163 184;
+  --line: 148 163 184;
+  --accent: 96 165 250;
+  --accent-2: 167 139 250;
+  --on-accent: 7 11 24;
+  --danger: 248 113 113;
+  --thread-1: 96 165 250;
+  --thread-2: 139 92 246;
+  --thread-3: 16 185 129;
+  --thread-4: 251 191 36;
+  --thread-5: 6 182 212;
+  --thread-label: 148 163 184;
+  --thread-mode: glow;
+  --glass: 15 23 42;
+  --glass-a: 0.42;
+  --shadow: 0 0 0;
+  --pane-border: rgb(148 163 184 / .2);
+  --pane-sheen: linear-gradient(180deg, rgb(255 255 255 / .05), rgb(255 255 255 / 0) 40%);
+  --pane-edge: inset 0 1px 0 rgb(255 255 255 / .16), inset 1px 0 0 rgb(255 255 255 / .05), inset -1px 0 0 rgb(255 255 255 / .04),
+    inset 0 0 0 2px rgb(255 255 255 / .02);
+  --pane-shadow: 0 18px 40px -22px rgb(0 0 0 / .7);
+  --card-shadow-hi: 0 2px 4px rgb(0 0 0 / .4), 0 26px 50px -12px rgb(0 0 0 / .8), 0 60px 90px -40px rgb(0 0 0 / .9);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lx-root *, .lx-root *::before, .lx-root *::after {
+    animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; transition-delay: 0ms !important;
+  }
+}
+
+/* ---------- shell ---------- */
+.lx-root {
+  position: fixed; inset: 0; z-index: 95; overflow: hidden; isolation: isolate; outline: none;
+  background: rgb(var(--bg)); color: rgb(var(--ink)); font-family: var(--sans); line-height: normal;
+  -webkit-font-smoothing: antialiased;
+}
+:where(.lx-root) :is(button, input, textarea) { font: inherit; color: inherit; }
+:where(.lx-root) :focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 3px; border-radius: 8px; }
+.lx-root::before { /* vignette */
+  content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(1200px 700px at 50% 42%, rgb(var(--bg-2) / .9), transparent 70%),
+    radial-gradient(900px 500px at 85% 110%, rgb(var(--accent-2) / .10), transparent 70%),
+    radial-gradient(900px 500px at 10% -10%, rgb(var(--accent) / .10), transparent 70%);
+}
+.lx-field { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; display: block; }
+
+.lx-header {
+  position: relative; z-index: 5; display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 18px 28px;
+}
+.lx-brand { display: flex; align-items: center; gap: 12px; }
+.lx-brand-mark { width: 30px; height: 30px; color: rgb(var(--accent)); }
+.lx-brand h2 { margin: 0; font-size: 15px; font-weight: 700; letter-spacing: -.01em; }
+.lx-brand p { margin: 1px 0 0; font-size: 12px; color: rgb(var(--ink-3)); }
+.lx-header-actions { display: flex; align-items: center; gap: 6px; }
+/* like the app's .canvas-control-button: no chrome, the icon takes the accent on hover and keyboard focus */
+.lx-icon-btn {
+  width: 36px; height: 36px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 8px;
+  background: transparent; color: rgb(var(--ink-3)); cursor: pointer; transition: color 150ms;
+}
+.lx-icon-btn:not(:disabled):hover, .lx-icon-btn:focus-visible { color: rgb(var(--accent)); }
+:where(.lx-root) .lx-icon-btn:focus-visible { outline: none; }
+.lx-icon-btn:disabled { opacity: .4; cursor: not-allowed; }
+.lx-icon-btn svg { width: 20px; height: 20px; }
+
+/* canvas history (the app's CanvasHistory, horizontal) sits in the header, in the launcher's colours */
+.lx-hist { display: flex; align-items: center; height: 36px; margin-right: 10px; }
+.lx-hist .canvas-history-marker span { background: rgb(var(--ink-3)); }
+.lx-hist .canvas-history-marker[data-active] span { background: rgb(var(--accent)); }
+
+.lx-main { position: absolute; inset: 72px 0 0; z-index: 3; }
+.lx-view { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; }
+.lx-view[hidden] { display: none; }
+
+/* ---------- hero: "Weave history around <rotating word>" ---------- */
+.lx-hero { text-align: center; padding: 3vh 24px 0; max-width: 1200px; }
+.lx-eyebrow {
+  display: inline-flex; align-items: center; font-size: 13px; font-weight: 700; letter-spacing: .2em; text-transform: uppercase;
+  color: rgb(var(--accent));
+}
+.lx-title {
+  margin: 14px 0 0; font-family: var(--display); font-weight: 800; font-size: clamp(34px, 4.4vw, 64px); line-height: 1.02; letter-spacing: -.04em;
+}
+.lx-title .w { display: inline-block; will-change: transform, opacity, filter; }
+.lx-sub { margin: 16px auto 0; max-width: 600px; font-size: clamp(15px, 1.1vw, 16.5px); font-weight: 400; line-height: 1.4; color: rgb(var(--ink)); text-wrap: balance; }
+.lx-title .lx-br { display: none; }
+@media (min-width: 1024px), (min-width: 760px) and (orientation: landscape) {
+  .lx-title, .lx-sub { white-space: nowrap; }
+  .lx-sub { max-width: none; }
+}
+@media (max-width: 1023px) and (orientation: portrait), (max-width: 759px) {
+  .lx-title .lx-br { display: inline; }
+}
+/* .w would make this inline-block and unstack the words */
+.lx-title .lx-rot.w { display: inline-grid; justify-items: start; vertical-align: bottom; text-align: left; transition: width .55s var(--out); }
+.lx-rot > span {
+  grid-area: 1 / 1; white-space: nowrap; color: rgb(var(--accent)); opacity: 0; transform: translateY(.45em); filter: blur(8px);
+  transition: opacity .5s var(--out), transform .6s var(--out), filter .5s;
+}
+.lx-rot > span.in { opacity: 1; transform: none; filter: none; }
+.lx-rot > span.out { opacity: 0; transform: translateY(-.45em); filter: blur(8px); }
+
+/* ---------- glyph tracing ---------- */
+.lx-root .glyph path { stroke-dasharray: 1; stroke-dashoffset: 0; transition: stroke-dashoffset .9s cubic-bezier(.65, 0, .35, 1) calc(var(--i) * 90ms); }
+.lx-root .glyph.is-untraced path { stroke-dashoffset: 1; transition-duration: .35s; transition-delay: 0ms; }
+.lx-root .glyph-stack { position: relative; }
+.lx-root .glyph-stack .glyph { position: absolute; inset: 0; width: 100%; height: 100%; }
+.lx-root .glyph-stack .glyph-base { opacity: .4; }
+
+/* ---------- strategy cards: glass panes ---------- */
+.lx-launcher-body { width: min(1120px, calc(100% - 48px)); margin-top: 5vh; perspective: 1600px; }
+.lx-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+@media (max-width: 860px) { .lx-grid { grid-template-columns: repeat(2, 1fr); } }
+.lx-scard {
+  --rx: 0deg; --ry: 0deg; --px: 0px; --py: 0px; --lift: 0px; --mx: 50%;
+  position: relative; display: flex; flex-direction: column; align-items: flex-start; text-align: left;
+  min-height: 200px; padding: 22px 22px 20px; border-radius: var(--pane-radius); cursor: pointer; overflow: hidden;
+  border: 1px solid var(--pane-border); background: var(--pane-fill);
+  -webkit-backdrop-filter: blur(var(--pane-blur)); backdrop-filter: blur(var(--pane-blur));
+  box-shadow: var(--pane-edge), var(--pane-shadow);
+  transform: translate3d(var(--px), var(--py), 0) rotateX(var(--rx)) rotateY(var(--ry)) translateY(var(--lift)); transform-style: preserve-3d;
+  transition: transform .55s var(--spring), box-shadow .4s;
+}
+.lx-scard:is(:hover, :focus-visible) { --lift: -5px; box-shadow: var(--pane-edge), var(--card-shadow-hi); }
+.lx-root .lx-scard:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 4px; border-radius: var(--pane-radius); }
+.lx-scard > * { position: relative; }
+.lx-scard .lx-scard-idx, .lx-scard .lx-scard-go { position: absolute; }
+.lx-scard :is(.lx-scard-idx, .lx-scard-kicker, .lx-scard-title, .lx-scard-desc) { text-shadow: var(--pane-halo); }
+.lx-scard .glyph-stack { width: 50px; height: 50px; color: rgb(var(--card-c)); transform: translateZ(30px); }
+.lx-scard-idx { top: 22px; right: 22px; font: 600 11px var(--mono); color: rgb(var(--ink-3)); letter-spacing: .1em; transition: opacity .25s; }
+.lx-scard-kicker { margin-top: auto; font-size: 10.5px; font-weight: 700; letter-spacing: .18em; text-transform: uppercase; color: rgb(var(--card-c)); transform: translateZ(20px); }
+.lx-scard-title { margin: 6px 0 0; font-family: var(--display); font-weight: 750; font-size: 22px; line-height: 1.15; letter-spacing: -.025em; transform: translateZ(24px); }
+.lx-scard-desc { margin: 7px 0 0; font-size: 14.5px; line-height: 1.45; color: rgb(var(--ink-2)); transform: translateZ(16px); }
+.lx-scard-go {
+  top: 16px; right: 16px; width: 34px; height: 34px; border-radius: var(--btn-radius); display: grid; place-items: center;
+  color: rgb(var(--ink)); background: rgb(var(--line) / .12); opacity: 0; transform: translateX(-8px) scale(.85);
+  transition: opacity .3s, transform .45s var(--spring);
+}
+.lx-scard-go svg { width: 16px; height: 16px; }
+.lx-scard:is(:hover, :focus-visible) .lx-scard-go { opacity: 1; transform: none; }
+.lx-scard:is(:hover, :focus-visible) .lx-scard-idx { opacity: 0; }
+
+/* ---------- morph ghost: carries the pane on ::before so it can shed it while landing on the icon-only stage ---------- */
+.lx-ghost { position: fixed; z-index: 40; pointer-events: none; display: grid; place-items: center; overflow: visible; color: rgb(var(--card-c)); }
+.lx-ghost .glyph-stack { position: relative; width: 54%; height: 54%; max-width: 84px; max-height: 84px; }
+.lx-ghost::before {
+  content: ''; position: absolute; inset: 0; border-radius: inherit;
+  border: 1px solid var(--pane-border); background: var(--pane-sheen), rgb(var(--glass) / .6);
+  -webkit-backdrop-filter: blur(var(--pane-blur)); backdrop-filter: blur(var(--pane-blur));
+  box-shadow: var(--pane-edge), var(--card-shadow-hi);
+  transition: opacity .5s var(--out);
+}
+.lx-ghost.is-iconic::before { opacity: 0; }
+
+/* ---------- surprise ---------- */
+.lx-surprise-dock { position: relative; margin-top: auto; padding: 24px 0 4vh; z-index: 4; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.lx-surprise-btn {
+  position: relative; display: inline-flex; align-items: center; gap: 10px; height: 46px; padding: 0 22px 0 16px; border-radius: var(--btn-radius);
+  border: 1px solid rgb(var(--line) / .25); background: rgb(var(--glass) / .5); backdrop-filter: blur(10px);
+  font-size: 14px; font-weight: 600; cursor: pointer; overflow: hidden; transition: transform .3s var(--spring), border-color .2s;
+}
+.lx-surprise-btn:not(:disabled):hover { transform: translateY(-2px); border-color: rgb(var(--accent) / .6); }
+.lx-surprise-btn:disabled { cursor: not-allowed; opacity: .6; }
+.lx-surprise-btn::before { /* travelling sheen */
+  content: ''; position: absolute; inset: -1px; border-radius: inherit; padding: 1px;
+  background: conic-gradient(from var(--lx-a, 0deg), transparent 0 70%, rgb(var(--accent)) 82%, rgb(var(--accent-2)) 90%, transparent 100%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude;
+  animation: lx-spin 4s linear infinite;
+}
+@property --lx-a { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+@keyframes lx-spin { to { --lx-a: 360deg; } }
+.lx-surprise-btn .lx-die { width: 20px; height: 20px; color: rgb(var(--accent)); transition: transform .6s var(--spring); }
+.lx-surprise-btn:not(:disabled):hover .lx-die { transform: rotate(180deg); }
+.lx-surprise-hint { font-size: 12px; color: rgb(var(--ink-3)); }
+
+.lx-scrim { position: absolute; inset: 0; z-index: 6; display: grid; place-items: center; padding: 24px; }
+.lx-scrim[hidden] { display: none; }
+/* the same pane as the strategy cards, as wide as the old Surprise box */
+.lx-card {
+  position: relative; width: min(820px, 100%); padding: 26px 30px 22px; border-radius: var(--pane-radius);
+  border: 1px solid var(--pane-border); background: var(--pane-fill);
+  -webkit-backdrop-filter: blur(var(--pane-blur)); backdrop-filter: blur(var(--pane-blur));
+  box-shadow: var(--pane-edge), var(--card-shadow-hi);
+}
+.lx-card :is(.lx-suggestion, .lx-ticker, .lx-notice, .lx-range) { text-shadow: var(--pane-halo); }
+.lx-card-close { position: absolute; top: 14px; right: 14px; }
+.lx-ticker { margin-top: 6px; font-family: var(--display); font-weight: 800; font-size: clamp(26px, 7.5vw, 44px); white-space: nowrap; line-height: 1; text-align: center; letter-spacing: -.035em; font-variant-numeric: tabular-nums; }
+.lx-ticker small { display: block; margin-top: 10px; font-family: var(--sans); font-weight: 400; font-size: 13px; letter-spacing: .02em; color: rgb(var(--ink-3)); }
+.lx-pill {
+  display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: 999px; font-size: 11px; letter-spacing: .12em; text-transform: uppercase;
+  color: rgb(var(--accent)); font-weight: 800;
+  background: rgb(var(--accent) / .14); border: 1px solid rgb(var(--accent) / .42);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .35);
+}
+:root[data-theme="dark"] .lx-root .lx-pill { background: rgb(var(--accent) / .18); border-color: rgb(var(--accent) / .5); box-shadow: none; }
+.lx-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding-right: 40px; }
+.lx-meta-end { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; margin-left: auto; }
+.lx-cat { display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: 999px; font-size: 11.5px; font-weight: 600; color: rgb(var(--ink-2)); border: 1px solid rgb(var(--line) / .28); background: transparent; }
+.lx-range { font-family: var(--mono); font-size: 12px; font-weight: 700; color: rgb(var(--accent)); margin-left: 6px; white-space: nowrap; }
+.lx-suggestion { margin: 16px 0 0; font-family: var(--display); font-size: 28px; line-height: 1.2; font-weight: 700; letter-spacing: -.02em; }
+.lx-notice { margin: 14px 0 0; font-size: 14px; line-height: 1.55; color: rgb(var(--ink-2)); }
+.lx-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; margin-top: 22px; padding-top: 16px; border-top: 1px solid rgb(var(--line) / .15); }
+.lx-actions[hidden] { display: none; }
+
+/* ---------- buttons ---------- */
+.lx-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 44px; padding: 0 20px; border-radius: var(--btn-radius);
+  border: 1px solid rgb(var(--line) / .3); background: transparent; font-size: 14px; font-weight: 600; cursor: pointer;
+  transition: transform .25s var(--spring), background .2s, border-color .2s;
+}
+.lx-btn:hover { background: rgb(var(--line) / .08); border-color: rgb(var(--line) / .45); }
+.lx-btn:active { transform: scale(.97); }
+.lx-btn:disabled { opacity: .6; cursor: not-allowed; }
+.lx-weave {
+  border: 0; color: #fff; background: rgb(37 99 235);
+  box-shadow: 0 6px 18px -6px rgb(37 99 235 / .55);
+}
+.lx-weave:hover { background: rgb(29 78 216); border: 0; transform: translateY(-1px); }
+/* light theme: the same muted blue as the accent */
+:root:not([data-theme="dark"]) .lx-root .lx-weave { background: rgb(var(--accent)); box-shadow: 0 6px 18px -6px rgb(var(--accent) / .5); }
+:root:not([data-theme="dark"]) .lx-root .lx-weave:hover { background: rgb(41 86 176); }
+.lx-weave svg { width: 16px; height: 16px; }
+.lx-weave[disabled] { opacity: .6; cursor: progress; }
+
+/* ---------- stage (prompt page) ---------- */
+.lx-stage { justify-content: safe center; overflow-y: auto; padding: 0 24px 6vh; } /* safe: a card taller than the screen scrolls instead of sliding under the header */
+/* back to the strategy grid (Escape does the same) */
+.lx-back {
+  position: absolute; top: 8px; left: 28px; z-index: 1; display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 14px 0 10px;
+  border-radius: var(--btn-radius); border: 1px solid rgb(var(--line) / .2); background: rgb(var(--glass) / .4); backdrop-filter: blur(8px);
+  font-size: 13px; font-weight: 600; color: rgb(var(--ink-2)); cursor: pointer; transition: transform .25s var(--spring), color .2s, opacity .5s var(--out);
+}
+.lx-back:not(:disabled):hover { color: rgb(var(--ink)); transform: translateX(-3px); }
+.lx-back:disabled { cursor: not-allowed; opacity: .5; }
+.lx-back svg { width: 16px; height: 16px; }
+.lx-stage:not(.is-in) .lx-back { opacity: 0; }
+@media (max-width: 640px) { .lx-back { left: 16px; } }
+.lx-stage-inner { width: min(960px, 100%); display: flex; flex-direction: column; align-items: stretch; text-align: left; }
+.lx-tabs, .lx-stage-card {
+  border: 1px solid var(--pane-border); background: var(--pane-fill);
+  -webkit-backdrop-filter: blur(var(--pane-blur)); backdrop-filter: blur(var(--pane-blur));
+  box-shadow: var(--pane-edge), var(--pane-shadow);
+}
+.lx-stage-card { position: relative; display: flex; flex-direction: column; align-items: stretch; border-radius: var(--pane-radius); padding: clamp(22px, 3vw, 34px) clamp(20px, 3.4vw, 40px) clamp(20px, 2.6vw, 28px); }
+.lx-stage-card :is(.lx-stage-title, .lx-stage-desc, .lx-field-label, .lx-help, .lx-build-title, .lx-build-desc) { text-shadow: var(--pane-halo); }
+.lx-stage :is(.lx-tabs, .lx-stage-card) { opacity: 0; transition: opacity .5s var(--out); }
+.lx-stage.is-in :is(.lx-tabs, .lx-stage-card) { opacity: 1; }
+.lx-tabs { position: relative; display: flex; gap: 2px; padding: 4px; margin-bottom: 14px; border-radius: calc(var(--btn-radius) + 4px); }
+.lx-tabs-pill { position: absolute; top: 4px; bottom: 4px; left: 0; width: 0; border-radius: var(--btn-radius); background: rgb(var(--accent) / .13); transition: transform .5s var(--spring), width .5s var(--spring); }
+.lx-tab {
+  position: relative; z-index: 1; flex: 1 1 auto; min-width: 0; display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 36px; padding: 0 10px;
+  border: 0; border-radius: var(--btn-radius); background: none; cursor: pointer; font-size: 13px; font-weight: 600; color: rgb(var(--ink-3)); white-space: nowrap; transition: color .25s;
+}
+.lx-tab:not(:disabled):hover { color: rgb(var(--ink)); }
+.lx-tab[aria-pressed="true"] { color: rgb(var(--accent)); }
+.lx-tab:disabled { cursor: not-allowed; opacity: .55; }
+.lx-tab .lx-tab-icon { flex: none; width: 18px; height: 18px; }
+.lx-tab .lx-tab-icon path { stroke-width: 5; }
+.lx-tab span { overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 900px) { .lx-tab span { display: none; } }
+/* the icon without a medallion: the same box as the landed ghost, whose glyph is 54% of it */
+.lx-medallion { position: relative; display: grid; place-items: center; border-radius: 50%; color: rgb(var(--card-c)); }
+.lx-medallion .glyph-stack { width: 54%; height: 54%; }
+.lx-stage-head { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 18px; text-align: left; max-width: 100%; }
+/* a 59px icon, title + description tall; the negative margin lines it up with the card's left edge */
+.lx-stage-head .lx-medallion { width: 110px; height: 110px; margin: -25px -6px -25px -25px; }
+.lx-stage-text { display: flex; flex-direction: column; align-items: stretch; min-width: 0; }
+.lx-stage-titlerow { display: flex; align-items: center; justify-content: space-between; gap: 8px 16px; flex-wrap: wrap; }
+.lx-stage-kicker { flex: none; margin: 0; }
+.lx-stage-title { margin: 0; font-family: var(--display); font-weight: 750; font-size: clamp(24px, 2.2vw, 30px); line-height: 1.08; letter-spacing: -.025em; }
+.lx-stage-desc { margin: 4px 0 0; font-size: 15px; color: rgb(var(--ink-2)); }
+.lx-form { width: 100%; margin-top: 24px; padding-top: 22px; border-top: 1px solid rgb(var(--line) / .14); }
+.lx-form[hidden] { display: none; }
+.lx-reveal > * { opacity: 0; transform: translateY(14px); filter: blur(6px); transition: opacity .6s var(--out), transform .7s var(--out), filter .6s var(--out); transition-delay: calc(var(--d, 0) * 70ms + 120ms); }
+.lx-reveal.is-in > * { opacity: 1; transform: none; filter: none; }
+
+.lx-field-label { display: block; margin: 0 0 10px; font-size: 11px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: rgb(var(--ink-3)); }
+.lx-input-wrap { position: relative; text-align: left; padding-bottom: 10px; }
+.lx-input {
+  width: 100%; resize: none; border: 0; outline: none; background: transparent; padding: 6px 0;
+  font-family: var(--display); font-weight: 500; font-size: clamp(18px, 1.6vw, 22px); line-height: 1.25; letter-spacing: -.01em; color: rgb(var(--ink)); text-align: left;
+}
+.lx-root .lx-input:focus-visible { outline: none; }
+.lx-input::placeholder { color: rgb(var(--ink-3) / .65); }
+.lx-underline { position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: rgb(var(--line) / .3); overflow: hidden; }
+.lx-underline::after {
+  content: ''; position: absolute; inset: 0; transform: scaleX(0); transform-origin: 50% 50%;
+  background: rgb(var(--ink) / .22); transition: transform .7s var(--out);
+}
+.lx-input-wrap:focus-within .lx-underline::after { transform: scaleX(1); }
+
+.lx-chips {
+  position: relative; margin-top: 18px; overflow: hidden;
+  -webkit-mask: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent); mask: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
+}
+.lx-chips-track { display: flex; gap: 8px; width: max-content; animation: lx-marquee var(--dur, 40s) linear infinite; }
+.lx-chips:is(:hover, :focus-within) .lx-chips-track { animation-play-state: paused; }
+@keyframes lx-marquee { to { transform: translateX(calc(-50% - 4px)); } }
+@media (prefers-reduced-motion: reduce) {
+  .lx-chips { overflow-x: auto; }
+  .lx-root .lx-chips-track { animation: none; }
+  .lx-chips-track [aria-hidden="true"] { display: none !important; }
+}
+.lx-chip {
+  flex: none; display: inline-flex; align-items: center; height: 32px; padding: 0 14px; border-radius: var(--btn-radius); cursor: pointer; white-space: nowrap;
+  border: 1px solid rgb(var(--line) / .22); background: rgb(var(--glass) / .45); backdrop-filter: blur(6px);
+  font-size: 13px; color: rgb(var(--ink-2)); transition: border-color .2s, color .2s, background .2s;
+}
+.lx-chip:not(:disabled):is(:hover, :focus-visible) { color: rgb(var(--ink)); border-color: rgb(var(--accent) / .55); background: rgb(var(--glass) / .7); }
+.lx-chip:disabled { cursor: not-allowed; opacity: .6; }
+.lx-form-foot { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 22px; }
+.lx-help { margin: 12px 0; font-size: 12px; color: rgb(var(--ink-3)); text-align: left; }
+.lx-help kbd { font-family: var(--mono); font-size: 11px; padding: 1px 5px; border-radius: 4px; border: 1px solid rgb(var(--line) / .3); }
+.lx-error {
+  margin-top: 16px; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 13px; font-weight: 600; color: rgb(var(--danger));
+  animation: lx-shake .4s;
+}
+.lx-error[hidden] { display: none; }
+.lx-card .lx-error { justify-content: flex-start; margin: 4px 40px 0 0; }
+.lx-card .lx-suggestion ~ .lx-error { margin: 14px 0 0; }
+/* a strict time span that already has a canvas: say so and offer to open it */
+.lx-exists {
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 16px; margin-top: 16px; padding: 10px 10px 10px 16px;
+  border-radius: var(--btn-radius); border: 1px solid rgb(var(--accent) / .35); background: rgb(var(--accent) / .08);
+  font-size: 13.5px; color: rgb(var(--ink-2)); text-shadow: var(--pane-halo);
+}
+.lx-exists b { color: rgb(var(--ink)); font-weight: 700; font-variant-numeric: tabular-nums; }
+.lx-exists-open { height: 34px; padding: 0 14px; font-size: 13px; color: rgb(var(--accent)); border-color: rgb(var(--accent) / .45); }
+@keyframes lx-shake { 20%, 60% { transform: translateX(-5px); } 40%, 80% { transform: translateX(5px); } }
+
+/* time span: start / end fields with era hints, quick picks, total span, and the era band */
+.lx-span-years { --yin-h: 52px; display: flex; align-items: flex-start; gap: 14px; flex-wrap: wrap; }
+.lx-yf { display: grid; gap: 5px; min-width: 0; }
+.lx-yin {
+  width: 6.4ch; height: var(--yin-h); padding: 0 12px; border: 1px solid rgb(var(--line) / .24); border-radius: var(--btn-radius); outline: 0;
+  background: rgb(var(--glass) / .55); font-size: 28px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; color: rgb(var(--ink));
+  transition: border-color .2s, box-shadow .2s;
+}
+.lx-root .lx-yin:focus-visible { outline: 0; }
+.lx-yin:focus { border-color: rgb(var(--accent) / .7); box-shadow: 0 0 0 3px rgb(var(--accent) / .16); }
+.lx-yera { font-style: normal; font-size: 13.5px; color: rgb(var(--ink-3)); min-height: 1.2em; white-space: nowrap; }
+.lx-yto { display: grid; place-items: center; height: var(--yin-h); color: rgb(var(--ink-3)); }
+.lx-yto svg { width: 18px; height: 18px; }
+.lx-presets { flex: 1 1 260px; min-width: 0; margin: -4px 0 0 18px; padding-left: 20px; border-left: 1px solid rgb(var(--line) / .14); }
+.lx-presets-k { display: block; margin-bottom: 8px; font-size: 12px; font-weight: 600; color: rgb(var(--ink-3)); }
+.lx-presets-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.lx-preset { height: 30px; padding: 0 12px; font-size: 12.5px; }
+.lx-preset[aria-pressed="true"] { color: rgb(var(--accent)); border-color: rgb(var(--accent) / .5); background: rgb(var(--accent) / .1); }
+@media (max-width: 760px) { .lx-presets { flex-basis: 100%; order: 3; margin: 4px 0 0; padding-left: 0; border-left: 0; } }
+.lx-ylen { margin: 0 0 0 auto; line-height: var(--yin-h); color: rgb(var(--ink-2)); font-size: 14px; }
+.lx-ylen b { font-size: 28px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; color: rgb(var(--ink)); }
+.lx-band { position: relative; height: 46px; margin-top: 40px; border-radius: var(--btn-radius); touch-action: none; user-select: none; -webkit-user-select: none; }
+.lx-segs { position: absolute; inset: 0; overflow: hidden; border-radius: inherit; background: rgb(var(--line) / .09); box-shadow: inset 0 0 0 1px rgb(var(--line) / .14); }
+.lx-seg { position: absolute; top: 0; bottom: 0; display: grid; place-items: center; overflow: hidden; cursor: pointer; box-shadow: inset -1px 0 0 rgb(var(--line) / .16); transition: background-color .2s; }
+.lx-seg:last-child { box-shadow: none; }
+.lx-seg:hover { background: rgb(var(--line) / .07); }
+.lx-seg em { font-style: normal; font-size: 11px; color: rgb(var(--ink-3)); white-space: nowrap; pointer-events: none; transition: opacity .3s, color .3s; }
+.lx-seg.on em { color: rgb(var(--ink)); font-weight: 600; }
+.lx-seg.tight em { opacity: 0; }
+.lx-win {
+  position: absolute; left: 0; top: 0; width: 100%; height: 100%; transform-origin: 0 0; cursor: grab;
+  background: rgb(var(--accent) / .16); box-shadow: inset 0 2px 0 rgb(var(--accent)), inset 0 -2px 0 rgb(var(--accent));
+}
+.lx-band.is-drag .lx-win { cursor: grabbing; }
+.lx-root .lx-win:focus-visible { outline-offset: 0; border-radius: 0; }
+.lx-wlab { position: absolute; left: 0; bottom: calc(100% + 14px); pointer-events: none; }
+.lx-wlab span { display: block; transform: translateX(-50%); white-space: nowrap; font: 700 12px/1 var(--mono); font-variant-numeric: tabular-nums; color: rgb(var(--accent)); }
+.lx-h { position: absolute; left: 0; top: -7px; bottom: -7px; width: 22px; margin-left: -11px; cursor: ew-resize; display: grid; place-items: center; }
+.lx-h i { display: block; width: 9px; height: 100%; border-radius: 5px; background: rgb(var(--surface)); box-shadow: 0 0 0 .5px rgb(var(--shadow) / .25), 0 2px 7px rgb(var(--shadow) / .28); transition: transform .3s var(--spring); }
+:root[data-theme="dark"] .lx-root .lx-h i { background: rgb(var(--ink)); box-shadow: 0 2px 7px rgb(0 0 0 / .5); }
+.lx-h:hover i, .lx-band.is-drag .lx-h:focus i { transform: scaleX(1.3); }
+.lx-root .lx-h:focus-visible { outline: none; }
+.lx-h:focus-visible i { outline: 2px solid rgb(var(--accent)); outline-offset: 2px; }
+.lx-axis { position: relative; height: 18px; margin-top: 7px; }
+.lx-axis span { position: absolute; top: 0; transform: translateX(-50%); font-size: 10.5px; font-weight: 700; white-space: nowrap; color: rgb(var(--ink-3)); font-variant-numeric: tabular-nums; }
+.lx-axis span:first-child { transform: none; }
+.lx-axis span:last-child { transform: translateX(-100%); }
+/* labels that would collide on a narrow band: 1 CE and 1900, then all but 3000 BCE, 1500 and 2000 */
+.lx-axis.is-narrow span:nth-child(2), .lx-axis.is-narrow span:nth-child(6) { display: none; }
+@media (max-width: 760px) { .lx-axis span:nth-child(2), .lx-axis span:nth-child(3), .lx-axis span:nth-child(5), .lx-axis span:nth-child(6) { display: none; } }
+
+/* build progress */
+.lx-build { width: 100%; margin-top: 24px; padding-top: 22px; border-top: 1px solid rgb(var(--line) / .14); text-align: left; }
+.lx-build[hidden] { display: none; }
+.lx-build-title { margin: 0; font-family: var(--display); font-size: 24px; font-weight: 700; letter-spacing: -.02em; }
+.lx-build-desc { margin: 8px 0 0; font-size: 14px; color: rgb(var(--ink-2)); min-height: 22px; }
+.lx-steps { display: flex; justify-content: flex-start; gap: 28px; margin-top: 92px; }
+.lx-step { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; color: rgb(var(--ink-3)); transition: color .3s; }
+.lx-step i { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid currentColor; transition: background .3s, transform .3s var(--spring); }
+.lx-step.is-active { color: rgb(var(--accent)); }
+.lx-step.is-active i { background: currentColor; transform: scale(1.3); animation: lx-pulse 1.2s infinite; }
+.lx-step.is-done { color: rgb(var(--ink-2)); }
+.lx-step.is-done i { background: currentColor; }
+@keyframes lx-pulse { 50% { box-shadow: 0 0 0 6px rgb(var(--accent) / .2); } }
+
+/* ---------- paper ground: fibre texture and two torn sheets ---------- */
+.lx-paper { position: absolute; inset: 0; z-index: -2; pointer-events: none; } /* torn sheets, under the vignette */
+.lx-paper svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; overflow: visible; }
+.lx-paper-tex { /* fibres and mottling over everything below the threads, same hue as the background */
+  position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='f' x='0' y='0' width='100%25' height='100%25'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.6' numOctaves='3' seed='4' stitchTiles='stitch'/%3E%3CfeDiffuseLighting lighting-color='%23fff' surfaceScale='1.1' diffuseConstant='1.15'%3E%3CfeDistantLight azimuth='60' elevation='62'/%3E%3C/feDiffuseLighting%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23f)'/%3E%3C/svg%3E"),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='600' height='600'%3E%3Cfilter id='m' x='0' y='0' width='100%25' height='100%25'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.012' numOctaves='4' seed='9' stitchTiles='stitch'/%3E%3CfeDiffuseLighting lighting-color='%23fff' surfaceScale='2.4' diffuseConstant='1.1'%3E%3CfeDistantLight azimuth='45' elevation='70'/%3E%3C/feDiffuseLighting%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23m)'/%3E%3C/svg%3E");
+  background-size: 240px 240px, 600px 600px;
+  mix-blend-mode: multiply; opacity: .22;
+}
+:root[data-theme="dark"] .lx-root .lx-paper-tex { filter: invert(1); mix-blend-mode: screen; opacity: .22; }
+.lx-sheet { fill: rgb(var(--bg)); filter: drop-shadow(0 -1px 1.5px rgb(var(--shadow) / .14)) drop-shadow(0 -10px 22px rgb(var(--shadow) / .07)); }
+.lx-sheet-core { fill: none; stroke: rgb(255 253 246 / .95); stroke-width: 2.4; stroke-linejoin: round; }
+:root[data-theme="dark"] .lx-root .lx-sheet { filter: drop-shadow(0 -1px 1.5px rgb(0 0 0 / .5)) drop-shadow(0 -12px 24px rgb(0 0 0 / .35)); }
+:root[data-theme="dark"] .lx-root .lx-sheet-core { stroke: rgb(203 213 225 / .14); }
+
+/* narrow screens: keep the header on one row */
+@media (max-width: 640px) {
+  .lx-header { padding: 14px 16px; }
+  .lx-brand-mark { flex: none; }
+  .lx-brand h2 { white-space: nowrap; }
+  .lx-brand p, .lx-hist { display: none; }
+}

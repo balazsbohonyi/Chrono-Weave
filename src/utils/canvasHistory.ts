@@ -167,10 +167,16 @@ export function saveCanvasHistory(storage: Storage, record: CanvasHistoryRecord)
   for (const key of obsolete) storage.removeItem(key);
 }
 
+/** True when a canvas was woven as a strict time span over exactly these years. */
+export function isTimeSpanCanvas(config: CanvasConfig, start: number, end: number): boolean {
+  const context = config.weaveContext;
+  return context?.mode === 'time-span' && context.inferredStartYear === start && context.inferredEndYear === end;
+}
+
 export function canvasHistoryDetails(canvas: CanvasSnapshot) {
   const context = canvas.config.weaveContext;
   const titles = { 'time-span': 'Strict Time Span', era: 'Historical Era', figure: 'Follow a Figure',
-    region: 'Region & Culture', theme: 'Theme or Discipline', freeform: 'Freeform / Custom' };
+    region: 'Region & Culture', theme: 'Theme or Discipline', freeform: 'Freeform' };
   return { title: context ? titles[context.mode] : 'Strict Time Span',
     verifiedConnections: countVerifiedConnections(canvas.figures, new CanvasCache(canvas.cache)),
     prompt: context?.query || `${canvas.config.start} to ${canvas.config.end}`,

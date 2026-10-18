@@ -1,12 +1,22 @@
-import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { WeaveMode, WeaveRequest, WeaveValidationResult } from '../types';
 import { useTheme } from '../contexts/ThemeContext';
 import { useModalFocus } from '../hooks/useModalFocus';
-import { formatYear } from '../utils/formatters';
 import { validateWeaveRequestLocally } from '../utils/weave';
 import { EmptyCanvasError, getUserErrorMessage } from '../utils/userErrors';
-import LauncherExampleScroller from './LauncherExampleScroller';
-import LauncherAnimatedIllustration from './LauncherAnimatedIllustration';
+import { glyphStackHTML } from './launcher/glyphs';
+import LauncherHero, { type HeroHandle } from './launcher/LauncherHero';
+import { animate, isReducedMotion, spring, stagger, tween, wait } from './launcher/motion';
+import PaperGround from './launcher/PaperGround';
+import PromptStage, { type Years } from './launcher/PromptStage';
+import StrategyGrid, { type MorphRect, type StrategyGridHandle } from './launcher/StrategyGrid';
+import { buildPhasesFor, clamp, formatLauncherYear, MAX_YEAR, MIN_YEAR } from './launcher/strategies';
+import type { Span } from './launcher/EraBand';
+import SurpriseCard, { type SurpriseState } from './launcher/SurpriseCard';
+import { ThreadField } from './launcher/ThreadField';
+import Tooltip from './Tooltip';
+import './launcher/launcher.css';
 
 interface WeaveLauncherOverlayProps {
   historyControl?: React.ReactNode;
@@ -17,388 +27,488 @@ interface WeaveLauncherOverlayProps {
   initialEndYear: number;
   phase?: 'idle' | 'validating' | 'building' | 'verifying';
   onOpenSettings: () => void;
+  /** Returns how to open an existing canvas woven as this strict time span, or null when there is none. */
+  findTimeSpanCanvas?: (start: number, end: number) => (() => void) | null;
 }
 
-interface StrategyConfig {
-  mode: WeaveMode;
-  title: string;
-  badge: string;
-  illustration: string;
-  illustrationHeight?: number;
-  description: string;
-  placeholder: string;
-  inputLabel: string;
-  examples: string[];
-}
+const ICONS = {
+  sun: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round"><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42" /></svg>,
+  moon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" /></svg>,
+  settings: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M20 7h-9" /><path d="M14 17H4" /><circle cx="7" cy="7" r="3" /><circle cx="17" cy="17" r="3" /></svg>,
+  close: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round"><path d="M6 18 18 6M6 6l12 12" /></svg>,
+  back: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M19 12H5m6-6-6 6 6 6" /></svg>,
+  die: <svg className="lx-die" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3.5" strokeWidth={1.8} /><circle cx="8.5" cy="8.5" r="1.3" fill="currentColor" /><circle cx="15.5" cy="15.5" r="1.3" fill="currentColor" /><circle cx="12" cy="12" r="1.3" fill="currentColor" /><circle cx="15.5" cy="8.5" r="1.3" fill="currentColor" /><circle cx="8.5" cy="15.5" r="1.3" fill="currentColor" /></svg>,
+  mark: <svg className="lx-brand-mark" viewBox="0 0 32 32" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" aria-hidden="true"><path d="M2 11c6 0 8 10 14 10s8-10 14-10" /><path d="M2 21c6 0 8-10 14-10s8 10 14 10" opacity=".55" /><circle cx="16" cy="16" r="2.2" fill="currentColor" stroke="none" /></svg>,
+};
 
-const STRATEGIES: StrategyConfig[] = [
-  {
-    mode: 'time-span',
-    title: 'Strict Time Span',
-    badge: 'Chronological Window',
-    illustration: '1-chronological-window.jpg',
-    description: 'Explore a specific century or span of years.',
-    placeholder: 'e.g. 1400 to 1500',
-    inputLabel: 'Specify Start and End Years',
-    examples: []
-  },
-  {
-    mode: 'era',
-    title: 'Historical Era',
-    badge: 'Epoch & Civilization',
-    illustration: '2-epoch-civilization.jpg',
-    description: 'Dive into a historical period, civilization, or dynasty.',
-    placeholder: 'e.g. Golden Age of Piracy, Meiji Restoration, Weimar Republic',
-    inputLabel: 'Era or Period Name',
-    examples: [
-      'Golden Age of Piracy', 'Meiji Restoration', 'Weimar Republic', 'Hellenistic Period',
-      'Italian Renaissance', 'Islamic Golden Age', 'Tokugawa Period', 'Byzantine Empire'
-    ]
-  },
-  {
-    mode: 'figure',
-    title: 'Follow a Figure',
-    badge: 'Biography & World',
-    illustration: '3-biography-history.jpg',
-    description: 'Explore a person’s life and the people around them.',
-    placeholder: 'e.g. Leonardo da Vinci, Cleopatra VII, Ada Lovelace',
-    inputLabel: 'Historical Figure Name',
-    examples: [
-      'Leonardo da Vinci', 'Cleopatra VII', 'Ada Lovelace', 'Ibn Battuta',
-      'Marie Curie', 'Mansa Musa', 'Zheng He', 'Hypatia'
-    ]
-  },
-  {
-    mode: 'region',
-    title: 'Region & Culture',
-    badge: 'Geographic History',
-    illustration: '4-geographic-history.jpg',
-    description: 'Focus on a region, civilization, or culture.',
-    placeholder: 'e.g. Song Dynasty China, Mughal Empire, Viking Age Scandinavia',
-    inputLabel: 'Region, Empire, or Culture',
-    examples: [
-      'Song Dynasty China', 'Mesoamerica before Spanish conquest', 'Mughal Empire', 'Viking Age Scandinavia',
-      'Ancient Egypt', 'Kingdom of Kush', 'Inca Empire', 'Safavid Persia'
-    ]
-  },
-  {
-    mode: 'theme',
-    title: 'Theme or Discipline',
-    badge: 'Ideas & Disciplines',
-    illustration: '5-ideas-discipline.jpg',
-    description: 'Trace the history of a field, discipline, or idea.',
-    placeholder: 'e.g. Early History of Computing, Astronomy in the Islamic Golden Age',
-    inputLabel: 'Theme, Movement, or Idea',
-    examples: [
-      'Early History of Computing', 'Astronomy in the Islamic Golden Age', 'Impressionism & Post-Impressionism', 'Development of Modern Surgery',
-      'History of Aviation', 'Silk Road Trade', 'History of Printing', 'Origins of Democracy'
-    ]
-  },
-  {
-    mode: 'freeform',
-    title: 'Freeform / Custom',
-    badge: 'Custom Synthesis',
-    illustration: '6-custom-synthesis.jpg',
-    illustrationHeight: 1024,
-    description: 'Combine periods, places, people, and ideas in your own prompt.',
-    placeholder: 'e.g. Women pioneers in medicine before 1900, Space Race architects',
-    inputLabel: 'Describe your historical canvas query',
-    examples: [
-      'Women pioneers in medicine before 1900',
-      'Philosophers in Athens during the Peloponnesian War',
-      'Key inventors of the Industrial Revolution',
-      'Navigators of the Age of Exploration',
-      'Women mathematicians in the 19th century',
-      'Architects and patrons of Renaissance Florence',
-      'Scholars and translators in medieval Baghdad',
-      'Artists and writers of the Harlem Renaissance'
-    ]
-  }
-];
+const ROLL_ERROR = 'We could not find a historical topic this time. Please roll again.';
+const BUILD_ERROR = 'We could not create your canvas. Please try again.';
+
+type Pending = { kind: 'select'; mode: WeaveMode; from: MorphRect } | { kind: 'back'; mode: WeaveMode; from: DOMRect } | { kind: 'switch' };
+interface Consult { settled: boolean; done: Promise<void>; finish: () => void }
+
+const spanOf = (start: number, end: number): Span => ({ s: clamp(start, MIN_YEAR, MAX_YEAR), e: clamp(end, MIN_YEAR, MAX_YEAR) });
 
 const WeaveLauncherOverlay: React.FC<WeaveLauncherOverlayProps> = ({
-  historyControl,
-  onClose,
-  onSubmit,
-  onSurprise,
-  initialStartYear,
-  initialEndYear,
-  phase = 'idle',
-  onOpenSettings
+  historyControl, onClose, onSubmit, onSurprise, initialStartYear, initialEndYear, phase = 'idle', onOpenSettings, findTimeSpanCanvas,
 }) => {
   const { theme, toggleTheme } = useTheme();
-  const themeLabel = theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme';
+  const themeLabel = theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme';
 
-  // Strategy Card State
-  const [focusedMode, setFocusedMode] = useState<WeaveMode | null>(null);
-  const [startYearStr, setStartYearStr] = useState<string>(initialStartYear.toString());
-  const [endYearStr, setEndYearStr] = useState<string>(initialEndYear.toString());
-  const [queryInput, setQueryInput] = useState<string>('');
+  // views: the strategy grid ('launcher') and the prompt stage
+  const [view, setView] = useState<'launcher' | 'stage'>('launcher');
+  const [mode, setMode] = useState<WeaveMode | null>(null);
+  const [launcherHidden, setLauncherHidden] = useState(false);
+  const [launcherInert, setLauncherInert] = useState(false);
+  const [stageHidden, setStageHidden] = useState(true);
+  const [sync, setSync] = useState(0);
+
+  // the prompt
+  const [query, setQuery] = useState('');
+  const [years, setYears] = useState<Years>({ start: String(initialStartYear), end: String(initialEndYear) });
+  const [span, setSpan] = useState<Span>(() => spanOf(initialStartYear, initialEndYear));
   const [inputError, setInputError] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [existing, setExisting] = useState<{ start: number; end: number; open: () => void } | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [buildShown, setBuildShown] = useState(false);
 
-  // Surprise State
-  const [surpriseState, setSurpriseState] = useState<'idle' | 'consulting' | 'suggested' | 'error'>('idle');
+  // Surprise Me
+  const [surpriseState, setSurpriseState] = useState<SurpriseState>('idle');
   const [surpriseResult, setSurpriseResult] = useState<WeaveValidationResult | null>(null);
   const [surpriseError, setSurpriseError] = useState<string | null>(null);
   const [surpriseNotice, setSurpriseNotice] = useState<string | null>(null);
-  const [excludedTopics, setExcludedTopics] = useState<string[]>([]);
-  const surpriseRequestRef = useRef(0);
-  const surpriseTriggerRef = useRef<HTMLButtonElement>(null);
-  const restoreSurpriseFocusRef = useRef(false);
+  const [scrimOpen, setScrimOpen] = useState(false);
+  const excludedTopics = useRef<string[]>([]);
+  const surpriseRequest = useRef(0);
+  const consult = useRef<Consult | null>(null);
 
-  // Refs for form focus and restoring the selected card.
   const dialogRef = useRef<HTMLDivElement>(null);
-  const isMountedRef = useRef<boolean>(true);
-  const cardTriggerRefs = useRef<Record<string, HTMLButtonElement | null>>({});
-  const startInputRef = useRef<HTMLInputElement>(null);
-  const queryInputRef = useRef<HTMLTextAreaElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const field = useRef<ThreadField | null>(null);
+  const hero = useRef<HeroHandle>(null);
+  const grid = useRef<StrategyGridHandle>(null);
+  const dockRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<HTMLElement>(null);
+  const medallionRef = useRef<HTMLDivElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const stageBuildRef = useRef<HTMLDivElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const tickerRef = useRef<HTMLDivElement>(null);
+  const suggestionRef = useRef<HTMLHeadingElement>(null);
+  const weaveRef = useRef<HTMLButtonElement>(null);
+  const actionsRef = useRef<HTMLDivElement>(null);
+  const surpriseBuildRef = useRef<HTMLDivElement>(null);
+  const surpriseTrigger = useRef<HTMLButtonElement>(null);
+  const parallax = useRef(true);
+  const pending = useRef<Pending | null>(null);
+  const morphing = useRef(false);
+  const ghosts = useRef(new Set<HTMLElement>());
+  const isMounted = useRef(true);
+  const operation = useRef(false);
+  const buildContext = useRef<'stage' | 'surprise'>('stage');
+  const submitting = useRef(false);
+  const fade = useRef<{ stop(): void } | null>(null);
+  const collapsing = useRef(false);
 
-  const lastFocusedModeRef = useRef<WeaveMode | null>(null);
-  const operationRef = useRef(false);
+  const isBuildInProgress = isSubmitting || phase !== 'idle';
+  const isBusy = isBuildInProgress || surpriseState === 'consulting';
 
-  // Track mount lifecycle
   useEffect(() => {
-    isMountedRef.current = true;
+    setYears({ start: String(initialStartYear), end: String(initialEndYear) });
+    setSpan(spanOf(initialStartYear, initialEndYear));
+  }, [initialStartYear, initialEndYear]);
+
+  /* ---------- the thread field and the intro ---------- */
+  useLayoutEffect(() => {
+    isMounted.current = true;
+    const f = new ThreadField(canvasRef.current!, dialogRef.current!);
+    field.current = f;
+    f.playIntro();
+    const panes = grid.current?.panes() ?? [];
+    const timers: Array<ReturnType<typeof setTimeout>> = [];
+    if (!isReducedMotion()) {
+      const h = hero.current!;
+      const words = h.words();
+      const others = [h.root?.querySelector('.lx-eyebrow'), h.root?.querySelector('.lx-sub')].filter((e): e is HTMLElement => !!e);
+      const dock = dockRef.current!;
+      [...words, ...others, dock, ...panes].forEach(el => { el.style.opacity = '0'; });
+      const raf = requestAnimationFrame(() => {
+        animate(others[0], { opacity: [0, 1], y: [10, 0] }, tween(0.8, { delay: 0.1 }));
+        animate(words, { opacity: [0, 1], y: [34, 0], filter: ['blur(10px)', 'blur(0px)'] }, tween(1.1, { delay: stagger(0.07, { startDelay: 0.2 }) }));
+        animate(others[1], { opacity: [0, 1], y: [10, 0] }, tween(0.9, { delay: 0.55 }));
+        animate(dock, { opacity: [0, 1], y: [16, 0] }, tween(0.9, { delay: 1.1 }));
+        timers.push(setTimeout(() => grid.current?.intro(), 380));
+      });
+      timers.push(raf as unknown as ReturnType<typeof setTimeout>);
+    }
     return () => {
-      isMountedRef.current = false;
+      isMounted.current = false;
+      timers.forEach(t => { clearTimeout(t); cancelAnimationFrame(t as unknown as number); });
+      ghosts.current.forEach(g => g.remove());
+      f.destroy();
+      field.current = null;
     };
   }, []);
 
-  // Sync initial years if changed externally
-  useEffect(() => {
-    setStartYearStr(initialStartYear.toString());
-    setEndYearStr(initialEndYear.toString());
-  }, [initialStartYear, initialEndYear]);
+  useEffect(() => { field.current?.refreshColors(); }, [theme]);
 
-  const isBusy = isSubmitting || phase !== 'idle' || surpriseState === 'consulting';
-  const isBuildInProgress = isSubmitting || phase !== 'idle';
-  const isBusyRef = useRef(isBusy);
-  isBusyRef.current = isBusy;
-  const isBuildInProgressRef = useRef(isBuildInProgress);
-  isBuildInProgressRef.current = isBuildInProgress;
-  const surpriseStateRef = useRef(surpriseState);
-  surpriseStateRef.current = surpriseState;
+  useEffect(() => { parallax.current = view === 'launcher' && !scrimOpen; }, [view, scrimOpen]);
 
-  // Stable callbacks for focus trap
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
+  /* ---------- launcher ⇄ stage morph ---------- */
+  const makeGhost = (m: WeaveMode, rect: DOMRect, radius: string) => {
+    const g = document.createElement('div');
+    g.className = 'lx-ghost';
+    Object.assign(g.style, { left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px`, borderRadius: radius });
+    g.innerHTML = glyphStackHTML(m, true);
+    dialogRef.current!.append(g);
+    ghosts.current.add(g);
+    return g;
+  };
+  const dropGhost = (g: HTMLElement) => { g.remove(); ghosts.current.delete(g); };
+  const reveals = () => [...(stageRef.current?.querySelectorAll<HTMLElement>('.lx-reveal') ?? [])];
 
-  const focusedModeRef = useRef<WeaveMode | null>(focusedMode);
-  focusedModeRef.current = focusedMode;
+  const afterStageIn = () => {
+    stageRef.current?.querySelector<HTMLElement>('.lx-input, .lx-yin')?.focus({ preventScroll: true });
+    setSync(n => n + 1);
+  };
 
-  const handleBackToGrid = useCallback(() => {
-    if (isSubmitting || phase !== 'idle') return;
-    const currentMode = focusedModeRef.current;
-    if (!currentMode) return;
-
-    setFocusedMode(null);
+  const select = (m: WeaveMode) => {
+    if (view !== 'launcher' || isBusy || morphing.current || scrimOpen) return;
+    morphing.current = true;
+    const from = grid.current!.leave(m);
+    field.current?.pulse(from.rect.left + from.rect.width / 2, from.rect.top + from.rect.height / 2);
+    const h = hero.current?.root;
+    if (h) animate(h, { opacity: 0, y: -24, filter: 'blur(8px)' }, tween(0.5));
+    if (dockRef.current) animate(dockRef.current, { opacity: 0, y: 20 }, tween(0.4));
+    pending.current = { kind: 'select', mode: m, from };
+    setQuery('');
     setInputError(null);
-  }, [isSubmitting, phase]);
+    setMode(m);
+    setView('stage');
+    setLauncherInert(true);
+    setStageHidden(false);
+  };
 
-  const handleBackRef = useRef<() => void>(handleBackToGrid);
-  handleBackRef.current = handleBackToGrid;
+  const back = () => {
+    if (view !== 'stage' || isBusy || morphing.current || !mode) return;
+    morphing.current = true;
+    field.current?.setHighlight(null);
+    const from = medallionRef.current!.getBoundingClientRect();
+    reveals().forEach(el => el.classList.remove('is-in'));
+    stageRef.current?.classList.remove('is-in');
+    pending.current = { kind: 'back', mode, from };
+    setInputError(null);
+    setExisting(null);
+    setView('launcher');
+    setLauncherHidden(false);
+  };
 
-  const handleCollapseSurprise = useCallback(() => {
-    if (isSubmitting || phase !== 'idle') return;
-    ++surpriseRequestRef.current;
-    operationRef.current = false;
-    restoreSurpriseFocusRef.current = true;
-    setSurpriseState('idle');
-    setSurpriseResult(null);
-    setSurpriseError(null);
-    setSurpriseNotice(null);
-  }, [isSubmitting, phase]);
-  const collapseSurpriseRef = useRef(handleCollapseSurprise);
-  collapseSurpriseRef.current = handleCollapseSurprise;
+  const switchMode = (next: WeaveMode) => {
+    if (view !== 'stage' || isBusy || morphing.current || next === mode) return;
+    field.current?.setHighlight(null);
+    pending.current = { kind: 'switch' };
+    setInputError(null);
+    setExisting(null);
+    setMode(next);
+  };
+
+  // Runs a morph once React has committed the views it needs to measure.
+  useLayoutEffect(() => {
+    const p = pending.current;
+    if (!p) return;
+    pending.current = null;
+    const stage = stageRef.current!;
+    const medallion = medallionRef.current!;
+    const f = field.current;
+
+    if (p.kind === 'switch') {
+      void stage.offsetWidth;
+      reveals().forEach(el => el.classList.add('is-in'));
+      if (!isReducedMotion()) animate(medallion, { opacity: [0, 1], scale: [0.8, 1] }, spring({ stiffness: 220, damping: 20 }));
+      f?.converge(medallion.getBoundingClientRect());
+      requestAnimationFrame(afterStageIn);
+      return;
+    }
+
+    if (p.kind === 'select') {
+      const target = medallion.getBoundingClientRect();
+      f?.converge(target);
+      if (isReducedMotion()) {
+        setLauncherHidden(true);
+        stage.classList.add('is-in');
+        reveals().forEach(el => el.classList.add('is-in'));
+        morphing.current = false;
+        afterStageIn();
+        return;
+      }
+      medallion.style.opacity = '0';
+      const ghost = makeGhost(p.mode, p.from.rect, p.from.radius);
+      requestAnimationFrame(() => { ghost.classList.add('is-iconic'); stage.classList.add('is-in'); });
+      animate(ghost, {
+        left: `${target.left}px`, top: `${target.top}px`, width: `${target.width}px`, height: `${target.height}px`, borderRadius: '50%',
+      }, spring({ stiffness: 120, damping: 19 })).then(() => {
+        dropGhost(ghost);
+        if (!isMounted.current) return;
+        medallion.style.opacity = '1';
+        setLauncherHidden(true);
+        reveals().forEach(el => el.classList.add('is-in'));
+        morphing.current = false;
+        afterStageIn();
+      });
+      return;
+    }
+
+    // back to the grid: the ghost flies from the stage icon to the card where it rests
+    const g = grid.current!;
+    const { rect, radius } = g.rectOf(p.mode);
+    f?.release();
+    const h = hero.current?.root;
+    if (h) animate(h, { opacity: 1, y: 0, filter: 'blur(0px)' }, tween(0.7, { delay: 0.15 }));
+    if (dockRef.current) animate(dockRef.current, { opacity: 1, y: 0 }, tween(0.6, { delay: 0.25 }));
+    const finish = () => {
+      g.reveal(p.mode);
+      // the grid must leave inert before its card can take focus
+      flushSync(() => { setStageHidden(true); setLauncherInert(false); });
+      morphing.current = false;
+      g.focus(p.mode);
+    };
+    if (isReducedMotion()) { g.enter(p.mode); queueMicrotask(finish); return; }
+    const ghost = makeGhost(p.mode, p.from, '50%');
+    ghost.classList.add('is-iconic');
+    void ghost.offsetWidth;
+    requestAnimationFrame(() => ghost.classList.remove('is-iconic'));
+    medallion.style.opacity = '0';
+    g.enter(p.mode);
+    wait(120).then(() => animate(ghost, {
+      left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px`, borderRadius: radius,
+    }, spring({ stiffness: 140, damping: 21 }))).then(() => {
+      dropGhost(ghost);
+      if (isMounted.current) finish();
+    });
+  });
+
+  /* ---------- build progress: the form makes way, and the threads tighten into a timeline ---------- */
+  const startBuild = async (context: 'stage' | 'surprise') => {
+    buildContext.current = context;
+    submitting.current = true;
+    const out = context === 'stage' ? formRef.current : actionsRef.current;
+    if (out && !isReducedMotion()) {
+      const controls = animate(out, { opacity: 0, y: 12, filter: 'blur(6px)' }, tween(0.35));
+      fade.current = controls;
+      await controls;
+    }
+    if (submitting.current && isMounted.current) setBuildShown(true);
+  };
+  const endBuild = () => {
+    submitting.current = false;
+    setBuildShown(false);
+    field.current?.setTimeline(false);
+    fade.current?.stop();
+    fade.current = null;
+    // motion commits its last frame a frame late, so clear once now and once after it
+    const clear = () => {
+      for (const el of [formRef.current, actionsRef.current, stageBuildRef.current, surpriseBuildRef.current]) {
+        if (el) { el.style.opacity = ''; el.style.transform = ''; el.style.filter = ''; }
+      }
+    };
+    clear();
+    requestAnimationFrame(clear);
+  };
 
   useLayoutEffect(() => {
-    if (surpriseState === 'idle' && restoreSurpriseFocusRef.current) {
-      restoreSurpriseFocusRef.current = false;
-      surpriseTriggerRef.current?.focus({ preventScroll: true });
+    if (!buildShown) return;
+    const build = buildContext.current === 'stage' ? stageBuildRef.current : surpriseBuildRef.current;
+    if (!build) return;
+    if (!isReducedMotion()) animate(build, { opacity: [0, 1], y: [10, 0] }, tween(0.5));
+    const steps = build.querySelector('.lx-steps')!.getBoundingClientRect();
+    const f = field.current;
+    f?.release();
+    f?.setHighlight(null);
+    f?.setTimeline(true, steps.top - 44);
+  }, [buildShown]);
+
+  useEffect(() => {
+    if (!buildShown) return;
+    const phases = buildPhasesFor(buildContext.current === 'stage' && mode ? mode : 'freeform');
+    const i = phase === 'idle' ? -1 : phases.indexOf(phase);
+    field.current?.setTimelineProgress(i < 0 ? 0.06 : (i + 0.85) / phases.length * 0.92);
+  }, [buildShown, phase, mode]);
+
+  const runSubmit = async (request: WeaveRequest) => {
+    try {
+      operation.current = true;
+      setIsSubmitting(true);
+      void startBuild('stage');
+      await onSubmit(request);
+    } catch (err: unknown) {
+      if (isMounted.current) {
+        endBuild();
+        setInputError(getUserErrorMessage(err, BUILD_ERROR));
+      }
+    } finally {
+      operation.current = false;
+      if (isMounted.current) setIsSubmitting(false);
     }
+  };
+
+  const handleSubmit = () => {
+    if (!mode || isBusy || operation.current) return;
+    setInputError(null);
+    setExisting(null);
+    if (mode === 'time-span') {
+      const INT = /^-?\d+$/;
+      const start = years.start.trim().replace(/[−–]/g, '-');
+      const end = years.end.trim().replace(/[−–]/g, '-');
+      if (!start || !end) return setInputError('Please specify both a start year and an end year.');
+      if (!INT.test(start) || !INT.test(end)) return setInputError('Years must be valid whole numbers (e.g. -500, 1400, 1945).');
+      const s = Number(start), e = Number(end);
+      if (!Number.isSafeInteger(s) || !Number.isSafeInteger(e)) return setInputError('These years are too large. Please enter a smaller historical year range.');
+      if (s >= e) return setInputError('The start year must come before the end year.');
+      const request: WeaveRequest = { mode: 'time-span', query: `${s} to ${e}`, startYear: s, endYear: e };
+      const rejection = validateWeaveRequestLocally(request);
+      if (rejection) return setInputError(rejection.errorMessage);
+      const open = findTimeSpanCanvas?.(s, e);
+      if (open) return setExisting({ start: s, end: e, open });
+      void runSubmit(request);
+    } else {
+      const trimmed = query.trim();
+      if (!trimmed) return setInputError('Please enter a query or choose an example.');
+      void runSubmit({ mode, query: trimmed });
+    }
+  };
+
+  /* ---------- Surprise Me ---------- */
+  // Glass panes dim themselves, never through their wrapper: an opacity or filter on the wrapper flattens the glass
+  // while it fades. Opacity on the pane keeps it frosted; the blur goes on its contents.
+  const dimTargets = () => {
+    const panes = grid.current?.panes() ?? [];
+    const soft = [hero.current?.root, dockRef.current].filter((e): e is HTMLDivElement => !!e);
+    return { panes, contents: panes.flatMap(el => [...el.children] as HTMLElement[]), soft };
+  };
+
+  useLayoutEffect(() => {
+    if (!scrimOpen) return;
+    const { soft, panes, contents } = dimTargets();
+    animate(soft, { opacity: 0.18, filter: 'blur(4px)' }, tween(0.5));
+    if (panes.length) {
+      animate(panes, { opacity: 0.18 }, tween(0.5));
+      animate(contents, { filter: 'blur(4px)' }, tween(0.5));
+    }
+    if (!isReducedMotion() && cardRef.current) animate(cardRef.current, { opacity: [0, 1], scale: [0.94, 1], y: [16, 0] }, spring({ stiffness: 200, damping: 22 }));
+  }, [scrimOpen]);
+
+  // the ticker: year ranges flicker fast while the archives are consulted, then decelerate once they answer
+  useEffect(() => {
+    const c = consult.current;
+    if (surpriseState !== 'consulting' || !c) return;
+    const dur = isReducedMotion() ? 0 : 1700;
+    const t0 = performance.now();
+    let settledAt = 0, settledP = 0, timer: ReturnType<typeof setTimeout>;
+    const step = () => {
+      const now = performance.now();
+      let p = Math.min((now - t0) / (dur || 1), 0.6);
+      if (c.settled) {
+        if (!settledAt) { settledAt = now; settledP = dur ? Math.min((now - t0) / dur, 0.6) : 1; }
+        p = settledP + (now - settledAt) / (dur || 1);
+      }
+      if (p >= 1) { c.finish(); return; }
+      if (dur) {
+        const snap = p > 0.7 ? 50 : 1;
+        const a = Math.round((Math.random() * 4400 - 2500) / snap) * snap;
+        const b = Math.min(2025, a + Math.round((20 + Math.random() * 230) / snap) * snap);
+        const text = tickerRef.current?.firstChild;
+        if (text) text.textContent = `${formatLauncherYear(a)} – ${formatLauncherYear(b)}`;
+      }
+      timer = setTimeout(step, dur ? 30 + p * p * 160 : 60);
+    };
+    step();
+    return () => { clearTimeout(timer); c.finish(); };
   }, [surpriseState]);
 
-  // Stable escape callback passed to useModalFocus:
-  // When inside a focused card, Escape returns to the grid.
-  // At grid level, Escape collapses an open suggestion before closing the overlay.
-  const handleModalClose = useCallback(() => {
-    if (!isBuildInProgressRef.current && focusedModeRef.current === null && surpriseStateRef.current !== 'idle') {
-      collapseSurpriseRef.current();
-    } else if (isBusyRef.current) {
-      onCloseRef.current();
-    } else if (focusedModeRef.current !== null) {
-      handleBackRef.current();
-    } else {
-      onCloseRef.current();
-    }
-  }, []);
-
-  useModalFocus(dialogRef, true, handleModalClose);
-
-  useLayoutEffect(() => {
-    if (focusedMode === 'time-span') {
-      startInputRef.current?.focus({ preventScroll: true });
-    } else if (focusedMode) {
-      queryInputRef.current?.focus({ preventScroll: true });
-    } else if (lastFocusedModeRef.current) {
-      cardTriggerRefs.current[lastFocusedModeRef.current]?.focus({ preventScroll: true });
-    }
-  }, [focusedMode]);
-
-  const handleSelectStrategy = (mode: WeaveMode) => {
-    if (isBusy) return;
-    setInputError(null);
-    lastFocusedModeRef.current = mode;
-    setFocusedMode(mode);
-  };
-
-  const handleSelectExample = (example: string) => {
-    if (isBusy) return;
-    setQueryInput(example);
-    setInputError(null);
-    queryInputRef.current?.focus({ preventScroll: true });
-  };
-
-  const handleSubmitForm = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!focusedMode || isBusy || operationRef.current) return;
-
-    setInputError(null);
-
-    if (focusedMode === 'time-span') {
-      const INT_REGEX = /^-?\d+$/;
-      const trimmedStart = startYearStr.trim();
-      const trimmedEnd = endYearStr.trim();
-
-      if (!trimmedStart || !trimmedEnd) {
-        setInputError('Please specify both a start year and an end year.');
-        return;
-      }
-
-      if (!INT_REGEX.test(trimmedStart) || !INT_REGEX.test(trimmedEnd)) {
-        setInputError('Years must be valid whole numbers (e.g. -500, 1400, 1945).');
-        return;
-      }
-
-      const s = Number(trimmedStart);
-      const e = Number(trimmedEnd);
-
-      if (!Number.isSafeInteger(s) || !Number.isSafeInteger(e)) {
-        setInputError('These years are too large. Please enter a smaller historical year range.');
-        return;
-      }
-
-      if (s >= e) {
-        setInputError('The start year must come before the end year.');
-        return;
-      }
-
-      const request: WeaveRequest = {
-        mode: 'time-span',
-        query: `${s} to ${e}`,
-        startYear: s,
-        endYear: e
-      };
-
-      const rejection = validateWeaveRequestLocally(request);
-      if (rejection) {
-        setInputError(rejection.errorMessage);
-        return;
-      }
-
-      try {
-        operationRef.current = true;
-        setIsSubmitting(true);
-        await onSubmit(request);
-      } catch (err: unknown) {
-        if (isMountedRef.current) {
-          setInputError(getUserErrorMessage(err, 'We could not create your canvas. Please try again.'));
-        }
-      } finally {
-        operationRef.current = false;
-        if (isMountedRef.current) setIsSubmitting(false);
-      }
-    } else {
-      const trimmed = queryInput.trim();
-      if (!trimmed) {
-        setInputError('Please enter a query or choose an example.');
-        return;
-      }
-
-      const request: WeaveRequest = {
-        mode: focusedMode,
-        query: trimmed
-      };
-
-      try {
-        operationRef.current = true;
-        setIsSubmitting(true);
-        await onSubmit(request);
-      } catch (err: unknown) {
-        if (isMountedRef.current) {
-          setInputError(getUserErrorMessage(err, 'We could not create your canvas. Please try again.'));
-        }
-      } finally {
-        operationRef.current = false;
-        if (isMountedRef.current) setIsSubmitting(false);
-      }
-    }
-  };
-
-  // Surprise roll handler
-  const handleSurpriseRoll = async () => {
-    if (isBusy || operationRef.current) return;
-    const request = ++surpriseRequestRef.current;
+  /** Asks for a topic while the ticker runs; resolves once both are done. Throws what onSurprise threw. */
+  const consultArchives = async (broadenTopic?: string) => {
+    let finish = () => {};
+    const done = new Promise<void>(resolve => { finish = resolve; });
+    const c: Consult = { settled: false, done, finish };
+    consult.current = c;
+    setSurpriseState('consulting');
+    setScrimOpen(true);
+    field.current?.release();
+    field.current?.setSpeed(9);
     try {
-      operationRef.current = true;
-      setSurpriseState('consulting');
-      setSurpriseError(null);
-      setSurpriseNotice(null);
-      const result = await onSurprise(excludedTopics);
-      if (!isMountedRef.current || request !== surpriseRequestRef.current) return;
+      return await onSurprise(excludedTopics.current, broadenTopic);
+    } finally {
+      c.settled = true;
+      await c.done;
+      field.current?.setSpeed(1);
+    }
+  };
 
-      if (result.isValid && result.themeDescription) {
-        setSurpriseResult(result);
-        setExcludedTopics(prev => [...prev, result.themeDescription]);
-        setSurpriseState('suggested');
-      } else {
-        setSurpriseError('We could not find a historical topic this time. Please roll again.');
-        setSurpriseState('error');
-      }
+  const showSuggestion = (result: WeaveValidationResult, notice: string | null) => {
+    excludedTopics.current = [...excludedTopics.current, result.themeDescription];
+    setSurpriseResult(result);
+    setSurpriseNotice(notice);
+    setSurpriseState('suggested');
+  };
+
+  const roll = async () => {
+    if (isBusy || operation.current) return;
+    const request = ++surpriseRequest.current;
+    operation.current = true;
+    setSurpriseError(null);
+    setSurpriseNotice(null);
+    setSurpriseResult(null);
+    try {
+      const result = await consultArchives();
+      if (!isMounted.current || request !== surpriseRequest.current) return;
+      if (result.isValid && result.themeDescription) showSuggestion(result, null);
+      else { setSurpriseError(ROLL_ERROR); setSurpriseState('error'); }
     } catch (err: unknown) {
-      if (!isMountedRef.current || request !== surpriseRequestRef.current) return;
-      setSurpriseError(getUserErrorMessage(err, 'We could not find a historical topic this time. Please roll again.'));
+      if (!isMounted.current || request !== surpriseRequest.current) return;
+      setSurpriseError(getUserErrorMessage(err, ROLL_ERROR));
       setSurpriseState('error');
     } finally {
-      if (request === surpriseRequestRef.current) operationRef.current = false;
+      if (request === surpriseRequest.current) operation.current = false;
     }
   };
 
-  const handleBuildSurprise = async () => {
-    if (!surpriseResult || !surpriseResult.isValid || isBusy || operationRef.current) return;
-    const request = ++surpriseRequestRef.current;
+  // a new suggestion rises in, and the threads gather around the card
+  useLayoutEffect(() => {
+    if (surpriseState !== 'suggested' || !surpriseResult) return;
+    if (!isReducedMotion()) {
+      if (suggestionRef.current) animate(suggestionRef.current, { opacity: [0, 1], y: [18, 0], filter: ['blur(8px)', 'blur(0px)'] }, tween(0.8));
+      const meta = cardRef.current?.querySelectorAll('.lx-meta :is(.lx-pill, .lx-cat, .lx-range)');
+      if (meta?.length) animate(meta, { opacity: [0, 1], y: [8, 0] }, tween(0.5, { delay: stagger(0.05) }));
+    }
+    if (cardRef.current) field.current?.converge(cardRef.current.getBoundingClientRect(), 0.55);
+    weaveRef.current?.focus({ preventScroll: true });
+  }, [surpriseState, surpriseResult]);
+
+  const weaveSuggestion = async () => {
+    const suggestion = surpriseResult;
+    if (!suggestion?.isValid || isBusy || operation.current) return;
+    const request = ++surpriseRequest.current;
     try {
-      operationRef.current = true;
+      operation.current = true;
       setIsSubmitting(true);
       setSurpriseError(null);
       setSurpriseNotice(null);
-      await onSubmit({ mode: 'freeform', query: surpriseResult.themeDescription });
+      void startBuild('surprise');
+      await onSubmit({ mode: 'freeform', query: suggestion.themeDescription });
     } catch (err: unknown) {
-      if (!isMountedRef.current || request !== surpriseRequestRef.current) return;
+      if (!isMounted.current || request !== surpriseRequest.current) return;
+      endBuild();
       if (err instanceof EmptyCanvasError) {
+        // the topic came back empty: offer a broader one to review before weaving again
         setIsSubmitting(false);
-        setSurpriseState('consulting');
+        setSurpriseResult(null);
         try {
-          const result = await onSurprise(excludedTopics, surpriseResult.themeDescription);
-          if (!isMountedRef.current || request !== surpriseRequestRef.current) return;
+          const result = await consultArchives(suggestion.themeDescription);
+          if (!isMounted.current || request !== surpriseRequest.current) return;
           if (!result.isValid || !result.themeDescription) throw new Error('No broader topic was suggested.');
-          setSurpriseResult(result);
-          setExcludedTopics(prev => [...prev, result.themeDescription]);
-          setSurpriseState('suggested');
-          setSurpriseNotice('The previous topic returned no people or events. Here is a broader related suggestion. Review it before weaving again.');
+          showSuggestion(result, 'The previous topic returned no people or events. Here is a broader related suggestion. Review it before weaving again.');
         } catch (recoveryError: unknown) {
-          if (!isMountedRef.current || request !== surpriseRequestRef.current) return;
+          if (!isMounted.current || request !== surpriseRequest.current) return;
           setSurpriseState('error');
           setSurpriseError(getUserErrorMessage(recoveryError, 'That topic returned no people or events, and we could not find a broader suggestion. Try Spin Again.'));
         }
@@ -406,464 +516,114 @@ const WeaveLauncherOverlay: React.FC<WeaveLauncherOverlayProps> = ({
         setSurpriseError(getUserErrorMessage(err, 'We could not create a canvas for this topic. Please try again.'));
       }
     } finally {
-      if (isMountedRef.current && request === surpriseRequestRef.current) {
-        operationRef.current = false;
+      if (isMounted.current && request === surpriseRequest.current) {
+        operation.current = false;
         setIsSubmitting(false);
       }
     }
   };
 
-  const focusedStrategy = STRATEGIES.find(s => s.mode === focusedMode);
-  const weaveButtonContent = (
-    <>
-      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
-        <path strokeLinecap="round" d="M4 7c4-4 12 4 16 0M4 12c4-4 12 4 16 0M4 17c4-4 12 4 16 0M7 4c-4 4 4 12 0 16M12 4c-4 4 4 12 0 16M17 4c-4 4 4 12 0 16" />
-      </svg>
-      <span>{isBuildInProgress ? 'Weaving...' : 'Weave'}</span>
-    </>
-  );
-  const weaveButton = (
-    <button
-      type="submit"
-      disabled={isBusy}
-      aria-busy={isBuildInProgress}
-      className="launcher-btn-primary launcher-weave-button"
-    >
-      {weaveButtonContent}
-    </button>
-  );
-  const buildProgress = isBuildInProgress && (
-    <div className="launcher-build-progress" role="status" aria-live="polite" aria-atomic="true" data-phase={phase}>
-      <div className="launcher-build-progress-copy">
-        <p className="launcher-build-progress-title">
-          {phase === 'validating' ? 'Checking your historical query...'
-            : phase === 'building' ? 'Building your timeline...'
-            : phase === 'verifying' ? 'Checking historical connections...'
-            : 'Preparing your timeline...'}
-        </p>
-        <p className="launcher-build-progress-description">
-          {phase === 'validating' ? 'Confirming the subject, dates, and categories for your timeline.'
-            : phase === 'building' ? 'Finding historical figures and events. Your timeline will open when it is ready.'
-            : phase === 'verifying' ? 'Keeping figures with established connections to your focus figure.'
-            : 'Getting your request ready.'}
-        </p>
-      </div>
-      <span className="launcher-build-spinner" aria-hidden="true" />
-    </div>
-  );
+  const collapseSurprise = async () => {
+    if (!scrimOpen || isBuildInProgress || collapsing.current) return;
+    collapsing.current = true;
+    ++surpriseRequest.current;
+    operation.current = false;
+    consult.current?.finish();
+    field.current?.setSpeed(1);
+    field.current?.release();
+    const { soft, panes, contents } = dimTargets();
+    // motion commits its final inline styles (and re-writes any earlier transform as "none") a frame
+    // after the promise resolves; clear them so the items' CSS transforms and glass work again
+    const restore = (els: HTMLElement[]) => () => requestAnimationFrame(() => {
+      els.forEach(el => { el.style.filter = ''; el.style.opacity = ''; el.style.transform = ''; });
+    });
+    if (panes.length) {
+      animate(panes, { opacity: 1 }, tween(0.5)).then(restore(panes));
+      animate(contents, { filter: 'blur(0px)' }, tween(0.5)).then(restore(contents));
+    }
+    animate(soft, { opacity: 1, filter: 'blur(0px)' }, tween(0.5)).then(restore(soft));
+    const card = cardRef.current;
+    if (card) await animate(card, { opacity: 0, scale: 0.96 }, tween(0.25));
+    collapsing.current = false;
+    if (!isMounted.current) return;
+    if (card) { card.style.opacity = ''; card.style.transform = ''; }
+    // the grid leaves inert before the Surprise button takes focus back
+    flushSync(() => {
+      setSurpriseState('idle');
+      setSurpriseResult(null);
+      setSurpriseError(null);
+      setSurpriseNotice(null);
+      setScrimOpen(false);
+    });
+    surpriseTrigger.current?.focus({ preventScroll: true });
+  };
+
+  /* ---------- Escape: Surprise card, then a build (cancels it), then the stage, then the launcher ---------- */
+  const latest = useRef({ collapse: collapseSurprise, back, onClose, surpriseState, isBuildInProgress, isBusy, view });
+  latest.current = { collapse: collapseSurprise, back, onClose, surpriseState, isBuildInProgress, isBusy, view };
+  const handleModalClose = useCallback(() => {
+    const l = latest.current;
+    if (!l.isBuildInProgress && l.surpriseState !== 'idle') l.collapse();
+    else if (l.isBusy) l.onClose();
+    else if (l.view === 'stage') l.back();
+    else l.onClose();
+  }, []);
+  useModalFocus(dialogRef, true, handleModalClose, undefined, 'container');
+
+  const building = buildShown && isBuildInProgress;
+  const stageBuilding = building && buildContext.current === 'stage';
+  const surpriseBuilding = building && buildContext.current === 'surprise';
 
   return (
-    <div
-      className="launcher-overlay"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="launcher-heading"
-      ref={dialogRef}
-      tabIndex={-1}
-    >
-      <div className="sr-only" role="status" aria-live="polite">
-        {surpriseState === 'consulting' ? 'Consulting the archives...' : ''}
-      </div>
-      <div className="launcher-dialog">
-        {/* Header with Theme, Settings, Close */}
-        <header className="launcher-header" data-canvas-controls>
-          <div className="flex items-center gap-3">
-            <div>
-              <h2 id="launcher-heading" className="text-base font-bold text-content-primary leading-tight">
-                Weave New Canvas
-              </h2>
-              <p className="text-xs text-content-muted">Choose your historical exploration strategy</p>
-            </div>
+    <div className="lx-root" role="dialog" aria-modal="true" aria-labelledby="lx-heading" ref={dialogRef} tabIndex={-1}>
+      <PaperGround />
+      <canvas className="lx-field" aria-hidden="true" ref={canvasRef} />
+      <header className="lx-header" data-canvas-controls>
+        <div className="lx-brand">{ICONS.mark}<div><h2 id="lx-heading">Weave New Canvas</h2><p>Choose your historical exploration strategy</p></div></div>
+        <div className="lx-header-actions">
+          {historyControl && <div className="lx-hist">{historyControl}</div>}
+          <Tooltip text={themeLabel} placement="bottom">
+            <button className="lx-icon-btn" type="button" onClick={toggleTheme} aria-label={themeLabel}>{theme === 'dark' ? ICONS.sun : ICONS.moon}</button>
+          </Tooltip>
+          <Tooltip text="Settings" placement="bottom">
+            <button className="lx-icon-btn" type="button" onClick={onOpenSettings} disabled={isBuildInProgress} aria-label="Settings">{ICONS.settings}</button>
+          </Tooltip>
+          <Tooltip text="Close (Esc)" placement="bottom">
+            <button className="lx-icon-btn" type="button" onClick={onClose} aria-label="Close launcher">{ICONS.close}</button>
+          </Tooltip>
+        </div>
+      </header>
+      <main className="lx-main">
+        <section className="lx-view lx-launcher" aria-label="Choose how to explore" hidden={launcherHidden} inert={launcherInert || scrimOpen || undefined}>
+          <LauncherHero ref={hero} />
+          <div className="lx-launcher-body">
+            <StrategyGrid ref={grid} field={field} disabled={isBusy} parallax={parallax}
+              onHover={m => (m ? hero.current?.hold(m) : hero.current?.release())} onSelect={select} />
           </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={toggleTheme}
-              className="p-2 text-content-muted hover:text-content-heading hover:bg-interaction/5 rounded-lg transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-marker focus-visible:outline-offset-2"
-              aria-label={themeLabel}
-              title={themeLabel}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
-                {theme === 'light' ? (
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
-                ) : (
-                  <>
-                    <circle cx="12" cy="12" r="4" />
-                    <path strokeLinecap="round" d="M12 2v2m0 16v2M2 12h2m16 0h2M4.93 4.93l1.42 1.42m11.3 11.3l1.42 1.42M4.93 19.07l1.42-1.42m11.3-11.3l1.42-1.42" />
-                  </>
-                )}
-              </svg>
-            </button>
-
-            <button
-              type="button"
-              onClick={onOpenSettings}
-              disabled={isBuildInProgress}
-              className="p-2 text-content-muted enabled:hover:text-content-heading enabled:hover:bg-interaction/5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-marker focus-visible:outline-offset-2"
-              title="Settings"
-              aria-label="Settings"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-            </button>
-
-            <button
-              type="button"
-              onClick={onClose}
-              className="close-button"
-              title="Close (Esc)"
-              aria-label="Close launcher"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
+          <div className="lx-surprise-dock" ref={dockRef}>
+            <button className="lx-surprise-btn" type="button" ref={surpriseTrigger} disabled={isBusy} onClick={roll}>{ICONS.die}<span>Surprise me</span></button>
+            <span className="lx-surprise-hint">An unexpected chapter of history</span>
           </div>
-          {historyControl}
-        </header>
-
-        {/* Scrollable Main Area */}
-        <div className={`launcher-scroll ${focusedMode ? 'launcher-scroll--focused' : ''}`}>
-          {/* Hero Section */}
-          <div className="launcher-hero">
-            <span className="launcher-eyebrow">Explore history</span>
-            <h1 className="text-3xl font-extrabold text-content-primary mt-2">
-              How would you like to explore history?
-            </h1>
-            <p className="text-sm text-content-secondary mt-2 max-w-xl mx-auto">
-              Choose a period, place, person, or idea. We’ll weave a timeline around it.
-            </p>
-          </div>
-
-          {/* Six Strategy Cards in Grid */}
-          <div
-            className={`launcher-grid ${focusedMode ? 'launcher-grid--dimmed' : ''}`}
-            aria-hidden={focusedMode !== null}
-            inert={focusedMode !== null ? true : undefined}
-          >
-            {STRATEGIES.map(strat => (
-              <div
-                key={strat.mode}
-                className="launcher-card group"
-              >
-                <button
-                  type="button"
-                  ref={el => { cardTriggerRefs.current[strat.mode] = el; }}
-                  onClick={() => handleSelectStrategy(strat.mode)}
-                  disabled={isBusy || focusedMode !== null}
-                  className="launcher-card-trigger w-full text-left bg-transparent border-0 cursor-pointer focus:outline-none"
-                  aria-label={`${strat.title}: ${strat.description}`}
-                >
-                  <LauncherAnimatedIllustration
-                    variant="card"
-                    src={`/illustrations/${strat.illustration}`}
-                    height={strat.illustrationHeight ?? 986}
-                  />
-                  <div className="launcher-card-overlay launcher-card-badges">
-                    <span className="launcher-card-kicker">
-                      {strat.badge}
-                    </span>
-                  </div>
-                  <div className="launcher-card-overlay launcher-card-caption">
-                    <h3 className="launcher-card-title">{strat.title}</h3>
-                    <div className="launcher-card-description-reveal">
-                      <div className="launcher-card-description-clip">
-                        <p className="launcher-card-desc">{strat.description}</p>
-                      </div>
-                    </div>
-                  </div>
-                </button>
-
-              </div>
-            ))}
-          </div>
-
-          {/* Strategy details */}
-          {focusedMode && focusedStrategy && (
-            <div className="launcher-focused-stage">
-              <LauncherAnimatedIllustration
-                key={focusedMode}
-                src={`/illustrations/${focusedStrategy.illustration}`}
-                height={focusedStrategy.illustrationHeight ?? 986}
-              />
-              <div className="launcher-focused-panel">
-                <div className={`launcher-focused-card${focusedMode === 'time-span' ? ' launcher-focused-card--time-span' : ''}`} role="region" aria-labelledby="focused-card-title">
-                  <div className="launcher-focused-heading">
-                    <h2 id="focused-card-title" className="text-2xl font-bold text-content-primary">
-                      {focusedStrategy.title}
-                    </h2>
-                    <button
-                      type="button"
-                      onClick={handleBackToGrid}
-                      disabled={isBusy}
-                      className="launcher-back"
-                      title="Return to strategy grid (Esc)"
-                    >
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 12H5m0 0 6 6m-6-6 6-6" />
-                      </svg>
-                      <span>Back</span>
-                    </button>
-                  </div>
-                  <p className="text-sm text-content-muted mt-1">{focusedStrategy.description}</p>
-
-                  <form onSubmit={handleSubmitForm} className="launcher-focused-form">
-                    {focusedMode === 'time-span' ? (
-                      <div>
-                        <p className="block text-xs font-semibold text-content-secondary uppercase tracking-wider mb-3">
-                          {focusedStrategy.inputLabel}
-                        </p>
-                        <div className="launcher-years">
-                          <label htmlFor="launcher-start-year" className="sr-only">Start Year</label>
-                          <input
-                            id="launcher-start-year"
-                            ref={startInputRef}
-                            type="text"
-                            inputMode="numeric"
-                            placeholder="1400"
-                            value={startYearStr}
-                            onChange={(e) => {
-                              setStartYearStr(e.target.value);
-                              setInputError(null);
-                            }}
-                            disabled={isBusy}
-                            aria-invalid={inputError !== null}
-                            aria-describedby={inputError ? 'launcher-year-help launcher-input-error' : 'launcher-year-help'}
-                            className="launcher-input launcher-year-input"
-                            style={{ width: `${Math.max(8, startYearStr.length + 4) * 2}ch` }}
-                          />
-                          <span className="text-content-muted font-bold">to</span>
-                          <label htmlFor="launcher-end-year" className="sr-only">End Year</label>
-                          <input
-                            id="launcher-end-year"
-                            type="text"
-                            inputMode="numeric"
-                            placeholder="1500"
-                            value={endYearStr}
-                            onChange={(e) => {
-                              setEndYearStr(e.target.value);
-                              setInputError(null);
-                            }}
-                            disabled={isBusy}
-                            aria-invalid={inputError !== null}
-                            aria-describedby={inputError ? 'launcher-year-help launcher-input-error' : 'launcher-year-help'}
-                            className="launcher-input launcher-year-input"
-                            style={{ width: `${Math.max(8, endYearStr.length + 4) * 2}ch` }}
-                          />
-                          {weaveButton}
-                        </div>
-                        <p id="launcher-year-help" className="text-xs text-content-faint mt-2">
-                          Negative numbers represent BCE (e.g. -500 for 500 BCE).
-                        </p>
-                      </div>
-                    ) : (
-                      <div>
-                        <label htmlFor="launcher-query-input" className="block text-xs font-semibold text-content-secondary uppercase tracking-wider mb-3">
-                          {focusedStrategy.inputLabel}
-                        </label>
-                        <div className="launcher-prompt">
-                          <textarea
-                            id="launcher-query-input"
-                            ref={queryInputRef}
-                            rows={3}
-                            placeholder={focusedStrategy.placeholder}
-                            value={queryInput}
-                            onChange={(e) => {
-                              setQueryInput(e.target.value);
-                              setInputError(null);
-                            }}
-                            disabled={isBusy}
-                            aria-invalid={inputError !== null}
-                            aria-describedby={inputError ? 'launcher-input-error' : undefined}
-                            className="launcher-textarea launcher-prompt-text"
-                          />
-                          <div className="launcher-prompt-footer">
-                            <LauncherExampleScroller
-                              key={focusedMode}
-                              examples={focusedStrategy.examples}
-                              disabled={isBusy}
-                              onSelect={handleSelectExample}
-                            />
-                            {weaveButton}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {inputError && (
-                      <div id="launcher-input-error" role="alert" aria-live="assertive" className="launcher-input-error mt-4">
-                        <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                        <span>{inputError}</span>
-                      </div>
-                    )}
-
-                    {buildProgress}
-                  </form>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Surprise Me Module (Distinct from 6-card grid) */}
-          <div
-            className={`launcher-surprise-wrapper ${focusedMode ? 'launcher-surprise-wrapper--hidden' : ''}`}
-            aria-hidden={focusedMode !== null}
-            inert={focusedMode !== null ? true : undefined}
-          >
-            <div className="launcher-surprise-box">
-              {surpriseState !== 'idle' && (
-                <button
-                  type="button"
-                  onClick={handleCollapseSurprise}
-                  disabled={isBuildInProgress}
-                  className="close-button launcher-surprise-close"
-                  aria-label="Close Surprise Me"
-                  title="Close Surprise Me (Esc)"
-                >
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              )}
-              {surpriseState === 'idle' && (
-                <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-                  <div className="flex items-center gap-3 text-left">
-                    <div className="launcher-dice-icon" aria-hidden="true">
-                      <svg className="w-6 h-6 text-accent-marker" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <rect x="4" y="4" width="16" height="16" rx="3" strokeWidth="2" />
-                        <circle cx="8" cy="8" r="1.25" fill="currentColor" />
-                        <circle cx="16" cy="8" r="1.25" fill="currentColor" />
-                        <circle cx="12" cy="12" r="1.25" fill="currentColor" />
-                        <circle cx="8" cy="16" r="1.25" fill="currentColor" />
-                        <circle cx="16" cy="16" r="1.25" fill="currentColor" />
-                      </svg>
-                    </div>
-                    <div>
-                      <h3 className="text-base font-bold text-content-primary">
-                        Unsure where to start? Surprise Me
-                      </h3>
-                      <p className="text-xs text-content-muted">
-                        Discover an unexpected chapter of history.
-                      </p>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={handleSurpriseRoll}
-                    ref={surpriseTriggerRef}
-                    disabled={isBusy || focusedMode !== null}
-                    className="launcher-btn-primary whitespace-nowrap"
-                  >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <rect x="4" y="4" width="16" height="16" rx="3" strokeWidth="2" />
-                      <circle cx="8" cy="8" r="1.25" fill="currentColor" />
-                      <circle cx="16" cy="16" r="1.25" fill="currentColor" />
-                      <circle cx="12" cy="12" r="1.25" fill="currentColor" />
-                    </svg>
-                    <span>Surprise Me</span>
-                  </button>
-                </div>
-              )}
-
-              {surpriseState === 'consulting' && (
-                <div className="py-4 flex flex-col items-center justify-center gap-3">
-                  <svg className="animate-spin h-6 w-6 text-accent-marker" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  <p className="text-sm font-semibold text-content-primary">
-                    Consulting the archives...
-                  </p>
-                  <p className="text-xs text-content-muted">
-                    Finding a chapter of history to explore...
-                  </p>
-                </div>
-              )}
-
-              {(surpriseState === 'suggested' || surpriseState === 'error') && surpriseResult && (
-                <div className="text-left">
-                  <div className="launcher-suggestion-header">
-                    <span className="launcher-pill-tag">Historical Suggestion</span>
-                    <div className="launcher-suggestion-meta">
-                      {surpriseResult.activeCategories?.map(cat => (
-                        <span key={cat} className="launcher-category-tag">{cat}</span>
-                      ))}
-                      <span className="text-xs font-mono font-bold text-accent-marker whitespace-nowrap">
-                        {formatYear(surpriseResult.inferredStartYear)} – {formatYear(surpriseResult.inferredEndYear)}
-                      </span>
-                    </div>
-                  </div>
-
-                  <h3 className="launcher-prompt-text text-content-primary">
-                    {surpriseResult.themeDescription}
-                  </h3>
-
-                  {surpriseError && (
-                    <div className="launcher-error-banner mt-3" role="alert">
-                      <span>{surpriseError}</span>
-                    </div>
-                  )}
-
-                  {surpriseNotice && (
-                    <p className="mt-3 text-sm text-content-body leading-relaxed" role="status">{surpriseNotice}</p>
-                  )}
-
-                  {!isBuildInProgress && (
-                    <div className="flex flex-wrap items-center justify-end gap-3 mt-5 pt-3 border-t border-border/40">
-                      <button
-                        type="button"
-                        onClick={handleSurpriseRoll}
-                        disabled={isBusy || focusedMode !== null}
-                        className="launcher-btn-secondary"
-                      >
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                        </svg>
-                        <span>Spin Again</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={handleBuildSurprise}
-                        disabled={isBusy || focusedMode !== null}
-                        aria-busy={isBuildInProgress}
-                        className="launcher-btn-primary launcher-weave-button"
-                      >
-                        {weaveButtonContent}
-                      </button>
-                    </div>
-                  )}
-                  {buildProgress}
-                </div>
-              )}
-
-              {surpriseState === 'error' && !surpriseResult && (
-                <div className="py-2 pr-7 text-left">
-                  <div className="launcher-error-banner" role="alert">
-                    <span>{surpriseError || 'Unable to uncover a topic. Please roll again.'}</span>
-                  </div>
-                  <div className="mt-4 flex justify-end">
-                    <button
-                      type="button"
-                      onClick={handleSurpriseRoll}
-                      disabled={isBusy || focusedMode !== null}
-                      className="launcher-btn-secondary"
-                    >
-                      Try Again
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
+        </section>
+        <section className="lx-view lx-stage" hidden={stageHidden} aria-labelledby="lx-stage-title" ref={stageRef}>
+          <button className="lx-back" type="button" disabled={isBusy} onClick={back} title="Back to the strategies (Esc)">{ICONS.back}<span>Back</span></button>
+          {mode && <PromptStage mode={mode} busy={isBusy} building={stageBuilding} phase={phase} field={field}
+            query={query} years={years} span={span} error={inputError} sync={sync}
+            medallionRef={medallionRef} formRef={formRef} buildRef={stageBuildRef}
+            existing={existing}
+            onQuery={setQuery} onYears={(y, s) => { setYears(y); setSpan(s); setExisting(null); }} onClearError={() => setInputError(null)}
+            onSubmit={handleSubmit} onSwitchMode={switchMode} />}
+        </section>
+        <div className="lx-scrim" hidden={!scrimOpen}>
+          <div className="lx-card" role="region" aria-label="Surprise Me" ref={cardRef}>
+            {surpriseState !== 'idle' && <SurpriseCard state={surpriseState} result={surpriseResult} error={surpriseError} notice={surpriseNotice}
+              building={surpriseBuilding} phase={phase} busy={isBusy}
+              tickerRef={tickerRef} suggestionRef={suggestionRef} weaveRef={weaveRef} actionsRef={actionsRef} buildRef={surpriseBuildRef}
+              onClose={collapseSurprise} onSpin={roll} onWeave={weaveSuggestion} />}
           </div>
         </div>
-      </div>
+      </main>
+      <div className="sr-only" role="status" aria-live="polite">{surpriseState === 'consulting' ? 'Consulting the archives...' : ''}</div>
     </div>
   );
 };

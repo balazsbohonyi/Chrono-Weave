@@ -20,6 +20,7 @@ Interactive historical timeline: AI-generated figures and events on a canvas (ti
 - A new provider: implement `IAIService`, add it to `createAIService` in `src/services/aiService.ts` and to `SettingsDialog.tsx`.
 - A new category: `FigureCategory` in `types.ts`; `CATEGORY_LIST`, `CATEGORY_COLORS` and `CATEGORY_BAR_TEXT_COLORS` in `constants.ts`; `--color-category-*` in both themes of `src/styles/tokens.css`; the order in `src/utils/galleryLayout.ts`.
 - Caches: relationship explanations `chrono_rel_${sourceId}_${targetId}` and deep dives `chrono_deepdive_${id}` in localStorage, cleared per canvas by `CACHE_PREFIXES` in `src/utils/canvasHistory.ts`.
+- The Weave launcher (`WeaveLauncherOverlay` and `src/components/launcher/`) is described in `ai-docs/guides/launcher.md`; read it before changing the launcher's morph, motion or styles.
 - Docs and plans live in `ai-docs/`. The timeline layout algorithm is described in `ai-docs/guides/timeline-layout-algorithm.md` and `ai-docs/PLACEMENT_ALGORITHM.md`.
 
 ## Six Degrees
