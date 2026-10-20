@@ -4,15 +4,16 @@ import { CANVAS_LAYOUT_VERSION, prepareCanvasLayout } from './canvasLayout';
 import { CLUSTER_STORAGE_KEY, emptyClusters, restoreClusters, serializeClusters } from './discoveryClusters';
 import { filterTimelineFigures } from './timelineFigures';
 import { normalizeWeaveContext } from './weave';
-import { countVerifiedConnections } from '../services/relationshipAssessment';
+import { ASSESSMENT_CACHE_PREFIX, CONTACT_CACHE_PREFIX, countVerifiedConnections } from '../services/relationshipAssessment';
+import { PATH_CACHE_PREFIX, LEGACY_PATH_CACHE_PREFIX, MEMBERSHIP_CACHE_PREFIX, WOVEN_CACHE_PREFIX } from './connectionPaths';
 
 export const CANVAS_HISTORY_KEY = 'chrono_canvas_history';
 export const CANVAS_HISTORY_LIMIT = 20;
 export const LEGACY_DATA_KEY = 'chrono_timeline_data';
 export const LEGACY_CONFIG_KEY = 'chrono_timeline_config';
 
-const isCanvasCacheKey = (key: string) => ['chrono_map_', 'chrono_assessment_', 'chrono_rel_', 'chrono_deepdive_']
-  .some(prefix => key.startsWith(prefix));
+const CACHE_PREFIXES = ['chrono_map_', ASSESSMENT_CACHE_PREFIX, CONTACT_CACHE_PREFIX, 'chrono_rel_', 'chrono_deepdive_', PATH_CACHE_PREFIX, LEGACY_PATH_CACHE_PREFIX, MEMBERSHIP_CACHE_PREFIX, WOVEN_CACHE_PREFIX];
+export const isCanvasCacheKey = (key: string) => CACHE_PREFIXES.some(prefix => key.startsWith(prefix));
 const isObject = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const createCanvasId = () => globalThis.crypto?.randomUUID?.() ?? `canvas-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 
@@ -166,10 +167,16 @@ export function saveCanvasHistory(storage: Storage, record: CanvasHistoryRecord)
   for (const key of obsolete) storage.removeItem(key);
 }
 
+/** True when a canvas was woven as a strict time span over exactly these years. */
+export function isTimeSpanCanvas(config: CanvasConfig, start: number, end: number): boolean {
+  const context = config.weaveContext;
+  return context?.mode === 'time-span' && context.inferredStartYear === start && context.inferredEndYear === end;
+}
+
 export function canvasHistoryDetails(canvas: CanvasSnapshot) {
   const context = canvas.config.weaveContext;
   const titles = { 'time-span': 'Strict Time Span', era: 'Historical Era', figure: 'Follow a Figure',
-    region: 'Region & Culture', theme: 'Theme or Discipline', freeform: 'Freeform / Custom' };
+    region: 'Region & Culture', theme: 'Theme or Discipline', freeform: 'Freeform' };
   return { title: context ? titles[context.mode] : 'Strict Time Span',
     verifiedConnections: countVerifiedConnections(canvas.figures, new CanvasCache(canvas.cache)),
     prompt: context?.query || `${canvas.config.start} to ${canvas.config.end}`,

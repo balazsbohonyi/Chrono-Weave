@@ -1,6 +1,9 @@
+import { requestContactDiscovery, requestContactAssessment, requestContactExplanation, type ContactDiscoveryRequest, type ContactPair } from './connectionAI';
+import type { ContactPerson, ContactAssessment } from './connectionGraph';
 import { generateRelationshipAssessment } from './relationshipAssessment';
 
-import { DeepDiveData, FigureCategory, HistoricalFigure, IAIService, RelationshipExplanation, WeaveGenerationContext, WeaveRequest, WeaveValidationResult } from "../types";
+import { ConnectionPathOptions, ConnectionPathProposal, DeepDiveData, FigureCategory, HistoricalFigure, IAIService, NewPerson, RelationshipExplanation, RelationshipExplanationOptions, WeaveGenerationContext, WeaveRequest, WeaveValidationResult } from "../types";
+import { requestConnectionPath, requestResolveFigure } from './pathService';
 import {
   buildDiscoveryPrompt,
   buildRelatedFiguresPrompt,
@@ -130,6 +133,24 @@ export class OpenRouterService implements IAIService {
         return generateWeaveTimeline(this.generate.bind(this), start, end, signal, context);
     }
 
+    discoverPersonalContacts(request: ContactDiscoveryRequest, signal?: AbortSignal) {
+        return requestContactDiscovery(this.generate.bind(this), request, signal);
+    }
+    assessPersonalContacts(pairs: ContactPair[], signal?: AbortSignal) {
+        return requestContactAssessment(this.generate.bind(this), pairs, signal);
+    }
+    explainPersonalContact(first: ContactPerson, second: ContactPerson, contact: ContactAssessment, signal?: AbortSignal) {
+        return requestContactExplanation(this.generate.bind(this), first, second, contact, signal);
+    }
+
+    fetchConnectionPath(from: HistoricalFigure, to: HistoricalFigure, options: ConnectionPathOptions, signal?: AbortSignal): Promise<ConnectionPathProposal | null> {
+        return requestConnectionPath(this.generate.bind(this), from, to, options, signal);
+    }
+
+    resolveFigure(name: string, signal?: AbortSignal): Promise<NewPerson | null> {
+        return requestResolveFigure(this.generate.bind(this), name, signal);
+    }
+
     async fetchRelatedFigures(target: HistoricalFigure, allFigures: HistoricalFigure[]): Promise<string[]> {
         const candidates = allFigures.filter(f => f.id !== target.id).map(({ id, name, birthYear, deathYear, category }) => ({ id, name, birthYear, deathYear, category }));
         if (candidates.length === 0) return [];
@@ -162,8 +183,8 @@ export class OpenRouterService implements IAIService {
         }, signal);
     }
 
-    async fetchRelationshipExplanation(source: HistoricalFigure, target: HistoricalFigure): Promise<RelationshipExplanation | null> {
-        const prompt = buildRelationshipExplanationPrompt(source, target);
+    async fetchRelationshipExplanation(source: HistoricalFigure, target: HistoricalFigure, _signal?: AbortSignal, options?: RelationshipExplanationOptions): Promise<RelationshipExplanation | null> {
+        const prompt = buildRelationshipExplanationPrompt(source, target, options);
         try {
             return await generateRelationshipAssessment(correction =>
                 enqueueTaskWithRetry(() => this.callOpenRouter(correction ? `${prompt}\n${correction}` : prompt)));

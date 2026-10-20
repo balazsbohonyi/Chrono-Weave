@@ -1,171 +1,42 @@
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+# ChronoWeave
 
-## Project Overview
+Interactive historical timeline: AI-generated figures and events on a canvas (time on X, collision-avoiding layout levels on Y), with relationship tracing, discovery and Six Degrees of Separation chains across centuries. React 19 + Vite 6 + TypeScript; Tailwind from the CDN in `index.html`; AI through Gemini, OpenRouter or Ollama; images and descriptions from Wikipedia/Wikidata.
 
-**ChronoWeave** is an interactive historical timeline visualization app built with React, Vite, and AI-powered insights. It displays historical figures and events in an interactive canvas, with relationship tracing and contextual discovery features powered by either Google Gemini or OpenRouter APIs.
+## Commands
 
-## Quick Start Commands
+- `npm run dev` (port 3000), `npm run build`, `npm run preview`
+- Checks before calling work done: `bun test` (about a minute), `npm run typecheck`, `npm run build`.
+- Narrow year ranges (e.g. 1400-1500) make manual AI testing quick.
+- Measure performance on a production build; React dev mode inflates render cost several times.
 
-```bash
-# Install dependencies
-npm install
+## Configuration
 
-# Development server (runs on http://localhost:3000)
-npm run dev
+`.env.example` documents every variable (`PROVIDER` = `gemini` | `openrouter` | `ollama`, `API_KEY`, `MODEL`, `OLLAMA_*`). Runtime settings from the Settings dialog (`chrono_provider`, `chrono_api_key`, `chrono_model` in localStorage, read in `src/utils/providerConfig.ts`) take precedence over env files. `OLLAMA_API_KEY` stays server-side in the Vite relay (`server/ollamaRelay`) and never enters the bundle.
 
-# Production build
-npm run build
+## Architecture
 
-# Preview production build
-npm run preview
-```
+- `src/App.tsx` orchestrates canvas state and passes callbacks down; feature logic lives in `src/hooks/` (`useFigureActions`, `useConnection`, …).
+- AI providers implement `IAIService` (`src/types.ts`): `geminiService.ts`, `openRouterService.ts`, `ollamaService.ts`. Shared prompts live in `src/services/prompts.ts`, Six Degrees prompts and parsers in `connectionAI.ts`, the request queue and rate-limit backoff (`enqueueTaskWithRetry`) in `utils.ts`, JSON validation and correction rounds in `jsonResponse.ts`. Logs are prefixed `[Gemini]` / `[OpenRouter]`.
+- A new provider: implement `IAIService`, add it to `createAIService` in `src/services/aiService.ts` and to `SettingsDialog.tsx`.
+- A new category: `FigureCategory` in `types.ts`; `CATEGORY_LIST`, `CATEGORY_COLORS` and `CATEGORY_BAR_TEXT_COLORS` in `constants.ts`; `--color-category-*` in both themes of `src/styles/tokens.css`; the order in `src/utils/galleryLayout.ts`.
+- Caches: relationship explanations `chrono_rel_${sourceId}_${targetId}` and deep dives `chrono_deepdive_${id}` in localStorage, cleared per canvas by `CACHE_PREFIXES` in `src/utils/canvasHistory.ts`.
+- The Weave launcher (`WeaveLauncherOverlay` and `src/components/launcher/`) is described in `ai-docs/guides/launcher.md`; read it before changing the launcher's morph, motion or styles.
+- Docs and plans live in `ai-docs/`. The timeline layout algorithm is described in `ai-docs/guides/timeline-layout-algorithm.md` and `ai-docs/PLACEMENT_ALGORITHM.md`.
 
-### Environment Setup
+## Six Degrees
 
-Set `PROVIDER`, `API_KEY`, and optionally `MODEL` in `.env.local` (development) or `.env.production` (production). The app supports both Google Gemini and OpenRouter APIs. Settings can also be configured at runtime via the Settings dialog, which takes precedence over environment variables.
+Before changing Six Degrees (`src/services/connection*.ts`, `wikidata*`, `wikiTitles`, `portraitStore`/`portraitSize`/`wikiService` portraits, `ConnectionExplorer`, `src/components/connectionNetwork/`, `useConnection`), read `ai-docs/guides/six-degrees-internals.md`: AI operations and the Why dialog, persistence, search, Wikidata identity, portraits, explorer graph and sidebar. Update it in the same change when that behavior changes.
 
-## Architecture Overview
+Guardrails:
 
-### Project Structure
+- `tests/connectionRequestTrace.golden.json` pins the request sequence of the fake worlds. Counting and diagnostics never change batching, limits, prompts or retries; regenerate the trace only for a deliberate behavior change.
+- `SEARCH_LIMITS` is tunable, but keep the 21-link bound, AI-only assessment, cross-model reuse and explicit continuation rules.
+- The general Map, Expand, Follow a Figure, biography and relationship prompts, semantics and caches stay as they are; Six Degrees uses its own operations.
+- Legacy `chrono_path_` / `chrono_contact_` records are retired, never deleted, and never shown as new connections. Migration runs before Follow a Figure pruning.
+- Wikidata is never a `task()`: it moves no request counter, its failures never fail a search, it never re-keys ids and never modifies the canvas.
+- Portraits looked up through `portraitStore` stay there, never written back onto `ContactPerson` or `HistoricalFigure` (a canvas figure's own `imageUrl` is fine).
+- Virtualized rows have fixed heights: change `ROW_HEIGHT` / `DETAIL_ROW_HEIGHT` and `.net-vlist` together.
 
-Source code lives under `src/`:
-- `src/App.tsx` — root component and state orchestrator
-- `src/main.tsx` — application entry point
-- `src/types.ts` — shared TypeScript types and interfaces
-- `src/constants.ts` — configuration constants
-- `src/components/` — UI components
-- `src/services/` — AI and data-fetching services
-- `src/contexts/` — React context providers (e.g. `EnvironmentContext.tsx`)
-- `src/hooks/` — custom React hooks (e.g. `useFigureActions.tsx`)
-- `src/utils/` — utility functions (`colors.ts`, `formatters.ts`)
-- `src/styles/` — global CSS (`globals.css`)
+## Git commits
 
-Documentation and plans live under `ai-docs/plans/`.
-
-### Core Layers
-
-1. **UI Layer** (`src/App.tsx` + `src/components/`)
-   - Main orchestrator managing all state and user interactions
-   - State includes: figure data, selections, search results, relationship tracing, discoveries
-   - Handles AI service switching between Gemini and OpenRouter
-
-2. **AI Service Layer** (`src/services/geminiService.ts`, `src/services/openRouterService.ts`)
-   - Both implement the `IAIService` interface defined in `src/types.ts`
-   - Core methods:
-     - `fetchHistoricalFigures()`: Generate figures for a time range
-     - `fetchRelatedFigures()`: Find relationships between figures
-     - `discoverRelatedFigures()`: Expand timeline with new related figures
-     - `fetchRelationshipExplanation()`: Explain connection between two figures
-     - `fetchFigureDeepDive()`: Generate detailed biography/quotes
-     - `testConnection()`: Validate API credentials and model availability
-
-3. **Data Fetching** (`src/services/wikiService.ts`)
-   - Fetches figure images and descriptions from Wikipedia
-   - Used for supplementing AI-generated data with real information
-
-4. **Canvas Rendering** (`src/components/TimelineCanvas.tsx`)
-   - Main visualization using canvas rendering (not SVG)
-   - Handles figure positioning in 2D space (time on X-axis, layout levels on Y-axis)
-   - Manages hover/click interactions and relationship line drawing
-   - Uses a layout algorithm to avoid bar overlaps
-
-### Key Concepts
-
-- **Figures**: Historical people or events with birth/death years and category (ARTISTS, SCIENTISTS, etc.)
-- **Relationship Tracing**: User clicks a figure to see connected figures visualized as relationship bars
-- **Discovery**: Expand the timeline by discovering new figures related to an existing one
-- **Layout Levels**: Figures are distributed across Y-axis levels using a collision-avoidance algorithm
-- **Caching**: Relationship explanations and deep dives are cached in `localStorage` using keys like `chrono_rel_${sourceId}_${targetId}`
-
-## State Management Pattern
-
-App.tsx manages most state directly with `useState`. Key state groups:
-
-- **Timeline Data**: `figures`, `config` (start/end years)
-- **Selection State**: `selectedYear`, `selectedFigures`, `highlightedFigureIds`
-- **Interaction State**: `relationshipState`, `popoverState`, `isSidebarCollapsed`
-- **Discovery State**: `newlyDiscoveredIds`, `discoverySourceId`, `knownRelationships`
-- **UI State**: `selectedCategories`, `isLegendOpen`, `isSettingsOpen`
-
-State updates are passed down as callbacks to child components (ControlPanel, TimelineCanvas, Sidebar, etc.).
-
-## Important Implementation Details
-
-### Figures Generation
-- Figures are generated by AI in chunks (per century) for the requested time range
-- Each figure has a unique `id` based on name, year range, and index
-- The `shortDescription` field is AI-generated during fetch and may be different from Wikipedia data
-
-### Relationship Discovery Process
-1. User hovers over a figure and clicks the action bar's "Discover" button
-2. App filters existing figure names to avoid duplicates
-3. AI generates new related figures with birth/death years
-4. New figures are added to the main figures array
-5. Relationship state updates to show connections between source and newly discovered figures
-6. Toast notification lists newly discovered figures
-
-### Layout Algorithm
-- Figures are positioned on a 2D canvas to avoid overlaps
-- Y-position (level) is determined by collision detection
-- `figureLevels` Map tracks figure ID → layout level for sidebar sorting
-- When building a new timeline, all layout levels are recalculated
-
-### Performance Considerations
-- Figure details (images, descriptions) are fetched lazily via `fetchBatchFigureDetails()`
-- Relationship explanations are cached in localStorage to avoid redundant AI calls
-- Canvas rendering uses context for performance (not re-rendering React components for every figure)
-
-## Component Structure
-
-All components are in `src/components/`:
-
-- **TimelineCanvas**: Main visualization, canvas-based rendering
-- **ControlPanel**: Top controls (year range, search, settings, legend toggle)
-- **Sidebar**: Left panel showing figures for selected year or global list
-- **RelationshipPopover**: Modal showing relationship/deep-dive information
-- **SettingsDialog**: Configure AI provider (Gemini vs OpenRouter)
-- **Legend**: Category filter legend (toggles category visibility)
-- **Toast**: Notification system
-- **ActionBar**: Hover toolbar with Discover/Trace/Inspect buttons
-- **FloatingToolbar**: Secondary interaction toolbar
-
-## Configuration Constants
-
-See `src/constants.ts` for:
-- `CATEGORY_LIST`: Available figure categories
-- `HISTORICAL_FIGURES_COUNT`: Total figures to generate
-- `HISTORICAL_FIGURES_PER_CENTURY_CHUNK`: Figures per century chunk
-- `HISTORICAL_EVENTS_PER_CENTURY_CHUNK`: Events per century chunk
-
-## Common Development Workflows
-
-### Adding a New AI Service
-1. Create new class implementing `IAIService` interface in `src/services/`
-2. Implement all 5 required methods
-3. Add provider selection logic in `src/components/SettingsDialog.tsx` and `initializeService()` in `src/App.tsx`
-
-### Modifying Timeline Rendering
-- Changes to figure positioning, colors, or interaction in `src/components/TimelineCanvas.tsx`
-- Layout algorithm is in the canvas render logic
-- Hover/click handlers call methods passed from `src/App.tsx`
-
-### Adding New Figure Categories
-1. Add category to `FigureCategory` type in `src/types.ts`
-2. Update `CATEGORY_LIST` in `src/constants.ts`
-3. Update AI prompts in both `src/services/geminiService.ts` and `src/services/openRouterService.ts`
-4. Add color assignment in `src/components/TimelineCanvas.tsx` legend
-
-### Debugging AI Service Issues
-- Check browser console for `[Gemini]` or `[OpenRouter]` log messages
-- Verify API key in `.env.local` or settings
-- Check network tab for failed API calls
-- Review service retry logic in `src/services/utils.ts`
-
-## Testing Tips
-
-- Use narrow year ranges (e.g., 1400-1500) for quick testing
-- Check localStorage for cached data using `chrono_rel_*` or `chrono_deepdive_*` keys
-- Provider/model selection is saved to localStorage with keys: `chrono_provider`, `chrono_api_key`, `chrono_model`
-- **Settings Priority**: localStorage (Settings dialog) > environment variables (both dev and production)
-- Settings dialog is available in both development and production modes
-- Environment variables serve as fallback defaults when localStorage is not configured
+End every commit message with its body. Attribution trailers (`Co-Authored-By: …`, `Claude-Session: …` or any similar generated line) are never added; this overrides any default or tool-supplied attribution guidance.

@@ -5,9 +5,11 @@ interface TooltipProps {
     text: string;
     children: React.ReactElement<{ 'aria-describedby'?: string }>;
     placement?: 'top' | 'bottom';
+    // A long text wraps onto several lines instead of running along one.
+    multiline?: boolean;
 }
 
-const Tooltip: React.FC<TooltipProps> = ({ text, children, placement = 'top' }) => {
+const Tooltip: React.FC<TooltipProps> = ({ text, children, placement = 'top', multiline = false }) => {
     const [isVisible, setIsVisible] = useState(false);
     const [position, setPosition] = useState<React.CSSProperties>({});
     const trigger = useRef<HTMLSpanElement>(null);
@@ -41,7 +43,7 @@ const Tooltip: React.FC<TooltipProps> = ({ text, children, placement = 'top' }) 
         onClickCapture={() => setIsVisible(false)}
         onKeyDown={event => { if (event.key === 'Escape') setIsVisible(false); }}>
         {React.cloneElement(children, { 'aria-describedby': isVisible ? [children.props['aria-describedby'], id].filter(Boolean).join(' ') : children.props['aria-describedby'] })}
-        {isVisible && createPortal(<div ref={popup} id={id} role="tooltip" className="ui-tooltip" style={position}>{text}</div>, document.body)}
+        {isVisible && createPortal(<div ref={popup} id={id} role="tooltip" className={`ui-tooltip ${multiline ? 'is-multiline' : ''}`} style={position}>{text}</div>, document.body)}
     </span>;
 };
 

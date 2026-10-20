@@ -1,3 +1,5 @@
+import { requestContactDiscovery, requestContactAssessment, requestContactExplanation, type ContactDiscoveryRequest, type ContactPair } from './connectionAI';
+import type { ContactPerson, ContactAssessment } from './connectionGraph';
 import { parseRelationshipAssessment, RelationshipAssessmentError } from './relationshipAssessment';
 import { CATEGORY_LIST } from '../constants';
 import {
@@ -9,10 +11,11 @@ import {
   CONNECTION_TEST_PROMPT,
   buildCorrectionPrompt,
 } from './prompts';
-import type { DeepDiveData, FigureCategory, HistoricalFigure, IAIService, RelationshipExplanation, WeaveGenerationContext, WeaveRequest, WeaveValidationResult } from '../types';
+import type { ConnectionPathOptions, ConnectionPathProposal, DeepDiveData, FigureCategory, HistoricalFigure, IAIService, NewPerson, RelationshipExplanation, RelationshipExplanationOptions, WeaveGenerationContext, WeaveRequest, WeaveValidationResult } from '../types';
+import { requestConnectionPath, requestResolveFigure } from './pathService';
 import { validateLocalUrl, type AppConfig } from '../utils/providerConfig';
 import { generateWeaveTimeline, getWeaveGenerationRange, parseWeaveFigures, suggestWeaveTopic, validateWeaveQuery } from './weaveService';
-import { parseJsonResponse } from './jsonResponse';
+import { noteValidationRetry, parseJsonResponse } from './jsonResponse';
 import { isWeaveCategoryAllowed } from '../utils/weave';
 import { withAbort } from './utils';
 
@@ -182,6 +185,7 @@ export class OllamaService implements IAIService {
             }
             throw new Error(`Model ${this.config.model} returned unusable data after a retry: ${validationError}`);
           }
+          noteValidationRetry();
         }
       }
       throw new Error('Ollama generation failed.');
@@ -221,6 +225,24 @@ export class OllamaService implements IAIService {
 
   fetchHistoricalFigures(start: number, end: number, signal?: AbortSignal, context?: WeaveGenerationContext): Promise<HistoricalFigure[]> {
     return generateWeaveTimeline(this.generate.bind(this), start, end, signal, context);
+  }
+
+    discoverPersonalContacts(request: ContactDiscoveryRequest, signal?: AbortSignal) {
+        return requestContactDiscovery(this.generate.bind(this), request, signal);
+    }
+    assessPersonalContacts(pairs: ContactPair[], signal?: AbortSignal) {
+        return requestContactAssessment(this.generate.bind(this), pairs, signal);
+    }
+    explainPersonalContact(first: ContactPerson, second: ContactPerson, contact: ContactAssessment, signal?: AbortSignal) {
+        return requestContactExplanation(this.generate.bind(this), first, second, contact, signal);
+    }
+
+  fetchConnectionPath(from: HistoricalFigure, to: HistoricalFigure, options: ConnectionPathOptions, signal?: AbortSignal): Promise<ConnectionPathProposal | null> {
+    return requestConnectionPath(this.generate.bind(this), from, to, options, signal);
+  }
+
+  resolveFigure(name: string, signal?: AbortSignal): Promise<NewPerson | null> {
+    return requestResolveFigure(this.generate.bind(this), name, signal);
   }
 
   async fetchRelatedFigures(target: HistoricalFigure, allFigures: HistoricalFigure[], signal?: AbortSignal): Promise<string[]> {
@@ -268,8 +290,8 @@ export class OllamaService implements IAIService {
     }, signal);
   }
 
-  fetchRelationshipExplanation(source: HistoricalFigure, target: HistoricalFigure, signal?: AbortSignal): Promise<RelationshipExplanation> {
-    return this.generate(buildRelationshipExplanationPrompt(source, target), parseRelationshipAssessment, signal);
+  fetchRelationshipExplanation(source: HistoricalFigure, target: HistoricalFigure, signal?: AbortSignal, options?: RelationshipExplanationOptions): Promise<RelationshipExplanation> {
+    return this.generate(buildRelationshipExplanationPrompt(source, target, options), parseRelationshipAssessment, signal);
   }
 
   fetchFigureDeepDive(figure: HistoricalFigure, signal?: AbortSignal): Promise<DeepDiveData> {

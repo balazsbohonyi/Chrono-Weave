@@ -12,8 +12,19 @@ test('the header uses the original prompt, capitalized, and actual inferred year
   const context = { mode: 'freeform' as const, query: '  ancient Rome and its rulers  ', inferredStartYear: -200, inferredEndYear: 700,
     themeDescription: 'Model-inferred title', activeCategories: ['ALL' as const] };
   assert.equal(formatCanvasPrompt({ ...config, weaveContext: context }), 'Ancient Rome and its rulers');
-  assert.equal(formatCanvasPrompt({ ...config, weaveContext: { ...context, mode: 'time-span', query: '' } }), '200 BC – 700');
+  assert.equal(formatCanvasPrompt({ ...config, weaveContext: { ...context, mode: 'time-span', query: '' } }), '200 BC – 700 · Classical antiquity – Early Middle Ages');
   assert.equal(formatCanvasPrompt(config), '300 BC – 800');
+});
+
+test('a strict time span is titled by its years and the eras they fall in', () => {
+  const span = (start: number, end: number) => formatCanvasPrompt({ ...config, start: start - 10, end: end + 10, weaveContext: {
+    mode: 'time-span', query: `${start} to ${end}`, inferredStartYear: start, inferredEndYear: end, themeDescription: '', activeCategories: ['ALL'] } });
+  assert.equal(span(1400, 1500), '1400 – 1500 · Late Middle Ages – Renaissance');
+  assert.equal(span(1460, 1520), '1460 – 1520 · Renaissance');
+  // a span ending where the next era begins stays in its own era
+  assert.equal(span(1450, 1600), '1450 – 1600 · Renaissance');
+  assert.equal(span(1940, 2026), '1940 – 2026 · Industrial & modern – Contemporary');
+  assert.equal(span(-500, -300), '500 BC – 300 BC · Classical antiquity');
 });
 
 test('zoom reset remains in the toolbar at every scale and is disabled at 100% or while busy', () => {

@@ -9,14 +9,16 @@ export function useFigurePortraits(figures: HistoricalFigure[]) {
   useEffect(() => {
     if (!missing.length) return;
     let current = true;
-    fetchBatchFigureDetails(missing).then(details => {
+    const show = (details: Map<string, { imageUrl: string | null }>) => {
       if (!current) return;
       setPortraits(previous => {
         const next = new Map(previous);
         for (const [id, detail] of details) if (detail.imageUrl) next.set(id, detail.imageUrl);
         return next.size === previous.size && [...next].every(([id, url]) => previous.get(id) === url) ? previous : next;
       });
-    }).catch(error => console.warn('Could not load figure portraits', error));
+    };
+    // The portraits remembered from earlier visits are shown at once; people nobody remembers follow when Wikipedia has answered.
+    fetchBatchFigureDetails(missing, show).then(show).catch(error => console.warn('Could not load figure portraits', error));
     return () => { current = false; };
     // Camera movement within the same visible set must not restart the request.
   }, [requestKey]);

@@ -1,0 +1,130 @@
+{
+ "searchinfo": {
+  "search": "Robert Oppenheimer"
+ },
+ "search": [
+  {
+   "id": "Q132537",
+   "title": "Q132537",
+   "pageid": 134326,
+   "concepturi": "http://www.wikidata.org/entity/Q132537",
+   "repository": "wikidata",
+   "url": "//www.wikidata.org/wiki/Q132537",
+   "display": {
+    "label": {
+     "value": "J. Robert Oppenheimer",
+     "language": "en"
+    },
+    "description": {
+     "value": "American theoretical physicist (1904–1967)",
+     "language": "en"
+    }
+   },
+   "label": "J. Robert Oppenheimer",
+   "description": "American theoretical physicist (1904–1967)",
+   "match": {
+    "type": "alias",
+    "language": "en",
+    "text": "Robert Oppenheimer"
+   },
+   "aliases": [
+    "Robert Oppenheimer"
+   ]
+  },
+  {
+   "id": "Q59557291",
+   "title": "Q59557291",
+   "pageid": 59453350,
+   "concepturi": "http://www.wikidata.org/entity/Q59557291",
+   "repository": "wikidata",
+   "url": "//www.wikidata.org/wiki/Q59557291",
+   "display": {
+    "label": {
+     "value": "Robert Oppenheimer",
+     "language": "en"
+    },
+    "description": {
+     "value": "researcher ORCID ID = 0000-0001-5384-3261",
+     "language": "en"
+    }
+   },
+   "label": "Robert Oppenheimer",
+   "description": "researcher ORCID ID = 0000-0001-5384-3261",
+   "match": {
+    "type": "label",
+    "language": "en",
+    "text": "Robert Oppenheimer"
+   }
+  },
+  {
+   "id": "Q88259084",
+   "title": "Q88259084",
+   "pageid": 87501348,
+   "concepturi": "http://www.wikidata.org/entity/Q88259084",
+   "repository": "wikidata",
+   "url": "//www.wikidata.org/wiki/Q88259084",
+   "display": {
+    "label": {
+     "value": "Robert L Oppenheimer",
+     "language": "en"
+    },
+    "description": {
+     "value": "researcher",
+     "language": "en"
+    }
+   },
+   "label": "Robert L Oppenheimer",
+   "description": "researcher",
+   "match": {
+    "type": "alias",
+    "language": "en",
+    "text": "Robert Oppenheimer"
+   },
+   "aliases": [
+    "Robert Oppenheimer"
+   ]
+  },
+  {
+   "id": "Q114852826",
+   "title": "Q114852826",
+   "pageid": 109516961,
+   "concepturi": "http://www.wikidata.org/entity/Q114852826",
+   "repository": "wikidata",
+   "url": "//www.wikidata.org/wiki/Q114852826",
+   "display": {
+    "label": {
+     "value": "Robert Oppenheimer: Letters and Recollections",
+     "language": "en"
+    }
+   },
+   "label": "Robert Oppenheimer: Letters and Recollections",
+   "match": {
+    "type": "label",
+    "language": "en",
+    "text": "Robert Oppenheimer: Letters and Recollections"
+   }
+  },
+  {
+   "id": "Q114853711",
+   "title": "Q114853711",
+   "pageid": 109517737,
+   "concepturi": "http://www.wikidata.org/entity/Q114853711",
+   "repository": "wikidata",
+   "url": "//www.wikidata.org/wiki/Q114853711",
+   "display": {
+    "label": {
+     "value": "Robert Oppenheimer: Letters and Recollections by Alice Kimball Smith, Charles Weiner [Review]",
+     "language": "en"
+    }
+   },
+   "label": "Robert Oppenheimer: Letters and Recollections by Alice Kimball Smith, Charles Weiner [Review]",
+   "match": {
+    "type": "label",
+    "language": "en",
+    "text": "Robert Oppenheimer: Letters and Recollections by Alice Kimball Smith, Charles Weiner [Review]"
+   }
+  }
+ ],
+ "search-continue": 5,
+ "success": 1
+}

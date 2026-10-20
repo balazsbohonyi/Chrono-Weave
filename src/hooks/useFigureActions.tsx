@@ -15,6 +15,8 @@ interface UseFigureActionsProps {
     onDiscover: (figure: HistoricalFigure) => void;
     onTrace: (figure: HistoricalFigure) => void;
     onInspect: (figure: HistoricalFigure) => void;
+    // Six Degrees: start choosing who to connect this person to. People only.
+    onConnect?: (figure: HistoricalFigure) => void;
     isDiscovering: boolean;
     isTracing?: boolean;
     isFollowingFigure?: boolean;
@@ -27,6 +29,7 @@ export const useFigureActions = ({
     onDiscover,
     onTrace,
     onInspect,
+    onConnect,
     isDiscovering,
     isTracing = false,
     isFollowingFigure = false,
@@ -80,6 +83,23 @@ export const useFigureActions = ({
                 onTrace(figure);
             },
             isLoading: isTracing,
+            isVisible: true
+        } : null,
+        !isEvent && onConnect ? {
+            id: 'connect',
+            label: "Connect to…",
+            icon: (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                    <circle cx="5" cy="12" r="2.5" strokeWidth={2} />
+                    <circle cx="19" cy="12" r="2.5" strokeWidth={2} />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7.5 12h9" />
+                </svg>
+            ),
+            onClick: (e: React.MouseEvent) => {
+                e.stopPropagation();
+                onConnect(figure);
+            },
+            isLoading: false,
             isVisible: true
         } : null,
         !isEvent && (!isFollowingFigure || isFocus) ? {

@@ -47,3 +47,26 @@ test('View Relationship and biography use their separate callbacks and stop prop
   assert.deepEqual(calls, ['relationship:ada', 'biography:ada']);
   assert.equal(stopped, 2);
 });
+
+test('Connect to appears for people between mapping and expansion, only when connecting is available', () => {
+  assert.deepEqual(actions({ onConnect: () => {} }), ['inspect', 'trace', 'connect', 'discover']);
+  assert.deepEqual(actions(), ['inspect', 'trace', 'discover']);
+  // Follow a Figure canvases allow connecting from the focus and from every other person.
+  assert.deepEqual(actions({ onConnect: () => {}, isFollowingFigure: true, focusFigureId: figure.id }), ['inspect', 'connect', 'discover']);
+  assert.deepEqual(actions({ onConnect: () => {}, isFollowingFigure: true, focusFigureId: 'focus' }), ['relationship', 'inspect', 'trace', 'connect']);
+});
+
+test('events never offer Connect to, because chains link people only', () => {
+  const event = { ...figure, category: 'EVENTS' as const };
+  assert.deepEqual(actions({ figure: event, onConnect: () => {} }), ['inspect']);
+});
+
+test('Connect to passes the person on and keeps the click away from the canvas', () => {
+  const calls: string[] = [];
+  let stopped = 0;
+  const connect = actionItems({ onConnect: selected => calls.push(selected.id) }).find(action => action.id === 'connect')!;
+  assert.equal(connect.label, 'Connect to…');
+  connect.onClick({ stopPropagation: () => { stopped++; } } as React.MouseEvent);
+  assert.deepEqual(calls, ['ada']);
+  assert.equal(stopped, 1);
+});

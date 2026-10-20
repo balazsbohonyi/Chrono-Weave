@@ -55,6 +55,17 @@
   --color-accent-text-hover: 29 78 216;
   --color-accent-heading: 30 64 175;
   --color-accent-emphasis: 30 58 138;
+  /* Six Degrees thread, outlines and badges: a deeper amber on light surfaces, a lighter one on dark. */
+  --color-connection: 217 119 6;
+  /* The accepted chain between the two endpoints in the exploration graph: lime, apart from the amber of every other accepted contact. */
+  --color-chain-path: 101 163 13;
+  --color-connection-contrast: 255 255 255;
+  /* Amber for small text on a tint of itself (the Why? buttons): deep enough to read on light surfaces. */
+  --color-connection-text: 146 64 14;
+  /* Six Degrees network: selection blue, and the side tints (reached from A / from B). */
+  --color-selection: 37 99 235;
+  --color-side-a: 13 148 136;
+  --color-side-b: 124 58 237;
   --color-accent-solid: 37 99 235;
   --color-accent-solid-hover: 29 78 216;
   --color-on-accent: 255 255 255;
@@ -161,6 +172,13 @@
   --color-accent-text-hover: 147 197 253;
   --color-accent-heading: 147 197 253;
   --color-accent-emphasis: 191 219 254;
+  --color-connection: 251 191 36;
+  --color-chain-path: 163 230 53;
+  --color-connection-contrast: 41 28 4;
+  --color-connection-text: 252 211 77;
+  --color-selection: 96 165 250;
+  --color-side-a: 45 212 191;
+  --color-side-b: 167 139 250;
   --color-accent-solid: 37 99 235;
   --color-accent-solid-hover: 29 78 216;
   --color-on-accent: 255 255 255;

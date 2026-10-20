@@ -7,10 +7,12 @@ import { figure, MemoryStorage, relationship } from './helpers';
 
 const candidate = (id: string): HistoricalFigure => ({ ...figure, id, name: id });
 const mockService = (overrides: Partial<IAIService> = {}): IAIService => ({
+  discoverPersonalContacts: async () => [], assessPersonalContacts: async () => [], explainPersonalContact: async () => relationship,
   validateWeaveQuery: async () => { throw new Error('Unexpected pre-flight request'); },
   suggestWeaveTopic: async () => { throw new Error('Unexpected topic suggestion'); },
   fetchHistoricalFigures: async () => [], fetchRelatedFigures: async () => [], discoverRelatedFigures: async () => [],
   fetchRelationshipExplanation: async () => relationship, fetchFigureDeepDive: async () => null,
+  fetchConnectionPath: async () => null, resolveFigure: async () => null,
   testConnection: async () => ({ success: true }), ...overrides,
 });
 const options = (service: IAIService, figures: HistoricalFigure[] = [figure]) => ({ service, source: figure, figures, action: 'map' as const,

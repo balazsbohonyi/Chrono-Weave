@@ -1,0 +1,405 @@
+/* Overlay shell: the same glass as the relationship overlay, with the exploration's parts floating on it. */
+.connection-explorer { position: fixed; inset: 0; z-index: 180; display: flex; flex-direction: column; gap: 14px; padding: 22px 28px 20px; background: rgb(var(--color-surface) / 60%); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); color: rgb(var(--color-content-primary)); outline: none; }
+.connection-explorer > :not(.close-button) { width: 100%; max-width: 1720px; margin-inline: auto; }
+.connection-explorer button:where(:not(.close-button, .canvas-floating-button)) { border: 1px solid rgb(var(--color-border-strong)); background: rgb(var(--color-surface) / .55); color: inherit; border-radius: 8px; padding: 8px 14px; font-size: 13px; line-height: 1.4; transition: background-color 150ms, border-color 150ms; }
+.connection-explorer button:where(:not(.close-button, .canvas-floating-button)):hover { background: rgb(var(--color-surface-muted) / .85); }
+.connection-explorer button:focus-visible, .connection-explorer summary:focus-visible, .connection-explorer input:focus-visible { outline: 2px solid rgb(var(--color-connection)); outline-offset: 3px; }
+
+/* Header: kicker, the two people, the phase and a prominent clock. */
+.connection-explorer-header { display: flex; flex-direction: column; align-items: center; gap: 10px; padding-right: 56px; }
+.connection-explorer-kicker { font-size: 12px; text-transform: uppercase; letter-spacing: .15em; color: rgb(var(--color-accent-marker)); font-weight: 700; }
+.ce-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 24px; width: 100%; }
+.connection-explorer-status { display: flex; flex-direction: column; gap: 2px; justify-self: start; min-width: 0; font-size: 14px; }
+.connection-explorer-status strong { overflow-wrap: anywhere; }
+.connection-explorer-status span { font-size: 12px; color: rgb(var(--color-content-secondary)); }
+.connection-explorer-status .ce-save-warning { color: rgb(var(--color-danger-text)); font-weight: 700; cursor: help; }
+.ce-endpoints { display: flex; align-items: center; justify-content: center; gap: 22px; min-width: 0; }
+.ce-arrow { font-size: 24px; color: rgb(var(--color-content-secondary)); }
+/* The degrees of a solved connection stand between the two endpoints where the arrow would be, as on the sidebar's connection cards. */
+.ce-degrees { display: inline-flex; align-items: baseline; gap: 4px; padding: 3px 14px; border-radius: 9999px; font-size: 13px; font-weight: 700; white-space: nowrap; color: rgb(var(--color-connection)); background: rgb(var(--color-connection) / 12%); border: 1px solid rgb(var(--color-connection) / 40%); }
+.ce-degrees b { font-size: 18px; font-weight: 800; line-height: 1.2; }
+.ce-endpoint { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.ce-endpoint-portrait { position: relative; display: inline-flex; flex: none; }
+.ce-endpoint-portrait .net-portrait { border: 3px solid rgb(var(--color-connection)); box-shadow: 0 6px 18px rgb(var(--color-shadow) / .22); }
+.ce-endpoint-portrait .net-end-badge { position: absolute; right: -4px; bottom: -4px; }
+.ce-endpoint-text { display: flex; flex-direction: column; min-width: 0; }
+.ce-endpoint-name { font-size: clamp(18px, 2vw, 26px); font-weight: 700; line-height: 1.2; overflow-wrap: break-word; }
+.ce-endpoint small { margin-top: 3px; font-size: 12px; color: rgb(var(--color-content-secondary)); overflow-wrap: anywhere; }
+.ce-opening { font-size: 22px; font-weight: 700; text-align: center; }
+/* The clock and the sign that the search is working, side by side. The clock has a fixed width and every character
+   a cell of its own, so its centre never moves while the digits change. */
+.ce-clock { display: flex; align-items: center; gap: 14px; justify-self: end; margin-right: 12px; }
+.ce-timer { position: relative; isolation: isolate; display: flex; flex-direction: column; align-items: center; width: 124px; line-height: 1; }
+.ce-timer-value { display: flex; justify-content: center; font-size: 36px; font-weight: 800; letter-spacing: 0; transform-origin: 50% 50%; }
+.ce-digit, .ce-colon { display: inline-block; text-align: center; }
+.ce-digit { width: .66em; }
+.ce-colon { width: .34em; }
+.ce-timer-caption { margin-top: 5px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .14em; color: rgb(var(--color-content-secondary)); }
+/* While the search runs a soft glow ripples out from the middle of the clock and the time breathes: it is working,
+   even when nothing new has appeared. Only transform and opacity animate, so it stays smooth and the digits never
+   get re-rasterised at fractional sizes. */
+.ce-timer.is-running::before { content: ''; position: absolute; z-index: -1; inset: -16px -4px; border-radius: 50%; pointer-events: none; will-change: transform, opacity;
+  background: radial-gradient(closest-side, rgb(var(--color-connection) / .75), rgb(var(--color-connection) / .3) 55%, transparent 100%); animation: ce-timer-ripple 1.7s cubic-bezier(.2, .6, .35, 1) infinite; }
+.ce-timer.is-running .ce-timer-value { will-change: transform; animation: ce-timer-pulse 1.7s ease-in-out infinite; }
+.ce-timer.is-running .ce-timer-caption { color: rgb(var(--color-connection)); }
+@keyframes ce-timer-ripple { 0% { transform: scale(.3); opacity: .9; } 100% { transform: scale(1.15); opacity: 0; } }
+@keyframes ce-timer-pulse { 0%, 100% { transform: scale(1); opacity: .85; } 50% { transform: scale(1.09); opacity: 1; } }
+
+/* A magnifying glass that sweeps about as if looking for something, shown while the search runs. Its space is
+   always kept, so the clock does not move when the search stops. */
+.ce-working { position: relative; flex: none; width: 38px; height: 38px; color: rgb(var(--color-connection)); opacity: 0; transition: opacity 300ms; }
+.ce-working.is-working { opacity: 1; }
+.ce-working svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.ce-working.is-working .ce-working-glass { animation: ce-working-scan 2.6s ease-in-out infinite; transform-origin: 50% 50%; }
+@keyframes ce-working-scan { 0%, 100% { transform: translate(-3px, 2px) rotate(-12deg); } 25% { transform: translate(2px, -3px) rotate(6deg); } 50% { transform: translate(3px, 2px) rotate(12deg); } 75% { transform: translate(-2px, 3px) rotate(-6deg); } }
+
+/* Body: the network and the inspection are two glass panels. */
+.connection-explorer-body { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 14px; flex: 1; min-height: 0; position: relative; }
+.connection-explorer-network, .connection-explorer-inspection { background: rgb(var(--color-surface) / .42); border: 1px solid rgb(var(--color-border) / .8); border-radius: 14px; box-shadow: 0 8px 28px rgb(var(--color-shadow) / .1333); }
+.connection-explorer-network { display: flex; flex-direction: column; min-height: 0; position: relative; overflow: hidden; }
+/* Maximized: the inspection panel steps aside (it stays mounted, so its tab, search and scroll survive) and the graph takes the
+   whole body; the header and footer stay. Narrow screens never maximize: there the graph already has the whole body. */
+.connection-explorer-body.is-maximized { grid-template-columns: minmax(0, 1fr); }
+.connection-explorer-body.is-maximized > .connection-explorer-inspection { display: none; }
+/* The toggle is a bare icon in the corner of the graph, below the year strip, with no panel of its own. */
+.net-maximize { position: absolute; top: 28px; right: 6px; z-index: 3; }
+
+/* Network graph */
+.net-graph { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.net-empty { margin: auto; color: rgb(var(--color-content-secondary)); font-size: 13px; }
+/* The view controls and the legend float over the bottom of the drawing, above the year strip. The
+   container is the main canvas's own bottom-left toolbar, positioned inside the graph instead of the page. */
+.net-overlay-row { position: absolute; left: 14px; right: 14px; bottom: 36px; z-index: 3; display: flex; align-items: center; gap: 10px; pointer-events: none; }
+.net-overlay-row > * { pointer-events: auto; }
+/* The legend sits at the right end of the row, on the toolbar’s centre line; when the graph is narrow its chips wrap
+   among themselves rather than the legend dropping below the toolbar. */
+.net-overlay-row > .canvas-view-toolbar { flex: none; }
+.net-overlay-row > .net-legend { margin-left: auto; min-width: 0; justify-content: flex-end; }
+.canvas-view-toolbar.net-view-toolbar { position: relative; left: auto; bottom: auto; z-index: auto; }
+.net-stage { position: relative; flex: 1; min-height: 0; }
+.net-svg { position: absolute; inset: 0; display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; user-select: none; }
+.net-svg:active { cursor: grabbing; }
+.net-node, .net-edge, .net-fold { cursor: pointer; outline: none; }
+.net-node:focus, .net-edge:focus, .net-fold:focus, .net-svg:focus { outline: none; }
+/* Dimming fades in a small network. In a large one it is immediate: an opacity transition on every person and line repaints the
+   whole drawing each frame for its duration (SVG opacity is not composited), which made selecting someone stutter. */
+.net-graph:not(.is-large) .net-node, .net-graph:not(.is-large) .net-edge { transition: opacity .2s; }
+
+/* Year strips: the same thin glass bars the main canvas uses, so the years stay readable over the graph. */
+.net-strip { position: absolute; left: 0; right: 0; height: 24px; overflow: hidden; z-index: 2; pointer-events: none; background: rgb(var(--color-timeline-axis) / .75); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); }
+.net-strip.is-top { top: 0; }
+.net-strip.is-bottom { bottom: 0; }
+.net-tick { position: absolute; top: 0; bottom: 0; transform: translateX(-50%); font-size: 12px; font-weight: 700; line-height: 1; white-space: nowrap; color: rgb(var(--color-timeline-axis-label)); }
+.net-strip.is-top .net-tick { padding-top: 3px; }
+.net-strip.is-bottom .net-tick { padding-top: 8px; }
+.net-tick::before { content: ''; position: absolute; left: 50%; width: 2px; height: 6px; margin-left: -1px; background: rgb(var(--color-timeline-axis-label)); }
+.net-strip.is-top .net-tick::before { bottom: 0; }
+.net-strip.is-bottom .net-tick::before { top: 0; }
+
+.net-axis { pointer-events: none; }
+.net-axis line { stroke: rgb(var(--color-content-muted) / .22); stroke-width: 1; }
+.net-band-a { fill: rgb(var(--color-side-a) / .1); }
+.net-band-b { fill: rgb(var(--color-side-b) / .1); }
+
+.net-node-body { transform-box: fill-box; transform-origin: center; animation: net-enter .35s ease-out; }
+@keyframes net-enter { from { opacity: 0; transform: scale(.6); } to { opacity: 1; transform: scale(1); } }
+.net-ring { fill: none; stroke: rgb(var(--color-content-muted)); stroke-width: 3; }
+.net-node.is-side-a .net-ring { stroke: rgb(var(--color-side-a)); }
+.net-node.is-side-b .net-ring { stroke: rgb(var(--color-side-b)); }
+.net-node.is-endpoint .net-ring { stroke: rgb(var(--color-connection)); stroke-width: 4.5; }
+.net-node.is-tentative .net-ring { stroke-dasharray: 3 3; }
+.net-node.is-tentative .net-disc { opacity: .7; }
+.net-disc { stroke: rgb(var(--color-surface)); stroke-width: 1; }
+.net-initials { font-weight: 700; pointer-events: none; }
+.net-name { fill: rgb(var(--color-content-primary)); font-size: 12px; font-weight: 600; paint-order: stroke; stroke: rgb(var(--color-surface) / .9); stroke-width: 4; stroke-linejoin: round; pointer-events: none; }
+.net-node.is-endpoint .net-name { font-size: 13px; font-weight: 700; }
+.net-node.is-tentative .net-name { font-weight: 500; fill: rgb(var(--color-content-secondary)); }
+.net-badge-ab circle { fill: rgb(var(--color-connection)); stroke: rgb(var(--color-surface)); stroke-width: 1.5; }
+.net-badge-ab text { fill: rgb(var(--color-connection-contrast)); font-size: 11px; font-weight: 800; pointer-events: none; }
+/* Endpoints are the landmarks of the drawing: painted last (on top), with a soft halo in the colour of their side, a double
+   ring whose thickness does not shrink when zoomed out, and the whole name on a pill. */
+.net-halo { fill: rgb(var(--color-side-a) / .16); pointer-events: none; }
+.net-halo-ring { fill: none; stroke: rgb(var(--color-side-a)); stroke-width: 2.5; vector-effect: non-scaling-stroke; pointer-events: none; }
+.net-node.is-end-b .net-halo { fill: rgb(var(--color-side-b) / .16); }
+.net-node.is-end-b .net-halo-ring { stroke: rgb(var(--color-side-b)); }
+.net-node.is-endpoint .net-ring { vector-effect: non-scaling-stroke; }
+.net-pill { fill: rgb(var(--color-surface)); stroke: rgb(var(--color-side-a)); stroke-width: 2; pointer-events: none; }
+.net-node.is-end-b .net-pill { stroke: rgb(var(--color-side-b)); }
+.net-node.is-endpoint .net-name { stroke: none; }
+.net-node.is-endpoint.is-dim { opacity: .45; }
+/* The cluster layout's guide rings: one per link from the endpoint, labelled on the side facing the other endpoint (A's labels above the line through the endpoints, B's below it, so they never meet). */
+.net-orbits { pointer-events: none; }
+.net-orbit circle { fill: none; stroke: rgb(var(--color-side-a) / .32); stroke-width: 1.5; stroke-dasharray: 4 7; vector-effect: non-scaling-stroke; }
+.net-orbit.is-side-b circle { stroke: rgb(var(--color-side-b) / .32); }
+.net-orbit text { fill: rgb(var(--color-side-a)); font-size: 11px; font-weight: 700; paint-order: stroke; stroke: rgb(var(--color-surface) / .85); stroke-width: 3; stroke-linejoin: round; }
+.net-orbit.is-side-b text { fill: rgb(var(--color-side-b)); }
+/* The columns layout's bands: one per number of links from an endpoint, headed by the count, at a constant size on screen. */
+.net-columns { pointer-events: none; }
+.net-column rect { fill: rgb(var(--color-side-a) / .05); stroke: rgb(var(--color-side-a) / .3); stroke-width: 1.5; stroke-dasharray: 4 7; vector-effect: non-scaling-stroke; }
+.net-column.is-side-b rect { fill: rgb(var(--color-side-b) / .05); stroke: rgb(var(--color-side-b) / .3); }
+.net-column text { fill: rgb(var(--color-side-a)); font-weight: 700; paint-order: stroke; stroke: rgb(var(--color-surface) / .85); stroke-linejoin: round; }
+.net-column.is-side-b text { fill: rgb(var(--color-side-b)); }
+/* The category layout's pods: a tinted panel in the category's colour under a title, in the layout's own coordinates. */
+.net-pods { pointer-events: none; }
+.net-pod rect { fill: var(--cat); fill-opacity: .09; stroke: var(--cat); stroke-opacity: .55; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.net-pod circle { fill: var(--cat); }
+.net-pod text { fill: rgb(var(--color-content-primary)); font-weight: 800; letter-spacing: .02em; paint-order: stroke; stroke: rgb(var(--color-surface) / .8); stroke-linejoin: round; }
+/* The corridor's centre line: a soft band behind the chain, from one endpoint to the other. */
+.net-corridor { pointer-events: none; }
+.net-corridor path { stroke: rgb(var(--color-connection) / .1); stroke-width: 76; stroke-linecap: round; }
+/* The layout button shows the current layout and opens a menu of all of them upwards. */
+.net-layout-root { position: relative; display: inline-flex; }
+.net-layout-trigger { position: relative; }
+.net-layout-trigger::after { content: ''; position: absolute; right: 4px; bottom: 4px; border: 3.5px solid transparent; border-top-width: 0; border-bottom-color: currentColor; opacity: .75; }
+.net-layout-trigger[aria-expanded="true"] { color: rgb(var(--color-accent-text)); background: rgb(var(--color-accent-soft) / .55); }
+/* The menu is a second toolbar: the same glass (translucent surface, border, blur, shadow) as the view controls, in a layer over the graph. */
+.net-menu-host { position: absolute; inset: 0; z-index: 8; pointer-events: none; }
+.net-menu-host > * { pointer-events: auto; }
+.net-layout-menu { position: absolute; display: flex; flex-direction: column; gap: 4px; padding: 6px; min-width: 168px; max-width: calc(100% - 16px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none;
+  border: 1px solid rgb(var(--color-border) / 50%); border-radius: 14px; background: rgb(var(--color-surface) / 60%); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); box-shadow: 0 4px 16px rgb(var(--color-shadow) / 12%); }
+.net-layout-menu::-webkit-scrollbar { display: none; }
+.connection-explorer .net-layout-item { display: flex; align-items: center; gap: 12px; flex: none; height: 36px; width: 100%; padding: 0 14px 0 8px; border: none; border-radius: 8px; background: transparent; color: rgb(var(--color-content-muted)); font-size: 13px; font-weight: 600; white-space: nowrap; cursor: pointer; transition: color 150ms; }
+.connection-explorer .net-layout-item > span { color: rgb(var(--color-content-primary)); transition: color 150ms; }
+.connection-explorer .net-layout-item svg { flex: none; }
+.connection-explorer .net-layout-item:hover, .connection-explorer .net-layout-item:focus-visible { background: transparent; color: rgb(var(--color-accent-text)); }
+.connection-explorer .net-layout-item:hover > span, .connection-explorer .net-layout-item:focus-visible > span { color: rgb(var(--color-accent-text)); }
+.connection-explorer .net-layout-item.is-current { color: rgb(var(--color-accent-text)); background: rgb(var(--color-accent-soft) / .55); }
+.connection-explorer .net-layout-item.is-current > span { color: rgb(var(--color-accent-text)); }
+.net-view-toolbar .canvas-floating-button[aria-pressed="true"] { color: rgb(var(--color-accent-text)); background: rgb(var(--color-accent-soft) / .55); }
+.net-pin circle { fill: rgb(var(--color-content-primary)); stroke: rgb(var(--color-surface)); stroke-width: 1.5; }
+.net-pin path { stroke: rgb(var(--color-surface)); stroke-width: 2; stroke-linecap: round; }
+.net-select-ring { fill: none; stroke: rgb(var(--color-selection)); stroke-width: 3.5; opacity: 0; }
+.net-node.is-selected .net-select-ring, .net-node.is-edge-end .net-select-ring { opacity: 1; }
+.net-node:focus-visible .net-select-ring { opacity: 1; stroke-dasharray: 5 4; }
+.net-pulse { fill: none; stroke: rgb(var(--color-connection)); stroke-width: 2; stroke-dasharray: 2 3; opacity: .8; transform-box: fill-box; transform-origin: center; animation: net-pulse 1.4s ease-out infinite; }
+@keyframes net-pulse { from { transform: scale(.85); opacity: .9; } to { transform: scale(1.25); opacity: 0; } }
+.net-node.is-chain .net-ring { stroke: rgb(var(--color-chain-path)); stroke-width: 5.5; }
+.net-fold rect { fill: rgb(var(--color-surface)); stroke: rgb(var(--color-border-strong)); stroke-width: 1.5; }
+.net-fold text { fill: rgb(var(--color-content-primary)); font-size: 11px; font-weight: 700; pointer-events: none; }
+.net-fold:hover rect, .net-fold:focus-visible rect { stroke: rgb(var(--color-selection)); }
+
+.net-edge path, .net-gap path { fill: none; }
+.net-edge-line { stroke: rgb(var(--color-content-muted)); stroke-width: 2; }
+.net-edge-hit { stroke: transparent; stroke-width: 18; }
+.net-edge.is-incident .net-edge-hit, .net-edge.is-selected .net-edge-hit { stroke-width: 24; }
+.net-edge-halo { stroke: rgb(var(--color-selection)); stroke-width: 11; stroke-linecap: round; opacity: 0; }
+.net-edge.is-accepted .net-edge-line { stroke: rgb(var(--color-connection)); stroke-width: 3; }
+.net-edge.is-unresolved .net-edge-line { stroke-dasharray: 10 6; }
+.net-edge.is-proposed .net-edge-line, .net-edge.is-checking .net-edge-line { stroke: rgb(var(--color-content-secondary)); stroke-dasharray: 3 5; }
+.net-edge.is-checking .net-edge-line { stroke: rgb(var(--color-content-primary)); stroke-dasharray: 2 4; }
+.net-edge.is-blocked .net-edge-line { stroke: rgb(var(--color-danger-text)); stroke-dasharray: 2 8; stroke-linecap: round; }
+.net-edge.is-contextual .net-edge-line { opacity: .8; }
+.net-edge.is-incident .net-edge-line, .net-edge.is-selected .net-edge-line { stroke: rgb(var(--color-selection)); }
+.net-edge.is-selected .net-edge-line { stroke-width: 4; }
+.net-edge.is-selected .net-edge-halo { opacity: .25; }
+.net-edge:focus-visible .net-edge-line { stroke: rgb(var(--color-selection)); stroke-width: 4; stroke-dasharray: 6 4; }
+.net-edge.is-chain .net-edge-line { stroke: rgb(var(--color-chain-path)); stroke-width: 5; stroke-dasharray: none; }
+/* A solved connection reopened to explore: every other line recedes (accepted ones go neutral, all at 30% strength), so the lime chain is what the eye finds.
+   A line the person is looking at (selected, or touching the selected person) keeps its own colour. */
+.net-graph.is-solved .net-edge:not(.is-chain) .net-edge-line { opacity: .3; }
+.net-graph.is-solved .net-edge.is-accepted:not(.is-chain):not(.is-selected):not(.is-incident) .net-edge-line { stroke: rgb(var(--color-content-muted)); }
+.net-gap-line { stroke: rgb(var(--color-content-muted)); stroke-width: 2; stroke-dasharray: 1 7; stroke-linecap: round; }
+.net-gap-hit { stroke: transparent; stroke-width: 14; pointer-events: stroke; }
+
+/* What the selection leaves behind: faded further and drained of colour, so only the focus carries any.
+   Edges and discs simply turn grey; only the raster portraits take a grayscale filter, which keeps the cost
+   of a dimmed crowd low while the layout moves. Only the opacity transitions, the colour change is immediate. */
+.net-node.is-dim, .net-edge.is-dim { opacity: .13; }
+.net-edge.is-dim .net-edge-line { stroke: rgb(var(--color-content-muted)); }
+.net-node.is-dim image { filter: grayscale(1); }
+.net-node.is-dim .net-disc { fill: rgb(var(--color-content-muted)); }
+.net-node.is-dim .net-initials { fill: rgb(var(--color-surface)) !important; }
+.net-node.is-dim .net-ring { stroke: rgb(var(--color-content-muted)); }
+.net-node.is-dim .net-name { fill: rgb(var(--color-content-muted)); }
+
+/* The lit chain's announcement and the Reveal button under it. Only the button takes clicks; the graph underneath stays explorable. */
+.net-success-wrap { position: absolute; top: 76px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 10px; pointer-events: none; z-index: 3; }
+.net-success { background: rgb(var(--color-connection)); color: rgb(var(--color-connection-contrast)); padding: 8px 18px; border-radius: 999px; font-weight: 700; font-size: 15px; text-align: center; box-shadow: 0 6px 20px rgb(0 0 0 / .25); }
+.net-success small { display: block; font-size: 10px; font-weight: 500; opacity: .85; }
+.connection-explorer button.net-reveal { pointer-events: auto; background: rgb(var(--color-connection)); color: rgb(var(--color-connection-contrast)); border-color: rgb(var(--color-connection)); border-radius: 999px; padding: 10px 34px; font-size: 15px; font-weight: 800; letter-spacing: .04em; box-shadow: 0 6px 20px rgb(0 0 0 / .25); transition: transform 150ms, box-shadow 150ms, filter 150ms; }
+.connection-explorer button.net-reveal:hover { background: rgb(var(--color-connection)); filter: brightness(1.08); transform: translateY(-1px); box-shadow: 0 8px 24px rgb(0 0 0 / .3); }
+.connection-explorer button.net-reveal:active { transform: translateY(0); }
+/* A solved connection's Reveal stands in the header, where the phase text is for any other exploration. */
+.connection-explorer button.net-reveal-header { display: inline-flex; align-items: center; gap: 8px; padding: 8px 22px; font-size: 14px; }
+
+/* The paused search's invitation: it drops in like the Reveal announcement, then the button breathes until it is pressed. */
+.net-resume-wrap { position: absolute; top: 76px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 12px; pointer-events: none; z-index: 3; width: min(420px, calc(100% - 32px)); }
+.net-resume { background: rgb(var(--color-connection)); color: rgb(var(--color-connection-contrast)); padding: 9px 20px; border-radius: 18px; font-weight: 700; font-size: 15px; text-align: center; box-shadow: 0 6px 20px rgb(0 0 0 / .25); animation: net-resume-drop 520ms cubic-bezier(.2, 1.3, .4, 1) both; }
+.net-resume small { display: block; margin-top: 2px; font-size: 11px; font-weight: 500; line-height: 1.35; opacity: .9; }
+.connection-explorer button.net-continue { pointer-events: auto; display: inline-flex; align-items: center; gap: 8px; background: rgb(var(--color-connection)); color: rgb(var(--color-connection-contrast)); border-color: rgb(var(--color-connection)); border-radius: 999px; padding: 10px 28px; font-size: 15px; font-weight: 800; letter-spacing: .04em; box-shadow: 0 6px 20px rgb(0 0 0 / .25);
+  transition: transform 150ms, filter 150ms; animation: net-resume-rise 520ms 160ms cubic-bezier(.2, 1.3, .4, 1) both, net-resume-breathe 2.4s 900ms ease-in-out infinite; }
+.connection-explorer button.net-continue:hover { background: rgb(var(--color-connection)); filter: brightness(1.08); transform: translateY(-1px); }
+.connection-explorer button.net-continue:active { transform: translateY(0); }
+/* A failure of the search (the AI service's limit, a lost connection): a dialog-style card over the graph, which is on screen with or without the inspector. */
+.net-alert-wrap { position: absolute; top: 76px; left: 50%; transform: translateX(-50%); width: min(560px, calc(100% - 32px)); z-index: 4; }
+.net-alert { display: flex; align-items: flex-start; gap: 14px; padding: 18px 20px; border-radius: 14px; background: rgb(var(--color-surface)); border: 1px solid rgb(var(--color-border-strong)); color: rgb(var(--color-content-body));
+  box-shadow: 0 16px 40px rgb(var(--color-shadow) / .3); animation: net-resume-drop 520ms cubic-bezier(.2, 1.3, .4, 1) both; }
+.net-alert > svg { flex: none; margin-top: 1px; color: rgb(var(--color-danger-text)); }
+.net-alert-text { min-width: 0; }
+.net-alert-text strong { display: block; font-size: 16px; font-weight: 800; line-height: 1.3; color: rgb(var(--color-danger-text)); }
+.net-alert-text p { margin: 6px 0 0; font-size: 14px; line-height: 1.5; color: rgb(var(--color-content-body)); }
+.net-alert-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+@keyframes net-resume-drop { from { opacity: 0; transform: translateY(-14px) scale(.94); } to { opacity: 1; transform: none; } }
+@keyframes net-resume-rise { from { opacity: 0; transform: translateY(10px) scale(.9); } to { opacity: 1; transform: none; } }
+@keyframes net-resume-breathe { 0%, 100% { box-shadow: 0 6px 20px rgb(0 0 0 / .25), 0 0 0 0 rgb(var(--color-connection) / .55); } 50% { box-shadow: 0 6px 20px rgb(0 0 0 / .25), 0 0 0 12px rgb(var(--color-connection) / 0); } }
+
+/* Legend / filters */
+.net-legend { display: flex; flex-wrap: wrap; gap: 6px; }
+.connection-explorer .net-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: 11px; backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); background: rgb(var(--color-surface) / .6); color: rgb(var(--color-content-secondary)); border: 1px solid rgb(var(--color-border-strong)); }
+.net-chip.is-fixed { border-style: solid; background: rgb(var(--color-surface-muted) / .6); }
+.connection-explorer .net-chip.is-on { background: rgb(var(--color-surface-muted) / .9); color: rgb(var(--color-content-primary)); border-color: rgb(var(--color-content-primary)); font-weight: 600; }
+.net-chip b { font-weight: 700; }
+.net-chip i { display: inline-block; width: 20px; height: 2px; background: currentColor; }
+.net-chip.is-accepted i { height: 3px; background: rgb(var(--color-connection)); }
+/* A solved connection: the other AI-supported contacts are faded neutral, so the swatch is too, and the lime chain gets a swatch of its own. */
+.net-chip.is-accepted.is-neutral i { background: currentColor; }
+.net-chip.is-chain i { height: 3px; background: rgb(var(--color-chain-path)); }
+.net-chip.is-unresolved i { background: repeating-linear-gradient(90deg, currentColor 0 7px, transparent 7px 11px); }
+.net-chip.is-proposed i { background: repeating-linear-gradient(90deg, currentColor 0 3px, transparent 3px 7px); }
+.net-chip.is-blocked i { background: repeating-linear-gradient(90deg, rgb(var(--color-danger-text)) 0 2px, transparent 2px 7px); }
+.net-filters { position: relative; }
+.net-filters-popover { position: absolute; z-index: 6; bottom: calc(100% + 6px); left: 0; padding: 10px; background: rgb(var(--color-surface)); border: 1px solid rgb(var(--color-border-strong)); border-radius: 8px; box-shadow: 0 8px 24px rgb(0 0 0 / .2); width: max-content; max-width: 80vw; }
+
+/* Inspection */
+.connection-explorer-inspection { display: flex; flex-direction: column; min-height: 0; padding: 18px 18px 14px; font-size: 13px; line-height: 1.6; overflow: hidden; }
+.connection-explorer-inspection[hidden] { display: none; }
+.net-inspect-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.connection-explorer-inspection h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: rgb(var(--color-content-secondary)); }
+.connection-explorer .net-back { padding: 3px 10px; font-size: 12px; font-weight: 600; }
+.connection-explorer-inspection h4 { font-size: 16px; line-height: 1.4; font-weight: 700; margin-bottom: 12px; }
+.connection-explorer-inspection h5 { font-size: 12px; font-weight: 700; margin: 16px 0 8px; color: rgb(var(--color-content-secondary)); }
+.connection-explorer-inspection p { margin-bottom: 14px; overflow-wrap: anywhere; }
+.connection-explorer-inspection small { color: rgb(var(--color-content-secondary)); overflow-wrap: anywhere; }
+.net-detail { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.net-detail-fixed { flex: none; }
+.net-detail-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.net-browser { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.net-browser[hidden] { display: none; }
+.connection-inspection-verdict { font-size: 11px; font-weight: 700; }
+.net-summary { font-size: 14px; margin-bottom: 2px !important; }
+.net-closest { font-size: 12px; color: rgb(var(--color-content-secondary)); margin-bottom: 8px !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.net-side-line { font-size: 12px; font-weight: 600; color: rgb(var(--color-content-secondary)); }
+.connection-explorer-inspection .net-detail .net-edge-head + h4 { margin-bottom: 4px; }
+.net-person-head, .net-edge-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.net-person-head > div { min-width: 0; }
+.connection-explorer-inspection .net-person-head h4 { font-size: 15px; line-height: 1.3; margin-bottom: 0; overflow-wrap: anywhere; }
+.connection-explorer-inspection .net-person-head p { margin-bottom: 0; font-size: 12px; line-height: 1.4; color: rgb(var(--color-content-secondary)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.connection-explorer-inspection .net-aliases { margin-bottom: 4px; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.connection-explorer-inspection .net-detail .net-side-line { margin-bottom: 2px; }
+.net-detail .net-tablist { margin-top: 8px; }
+.net-edge-head { justify-content: center; font-size: 18px; color: rgb(var(--color-content-secondary)); }
+.net-contact-rows { display: grid; gap: 6px; list-style: none; padding: 0; margin: 0; }
+.connection-explorer .net-contact-rows button { width: 100%; text-align: left; display: flex; align-items: center; gap: 10px; }
+.net-contact-rows span { min-width: 0; }
+.net-contact-rows em { font-style: normal; color: rgb(var(--color-content-secondary)); }
+.net-contact-rows small { display: block; line-height: 1.4; }
+.net-unverified { margin-top: 16px; }
+.net-unverified summary { cursor: pointer; font-weight: 600; margin-bottom: 8px; }
+.connection-explorer-storage { border-top: 1px solid rgb(var(--color-border)); padding-top: 12px; margin: 12px 0 0 !important; font-size: 12px; }
+
+/* The lists: endpoints stay pinned above the tabs, only the list under the search scrolls. */
+/* The endpoints are two chips side by side (a badge on the portrait), so the lists start higher; the hint is the tooltip of the "?" by the title. */
+.net-endpoints ul { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; list-style: none; padding: 0; margin: 0; }
+.net-endpoints li { min-width: 0; }
+.connection-explorer .net-endpoint-chip { width: 100%; display: flex; align-items: center; gap: 8px; text-align: left; min-width: 0; border-color: rgb(var(--color-border) / .8); background: rgb(var(--color-surface-muted) / .35); }
+.net-endpoint-chip > span:last-child { min-width: 0; }
+.net-endpoint-chip strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.net-chip-portrait { position: relative; display: inline-flex; flex: none; }
+.net-chip-portrait .net-end-badge { position: absolute; right: -5px; bottom: -5px; width: 12px; height: 12px; font-size: 8px; }
+.connection-explorer .net-help { width: 22px; height: 22px; padding: 0; border-radius: 50%; font-size: 12px; font-weight: 700; line-height: 1; display: inline-grid; place-items: center; }
+.connection-explorer .net-back { max-width: 70%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.connection-explorer .net-row { border-color: transparent; background: transparent; padding: 5px 8px; }
+.connection-explorer .net-row:hover { background: rgb(var(--color-surface-muted) / .7); }
+.net-row strong { display: block; font-size: 13px; line-height: 1.3; overflow-wrap: anywhere; }
+.net-row small { display: block; font-size: 11px; line-height: 1.35; }
+.net-row .net-end-badge { margin-left: auto; }
+.net-end-badge { display: inline-grid; place-items: center; flex: none; width: 18px; height: 18px; border-radius: 50%; font-size: 11px; font-weight: 800; line-height: 1; border: 2px solid rgb(var(--color-surface)); background: rgb(var(--color-side-a)); color: rgb(var(--color-surface)); box-sizing: content-box; }
+.net-end-badge.is-b, .ce-endpoint.is-b .net-end-badge { background: rgb(var(--color-side-b)); }
+.ce-endpoint.is-a .net-end-badge { background: rgb(var(--color-side-a)); }
+.net-tablist { display: flex; gap: 2px; margin-top: 10px; padding: 4px; border-radius: 10px; background: rgb(var(--color-surface-muted) / .5); }
+.connection-explorer .net-tab { flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; border: 0; border-radius: 7px; background: transparent; padding: 6px 10px; font-size: 12px; font-weight: 700; color: rgb(var(--color-content-muted)); }
+.connection-explorer .net-tab:hover { background: transparent; color: rgb(var(--color-content-body)); }
+.connection-explorer .net-tab.is-selected { background: rgb(var(--color-tab-selected)); color: rgb(var(--color-content-primary)); box-shadow: 0 1px 2px rgb(var(--color-shadow) / .18); }
+.net-tab-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; font-size: 10px; line-height: 1; background: rgb(var(--color-surface-placeholder)); color: rgb(var(--color-content-secondary)); }
+.net-tab.is-selected .net-tab-badge { background: rgb(var(--color-tab-badge)); color: rgb(var(--color-tab-badge-text)); }
+.net-search { width: 100%; margin: 8px 0 6px; padding: 8px 12px; border-radius: 8px; border: 1px solid rgb(var(--color-border-strong)); background: rgb(var(--color-surface) / .6); color: inherit; font-size: 13px; }
+.net-search::placeholder { color: rgb(var(--color-content-muted)); }
+.net-list { flex: 1; min-height: 0; overflow-y: auto; }
+.net-list-empty { color: rgb(var(--color-content-secondary)); font-size: 12px; margin: 8px 4px; }
+/* The windowed rows (VirtualList): each <li> is placed by its offset and has the fixed height NetworkInspector gives its kind, 6px of it being
+   the gap under the button; the text is clamped to fit, and the whole of it is in the button's tooltip. */
+.net-contact-rows.net-vlist { display: block; position: relative; }
+.net-vitem { position: absolute; left: 0; right: 0; box-sizing: border-box; padding-bottom: 6px; }
+.net-vitem > button { height: 100%; box-sizing: border-box; overflow: hidden; }
+.net-vlist .net-row strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.net-vlist .net-row small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.net-vlist .net-row.is-contact strong { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; white-space: normal; text-overflow: clip; }
+.net-vlist .net-detail-line { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.net-vlist .net-detail-contact small { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+.net-vitem.is-group { padding: 12px 0 0; }
+.connection-explorer .net-group { display: flex; align-items: center; gap: 8px; border-color: transparent; background: transparent; padding: 0 8px; font-weight: 600; }
+.connection-explorer .net-group:hover { background: rgb(var(--color-surface-muted) / .7); }
+.net-group::before { content: ''; flex: none; width: 0; height: 0; border-left: 6px solid currentColor; border-top: 4px solid transparent; border-bottom: 4px solid transparent; transition: transform .12s; }
+.net-group[aria-expanded="true"]::before { transform: rotate(90deg); }
+.net-vitem.is-empty { padding: 0; }
+.net-vitem > .net-list-empty { margin: 0; padding: 8px 4px 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+.net-sheet-close { display: none; }
+
+.connection-explorer-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 14px; border-radius: 14px; background: rgb(var(--color-surface) / .42); border: 1px solid rgb(var(--color-border) / .8); }
+.connection-explorer-footer p { flex: 1 1 0; min-width: 0; text-align: center; font-size: 12px; color: rgb(var(--color-content-secondary)); }
+.connection-explorer-footer > div { display: flex; flex-wrap: wrap; gap: 8px; }
+/* The left of the footer: how many people each endpoint has gathered. Hovering one explains the number (the shared Tooltip). */
+.connection-explorer-footer > .ce-footer-info { flex-wrap: nowrap; align-items: center; gap: 18px; flex: none; }
+.ce-side { display: inline-flex; align-items: center; gap: 8px; cursor: help; border-radius: 10px; }
+.ce-side-portrait { position: relative; display: inline-flex; flex: none; }
+.ce-side-portrait .net-portrait { border: 2px solid rgb(var(--color-side-a)); }
+.ce-side.is-b .ce-side-portrait .net-portrait { border-color: rgb(var(--color-side-b)); }
+.ce-side-portrait .net-end-badge { position: absolute; right: -5px; bottom: -5px; width: 14px; height: 14px; font-size: 9px; }
+.ce-side.is-b .net-end-badge { background: rgb(var(--color-side-b)); }
+.ce-side-count { font-size: 18px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; color: rgb(var(--color-content-primary)); }
+.ce-side:focus-visible { outline: 2px solid rgb(var(--color-accent-focus)); outline-offset: 4px; }
+.connection-explorer button.connection-explorer-primary { background: rgb(var(--color-content-primary)); color: rgb(var(--color-surface)); border-color: rgb(var(--color-content-primary)); font-weight: 700; }
+
+@media (max-width: 1100px) {
+  .connection-explorer-body { grid-template-columns: minmax(0, 1fr) 320px; }
+  .ce-heading { grid-template-columns: minmax(0, 1fr) auto; }
+  .connection-explorer-status { grid-column: 1 / -1; grid-row: 2; justify-self: center; align-items: center; text-align: center; flex-direction: row; gap: 10px; }
+  .ce-endpoints { grid-column: 1; grid-row: 1; justify-content: flex-start; }
+  .ce-clock { grid-column: 2; grid-row: 1; }
+}
+@media (max-width: 760px) {
+  .connection-explorer { padding: 12px 8px 8px; gap: 8px; }
+  .connection-explorer-header { padding-right: 48px; gap: 6px; }
+  .ce-heading { grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; }
+  .ce-endpoints { grid-column: 1 / -1; grid-row: 1; justify-content: space-between; gap: 8px; }
+  .ce-endpoint { flex: 1 1 0; gap: 8px; }
+  .connection-explorer-status { grid-column: 1; grid-row: 2; justify-self: start; flex-direction: column; align-items: flex-start; text-align: left; gap: 2px; font-size: 13px; }
+  .ce-clock { grid-column: 2; grid-row: 2; gap: 10px; }
+  .ce-working { width: 30px; height: 30px; }
+  .ce-timer { width: 92px; }
+  .ce-endpoint-portrait .net-portrait { width: 40px !important; height: 40px !important; }
+  .ce-endpoint-name { font-size: 14px; }
+  .ce-endpoint small { display: none; }
+  .ce-arrow { font-size: 16px; }
+  .ce-timer-value { font-size: 24px; }
+  /* The graph takes the whole body; inspection is a bottom sheet over it. */
+  .connection-explorer-body { display: block; }
+  .connection-explorer-network { height: 100%; }
+  .net-overlay-row { left: 8px; right: 8px; bottom: 32px; gap: 6px; flex-wrap: wrap; }
+  .connection-explorer-inspection.is-sheet { position: absolute; left: 0; right: 0; bottom: 0; height: 55%; z-index: 5; background: rgb(var(--color-surface) / .92); box-shadow: 0 -10px 28px rgb(0 0 0 / .22); border-radius: 14px 14px 0 0; padding: 14px 16px; }
+  .connection-explorer-inspection.is-sheet .net-inspect-head { padding-right: 36px; margin-bottom: 8px; }
+  .connection-explorer .net-sheet-close { display: block; position: absolute; top: 6px; right: 10px; padding: 0 10px; font-size: 20px; }
+  .connection-explorer-footer { padding: 8px 10px; flex-direction: column; align-items: flex-start; gap: 8px; }
+  .connection-explorer-footer p { flex: none; text-align: left; }
+  .net-success-wrap { top: 54px; }
+  .net-success { font-size: 13px; }
+  .net-resume-wrap { top: 54px; }
+  .net-alert-wrap { top: 54px; }
+  .net-resume { font-size: 13px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .connection-explorer *, .connection-explorer *::before { animation: none !important; transition: none !important; }
+}
+
+/* The kicker with the “?” that explains Six Degrees of Separation. */
+.connection-explorer-kicker-row { display: flex; align-items: center; justify-content: center; gap: 8px; }
