@@ -7,6 +7,7 @@ Seven features that add story, motion, play, parallel exploration, and historica
 | [Time-Lapse playback](time-lapse.md) | Sweep the selected year across the canvas; bars light up and fade as lives begin and end | Optional ticker only | S–M |
 | [Guided Story Tour](story-tour.md) | AI-written narrated tour; the camera flies between figures with captions | 1 new method | M–L |
 | [Six Degrees](six-degrees.md) | Connect two people (up to ~400 years apart) through a verified chain of personal contacts | 2 new methods + existing verification | L |
+| [Shared Knowledge Graph Explorer](knowledge-graph-explorer.md) | Explore the cumulative global network of verified personal contacts across all canvases and trace paths | Reuses `explainPersonalContact` | M |
 | [Dinner Party / Persona Chat](persona-chat.md) | Chat with a figure, or seat several at a table to debate | 1 new method | M |
 | [Who Am I? quiz](who-am-i-quiz.md) | Clue-by-clue riddles answered by clicking the right bar | 1 new method | M |
 | [Meanwhile: parallel histories](meanwhile.md) | Compare two saved canvases on a shared time axis, with optional AI comparisons | 1 optional explanation method; companion generation later | M–L |
