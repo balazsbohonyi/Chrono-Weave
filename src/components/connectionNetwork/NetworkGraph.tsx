@@ -561,8 +561,8 @@ const NetworkGraph: React.FC<Props> = ({
         </ToolButton>
         <span className="canvas-toolbar-divider" aria-hidden="true" />
         <ToolButton tip={showLines ? 'Hide connection lines' : 'Show connection lines'} label="Hide connection lines" pressed={!showLines} onClick={() => setShowLines(on => !on)}>
-          <circle cx="5.5" cy="12" r="2.6" /><circle cx="18.5" cy="12" r="2.6" /><path d="M8.1 12h7.8" />
-          {!showLines && <path d="M4 20 20 4" />}
+          <circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" /><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4" />
+          {!showLines && <path d="m2 2 20 20" />}
         </ToolButton>
         <ToolButton tip="Zoom in" label="Zoom network in" onClick={() => zoomBy(1.25)}><circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.5 15.5 5 5M10.5 7.8v5.4M7.8 10.5h5.4" /></ToolButton>
         <ToolButton tip="Zoom out" label="Zoom network out" onClick={() => zoomBy(0.8)}><circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.5 15.5 5 5M7.8 10.5h5.4" /></ToolButton>
