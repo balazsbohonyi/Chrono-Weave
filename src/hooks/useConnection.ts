@@ -1,17 +1,15 @@
 import { canvasPerson, type ConnectionSession } from '../services/connectionGraph';
 import { connectionRepository, type ConnectionRepository } from '../utils/connectionKnowledge';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type {
-  CanvasConfig, ClusterPlacement, DiscoveryClusterState, FigureCategory, HistoricalFigure, IAIService,
-} from '../types';
+import type { CanvasConfig, HistoricalFigure, IAIService } from '../types';
 import { classifyConnectionTarget, type ConnectionProgress, type ConnectionTargetStatus } from '../services/connectionPath';
 import {
   decideConnectionStart, degreeLabel, finishedExploration, reconcileSession, runConnectionSearch, savedConnectionView,
   type ConnectionTarget, type ConnectionView,
 } from '../services/connectionFlow';
 import { createWikidataResolver, type WikidataResolver } from '../services/wikidataService';
-import { listConnectionPaths, type ConnectionPathEntry } from '../utils/connectionPaths';
-import type { WovenCanvas } from '../utils/weaveConnection';
+import { connectionPathKey, deleteConnectionPath, listConnectionPaths, type ConnectionPathEntry } from '../utils/connectionPaths';
+import { removeConnectionGuests } from '../utils/connectionGuests';
 import type { ConnectionFocusRequest, ConnectionReveal } from './useConnectionReveal';
 import { createSuccessHold } from '../services/connectionSuccessHold';
 
@@ -34,15 +32,13 @@ interface Dependencies {
   provenance: { provider: string; model: string };
   figures: HistoricalFigure[];
   config: CanvasConfig;
-  clusters: DiscoveryClusterState;
-  selectedCategories: Set<FigureCategory>;
   // The cache of the canvas that is open now; each search keeps hold of the one it started with.
   storage: Storage;
   service: IAIService;
-  getPlacements: () => Record<string, ClusterPlacement>;
   // Joins the busy/abort rules of mapping and expanding: starting one stops the other.
   begin: () => { signal: AbortSignal; isCurrent: () => boolean };
-  applyWoven: (woven: WovenCanvas) => void;
+  // Replaces the canvas people and config: after a connection weaves people in, or is deleted and takes its guests along.
+  applyCanvas: (canvas: { figures: HistoricalFigure[]; config: CanvasConfig }) => void;
   // Slides the sidebar away (a no-op when it is already closed).
   hideSidebar: () => void;
   notify: (message: string, type: 'success' | 'info' | 'error') => void;
@@ -196,10 +192,10 @@ export function useConnection(dependencies: Dependencies) {
             if (generation.current === requestGeneration && latest.current.canvasId === canvasId) setExploration(next);
           },
           canvas: () => {
-            const { figures, config, clusters, selectedCategories, getPlacements } = latest.current;
-            return { figures, config, clusters, selectedCategories, placements: getPlacements() };
+            const { figures, config } = latest.current;
+            return { figures, config };
           },
-          applyWoven: woven => latest.current.applyWoven(woven),
+          applyWoven: woven => latest.current.applyCanvas(woven),
           pathsChanged: () => setPathRevision(previous => previous + 1),
           show: view => {
             // Settlement has already run. With a live exploration on screen, only the hand-over waits, until the user reveals it.
@@ -304,6 +300,17 @@ export function useConnection(dependencies: Dependencies) {
     setFocusRequest(null);
   }, []);
 
+  // Forgets a saved connection: the guests only it needed leave the canvas with it, and it stops being shown.
+  const deleteConnection = useCallback((entry: ConnectionPathEntry) => {
+    const { figures: canvasFigures, config, storage: canvasStorage } = latest.current;
+    const { guests, movedToMain, orphaned } = removeConnectionGuests(config, entry.key);
+    deleteConnectionPath(canvasStorage, entry.key, orphaned);
+    if (active && connectionPathKey(active.chain[0].id, active.chain[active.chain.length - 1].id) === entry.key) close();
+    const removed = new Set(orphaned);
+    latest.current.applyCanvas({ figures: canvasFigures.filter(figure => !removed.has(figure.id)), config: { ...config, guests, movedToMain } });
+    setPathRevision(previous => previous + 1);
+  }, [active, close]);
+
   const focusPerson = useCallback((figure: HistoricalFigure) => {
     setFocusRequest(previous => ({ requestId: (previous?.requestId ?? 0) + 1, figureId: figure.id }));
   }, []);
@@ -321,7 +328,7 @@ export function useConnection(dependencies: Dependencies) {
     picking, isConnecting, progress, active, recent, currentIndex, tabRequest, exploration, explorationChain, explorerOpen, openSavedExploration, solved, revealSolved, success, revealConnection, checkpoints, stop, continueSearch, openCheckpoint,
     focusRequest, canvasConnection, isTabVisible: !!active || recent.length > 0 || checkpoints.length > 0,
     isPickable, statusFor,
-    beginPicking, exitPicking, pickFigure, submitName, cancelSearch, reset, replay, replayActive, close, focusPerson,
+    beginPicking, exitPicking, pickFigure, submitName, cancelSearch, reset, replay, replayActive, close, focusPerson, deleteConnection,
     endReveal, setCurrentIndex,
   };
 }

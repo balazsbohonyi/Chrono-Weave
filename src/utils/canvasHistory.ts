@@ -6,6 +6,7 @@ import { filterTimelineFigures } from './timelineFigures';
 import { normalizeWeaveContext } from './weave';
 import { ASSESSMENT_CACHE_PREFIX, CONTACT_CACHE_PREFIX, countVerifiedConnections } from '../services/relationshipAssessment';
 import { PATH_CACHE_PREFIX, LEGACY_PATH_CACHE_PREFIX, MEMBERSHIP_CACHE_PREFIX, WOVEN_CACHE_PREFIX } from './connectionPaths';
+import { GUEST_VISIBILITIES, migrateGuests, normalizeGuests } from './connectionGuests';
 
 export const CANVAS_HISTORY_KEY = 'chrono_canvas_history';
 export const CANVAS_HISTORY_LIMIT = 20;
@@ -41,11 +42,12 @@ export const defaultCanvasView = (): CanvasViewSnapshot => ({
   cameras: {}, selectedYear: null, selectedFigureIds: [], selectedCategories: [],
   isSidebarCollapsed: true, isLegendOpen: false,
   sidebar: { mode: 'FIGURES', scrollPositions: { FIGURES: 0, EVENTS: 0 } },
-  searchQuery: '', highlightedFigureIds: [], currentSearchIndex: 0,
+  searchQuery: '', highlightedFigureIds: [], currentSearchIndex: 0, guestVisibility: 'show',
 });
 
 export function createCanvasSnapshot(figures: HistoricalFigure[], config: CanvasConfig, cache: Record<string, string> = {}): CanvasSnapshot {
-  return { id: createCanvasId(), createdAt: Date.now(), figures, config, cache, clusters: emptyClusters(), view: defaultCanvasView() };
+  // A new canvas has no guests yet; only canvases saved before guests were recorded lack the map and are migrated.
+  return { id: createCanvasId(), createdAt: Date.now(), figures, config: { ...config, guests: config.guests ?? {} }, cache, clusters: emptyClusters(), view: defaultCanvasView() };
 }
 
 export function activateCanvas(history: CanvasSnapshot[], outgoing: CanvasSnapshot | null, incoming: CanvasSnapshot): CanvasHistoryRecord {
@@ -69,6 +71,7 @@ function normalizeView(value: unknown, figures: HistoricalFigure[]): CanvasViewS
     ? CATEGORY_LIST.filter(category => (value.selectedCategories as unknown[]).includes(category)) : [];
   if (typeof value.isSidebarCollapsed === 'boolean') view.isSidebarCollapsed = value.isSidebarCollapsed;
   view.isLegendOpen = value.isLegendOpen === true;
+  if (GUEST_VISIBILITIES.includes(value.guestVisibility as CanvasViewSnapshot['guestVisibility'])) view.guestVisibility = value.guestVisibility as CanvasViewSnapshot['guestVisibility'];
   view.searchQuery = typeof value.searchQuery === 'string' ? value.searchQuery.slice(0, 2000) : '';
   view.currentSearchIndex = Number.isSafeInteger(value.currentSearchIndex) && (value.currentSearchIndex as number) >= 0
     && (value.currentSearchIndex as number) < view.highlightedFigureIds.length ? value.currentSearchIndex as number : 0;
@@ -97,6 +100,11 @@ function normalizeSnapshot(value: unknown): CanvasSnapshot | null {
     if (!Number.isSafeInteger(config.start) || !Number.isSafeInteger(config.end) || (config.start as number) >= (config.end as number)
         || !Number.isSafeInteger((config.end as number) - (config.start as number))) return null;
     const context = config.weaveContext ? normalizeWeaveContext(config.weaveContext as CanvasConfig['weaveContext']) : undefined;
+    const cache = isObject(value.cache) ? Object.fromEntries(Object.entries(value.cache)
+      .filter(([key, data]) => isCanvasCacheKey(key) && typeof data === 'string')) as Record<string, string> : {};
+    // Guests of connections are outside the canvas topic by design, so its categories never drop them.
+    const guestCandidates = isObject(config.guests) ? new Set(Object.keys(config.guests))
+      : new Set(Object.keys(migrateGuests(value.figures.filter(isObject) as unknown as HistoricalFigure[], new CanvasCache(cache))));
     const seen = new Set<string>();
     const figures = filterTimelineFigures(value.figures.filter((figure): figure is HistoricalFigure => {
       if (!isObject(figure) || typeof figure.id !== 'string' || !figure.id || seen.has(figure.id)
@@ -104,11 +112,12 @@ function normalizeSnapshot(value: unknown): CanvasSnapshot | null {
           || !Number.isSafeInteger(figure.birthYear) || !Number.isSafeInteger(figure.deathYear)
           || !CATEGORY_LIST.includes(figure.category as HistoricalFigure['category'])) return false;
       seen.add(figure.id);
-      return !context || context.activeCategories.includes('ALL') || context.activeCategories.includes(figure.category as HistoricalFigure['category']);
+      return !context || guestCandidates.has(figure.id) || context.activeCategories.includes('ALL') || context.activeCategories.includes(figure.category as HistoricalFigure['category']);
     }));
     if (!figures.length) return null;
-    const cache = isObject(value.cache) ? Object.fromEntries(Object.entries(value.cache)
-      .filter(([key, data]) => isCanvasCacheKey(key) && typeof data === 'string')) as Record<string, string> : {};
+    const figureIds = new Set(figures.map(figure => figure.id));
+    // Canvases saved before guests were recorded are migrated once, from the people their connections wove in.
+    const guests = isObject(config.guests) ? normalizeGuests(config.guests, figureIds) : migrateGuests(figures, new CanvasCache(cache));
     return {
       id: value.id, createdAt: value.createdAt as number, figures, cache,
       config: { start: config.start as number, end: config.end as number,
@@ -117,6 +126,9 @@ function normalizeSnapshot(value: unknown): CanvasSnapshot | null {
         layoutSelection: config.layoutSelection === 'manual' ? 'manual' : 'automatic',
         ...(context ? { weaveContext: context } : {}),
         ...(typeof config.seedFigureId === 'string' && figures.some(figure => figure.id === config.seedFigureId) ? { seedFigureId: config.seedFigureId } : {}),
+        guests,
+        ...(Array.isArray(config.movedToMain) ? { movedToMain: [...new Set(config.movedToMain.filter((id): id is string => typeof id === 'string' && id in guests))] } : {}),
+        ...(Array.isArray(config.movedCategories) ? { movedCategories: CATEGORY_LIST.filter(category => (config.movedCategories as unknown[]).includes(category)) } : {}),
       },
       clusters: restoreClusters(isObject(value.clusters) ? serializeClusters(figures, value.clusters as unknown as CanvasSnapshot['clusters']) : null,
         figures, KEEP_DISCOVERY_CLUSTERS),

@@ -2,10 +2,8 @@ import { canvasPerson, figurePerson, identifyPerson, needsWikidata, reconcileIde
 import type { WikidataResolver } from './wikidataService';
 import { pairKey } from './pathService';
 import type { ConnectionRepository } from '../utils/connectionKnowledge';
-import type {
-  CanvasConfig, ClusterPlacement, DiscoveryClusterState, FigureCategory, HistoricalFigure, IAIService,
-} from '../types';
-import { readConnectionPath, saveConnectionPath, saveWovenFigureIds, type ConnectionPathEntry } from '../utils/connectionPaths';
+import type { CanvasConfig, HistoricalFigure, IAIService } from '../types';
+import { connectionPathKey, readConnectionPath, saveConnectionPath, saveWovenFigureIds, type ConnectionPathEntry } from '../utils/connectionPaths';
 import { getUserErrorMessage } from '../utils/userErrors';
 import { canonicalName } from '../utils/names';
 import { weaveConnectionIntoCanvas, type WovenCanvas } from '../utils/weaveConnection';
@@ -54,9 +52,6 @@ export function savedConnectionView(saved: Pick<ConnectionPathEntry, 'figures' |
 export interface CanvasState {
   figures: HistoricalFigure[];
   config: CanvasConfig;
-  clusters: DiscoveryClusterState;
-  placements: Record<string, ClusterPlacement>;
-  selectedCategories: Set<FigureCategory>;
 }
 
 export interface ConnectionFlowEffects {
@@ -133,7 +128,7 @@ const plural = (count: number, one: string, many: string) => `${count} ${count =
 export const degreeLabel = (count: number) => plural(count, 'degree', 'degrees');
 
 // What a finished search does. A stale or incomplete search changes no canvas data; a verified
-// chain weaves its new people in, then saves the path and the woven-in people.
+// chain weaves its new people in as guests of the connection, then saves the path and the woven-in people.
 export function settleConnection({ result, request, storage, effects }: {
   result: ConnectionResult; request: { from: HistoricalFigure; to: HistoricalFigure }; storage: Storage; effects: ConnectionFlowEffects;
 }): void {
@@ -162,14 +157,14 @@ export function settleConnection({ result, request, storage, effects }: {
   if (new Set(chain.map(p => p.id)).size !== chain.length || !effects.isCurrent()) return;
   const newFigures = chain.filter(p => !current.figures.some(f => f.id === p.id));
   const links = result.links.map((link, i) => ({ ...link, from: chain[i], to: chain[i + 1] }));
-  const woven = weaveConnectionIntoCanvas({ ...current, chain, newFigures });
+  const woven = weaveConnectionIntoCanvas({ ...current, chain, newFigures, pathKey: connectionPathKey(chain[0].id, chain[chain.length - 1].id) });
   effects.applyWoven(woven);
   saveConnectionPath(storage, chain, links.map(link => link.evidence), Date.now(), links.map(link => link.contact!), [...people.values()]);
   saveWovenFigureIds(storage, woven.newIds);
   effects.pathsChanged();
   effects.show({ chain, links });
   effects.notify(woven.newIds.length
-    ? `Wove in ${plural(woven.newIds.length, 'person', 'people')} to connect ${from.name} and ${to.name}: ${newFigures.map(person => person.name).join(', ')}`
+    ? `Added ${plural(woven.newIds.length, 'person', 'people')} to From connections to link ${from.name} and ${to.name}: ${newFigures.map(person => person.name).join(', ')}`
     : `${from.name} and ${to.name} are ${degreeLabel(result.degrees)} apart.`, 'success');
 }
 

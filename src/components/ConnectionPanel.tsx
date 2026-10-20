@@ -22,6 +22,8 @@ export interface ConnectionPanelProps {
   isBusy: boolean;
   onClose: () => void;
   onReplay: (entry: ConnectionPathEntry) => void;
+  // Forgets a connection, and the people it brought in that no other connection needs.
+  onDelete?: (entry: ConnectionPathEntry) => void;
   onFocusPerson: (figure: HistoricalFigure) => void;
   onExplain: (from: HistoricalFigure, to: HistoricalFigure, contact?: ContactAssessment) => void;
   checkpoints?: ConnectionSession[];
@@ -41,6 +43,15 @@ const OpenExplorationButton: React.FC<{ onOpen: () => void; disabled?: boolean }
       <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <circle cx="5" cy="6" r="2.4" /><circle cx="19" cy="6" r="2.4" /><circle cx="12" cy="18" r="2.4" />
         <path d="M7.2 7l3.6 9M16.8 7l-3.6 9M7.6 6h8.8" />
+      </svg>
+    </button>
+  </Tooltip>;
+
+const DeleteConnectionButton: React.FC<{ onDelete: () => void; disabled?: boolean }> = ({ onDelete, disabled }) =>
+  <Tooltip text="Delete connection">
+    <button type="button" className="connection-open-exploration" aria-label="Delete connection" disabled={disabled} onClick={onDelete}>
+      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3" />
       </svg>
     </button>
   </Tooltip>;
@@ -90,8 +101,10 @@ export const ConnectionHeader: React.FC<{ connection: ActiveConnection; onClose:
 // The Connection tab: the chain from one person to the other with the verified evidence for every
 // link, and the connections already made on this canvas.
 const ConnectionPanel: React.FC<ConnectionPanelProps> = ({ connection, currentIndex, recent, canvasIds, isBusy, onClose,
-  onReplay, onFocusPerson, onExplain, renderActions, checkpoints = [], onOpenCheckpoint, onOpenExploration, onOpenInfo }) => {
+  onReplay, onDelete, onFocusPerson, onExplain, renderActions, checkpoints = [], onOpenCheckpoint, onOpenExploration, onOpenInfo }) => {
   const [details, setDetails] = useState<Map<string, FigureDetail>>(new Map());
+  // The connection whose deletion waits for a second click.
+  const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
   const chainRef = useRef<HTMLOListElement>(null);
   const known = connection?.chain ?? [];
   const chainKey = known.map(person => person.id).join('|');
@@ -175,8 +188,16 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({ connection, currentIn
                       <span className="connection-recent-names">{first.name} → {last.name}</span>
                     </button>
                     {onOpenExploration && <OpenExplorationButton disabled={isBusy} onOpen={() => onOpenExploration(entry)} />}
+                    {onDelete && <DeleteConnectionButton disabled={isBusy} onDelete={() => setConfirmingDelete(entry.key)} />}
                     <span className="connection-recent-degrees"><b>{entry.figures.length - 1}</b> {entry.figures.length - 1 === 1 ? 'degree' : 'degrees'}</span>
                   </div>
+                  {onDelete && confirmingDelete === entry.key && (
+                    <div className="connection-delete-confirm" role="group" aria-label={`Delete ${first.name} → ${last.name}`}>
+                      <span>Delete this connection? People only it added leave the canvas.</span>
+                      <button type="button" className="connection-delete-yes" disabled={isBusy} onClick={() => { setConfirmingDelete(null); onDelete(entry); }}>Delete</button>
+                      <button type="button" className="connection-delete-no" onClick={() => setConfirmingDelete(null)}>Cancel</button>
+                    </div>
+                  )}
                 </li>
               );
             })}

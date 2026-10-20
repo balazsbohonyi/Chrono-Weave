@@ -596,7 +596,27 @@ export function calculateTimelineLayout(figures: HistoricalFigure[], clusters: D
 
 }
 
-export type TimelineLayoutResult = ReturnType<typeof calculateTimelineLayout>;
+export type TimelineLayoutResult = ReturnType<typeof calculateTimelineLayout> & { guestRow?: number };
+
+// The canvas timeline: guests of Six Degrees connections are laid out on their own, in a band below everyone else that
+// starts after one empty row (`guestRow`, where the band's header is drawn). Discovery clusters only hold the others.
+export function calculateCanvasTimelineLayout(figures: HistoricalFigure[], guestIds: ReadonlySet<string>,
+    clusters: DiscoveryCluster[] = [], placements: Record<string, ClusterPlacement> = {}): TimelineLayoutResult {
+    const guests = figures.filter(figure => guestIds.has(figure.id) && isTimelineFigureVisible(figure));
+    if (!guests.length) return calculateTimelineLayout(figures, clusters, placements);
+    const coreClusters = clusters.map(cluster => ({ ...cluster, memberIds: cluster.memberIds.filter(id => !guestIds.has(id)) }))
+        .filter(cluster => !guestIds.has(cluster.sourceId) && cluster.memberIds.length);
+    const core = calculateTimelineLayout(figures.filter(figure => !guestIds.has(figure.id)), coreClusters, placements);
+    const band = calculateTimelineLayout(guests);
+    const guestRow = core.layoutData.length ? core.totalRows : 0;
+    const offset = core.layoutData.length ? guestRow + 1 : 0;
+    return {
+        layoutData: [...core.layoutData, ...band.layoutData.map(item => ({ ...item, level: item.level + offset,
+            ...(item.labelLevel !== undefined ? { labelLevel: item.labelLevel + offset } : {}) }))],
+        totalRows: offset + band.totalRows,
+        guestRow: offset ? guestRow : undefined,
+    };
+}
 
 // World-space box around a figure's bar and labels, used to point the camera at it.
 // The vertical centre sits 60px below the row top, where the bar and its labels are centred.

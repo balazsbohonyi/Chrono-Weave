@@ -113,6 +113,12 @@ export function readConnectionPath(storage: Storage, figures: HistoricalFigure[]
   return resolve(key, saved, new Map(figures.map(person => [person.id, person])), head !== first);
 }
 
+// The saved connection under one key, as it was found, or null when it was evicted or no longer fits the canvas.
+export function connectionPathEntry(storage: Storage, key: string, figures: HistoricalFigure[]): ConnectionPathEntry | null {
+  const saved = key.startsWith(PATH_CACHE_PREFIX) ? readSaved(storage, key) : null;
+  return saved ? resolve(key, saved, new Map(figures.map(person => [person.id, person])), false) : null;
+}
+
 // Newest first, capped, with entries that no longer fit the canvas left out.
 export function listConnectionPaths(storage: Storage, figures: HistoricalFigure[]): ConnectionPathEntry[] {
   const byId = new Map(figures.map(person => [person.id, person]));
@@ -125,6 +131,25 @@ export function listConnectionPaths(storage: Storage, figures: HistoricalFigure[
 
 export function savedPathFigureIds(storage: Storage): Set<string> {
   return new Set(listKeys(storage).flatMap(key => readSaved(storage, key)?.ids ?? []));
+}
+
+// The people on every readable saved path, by its key.
+export function savedPathIdsByKey(storage: Storage): Map<string, string[]> {
+  return new Map(listKeys(storage).flatMap(key => {
+    const saved = readSaved(storage, key);
+    return saved ? [[key, saved.ids] as [string, string[]]] : [];
+  }));
+}
+
+// Deleting a connection the user chose to forget. Paths evicted by MAX_RECENT_CONNECTIONS keep their guests;
+// only this removes them, together with their woven-in record.
+export function deleteConnectionPath(storage: Storage, key: string, removedIds: readonly string[]): void {
+  try {
+    storage.removeItem(key);
+    if (!removedIds.length) return;
+    const removed = new Set(removedIds);
+    storage.setItem(WOVEN_KEY, JSON.stringify([...wovenFigureIds(storage)].filter(id => !removed.has(id))));
+  } catch { /* An unavailable storage leaves the saved path; the canvas change still applies. */ }
 }
 
 export function wovenFigureIds(storage: Storage): Set<string> {
