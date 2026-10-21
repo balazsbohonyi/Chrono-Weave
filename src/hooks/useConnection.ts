@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CanvasConfig, HistoricalFigure, IAIService } from '../types';
 import { classifyConnectionTarget, type ConnectionProgress, type ConnectionTargetStatus } from '../services/connectionPath';
 import {
-  decideConnectionStart, degreeLabel, finishedExploration, reconcileSession, runConnectionSearch, savedConnectionView,
+  decideConnectionStart, degreeLabel, finishedExploration, reconcileSession, runConnectionSearch, savedConnectionView, savedEntryFor,
   type ConnectionTarget, type ConnectionView,
 } from '../services/connectionFlow';
 import { createWikidataResolver, type WikidataResolver } from '../services/wikidataService';
@@ -292,6 +292,9 @@ export function useConnection(dependencies: Dependencies) {
   const replay = useCallback((entry: ConnectionPathEntry) => show(savedConnectionView(entry)), [show]);
   // Plays the connection on show again from the start, as a fresh show: the stage opens anew on the first person.
   const replayActive = useCallback(() => { if (active) show({ chain: active.chain, links: active.links }); }, [active, show]);
+  // The graph of the connection on show: its saved entry (absent until the connection is saved), and the way to open its exploration.
+  const activeEntry = useMemo(() => active ? savedEntryFor(recent, active.chain) : null, [active, recent]);
+  const openActiveExploration = useCallback(() => { if (activeEntry) void openSavedExploration(activeEntry); }, [activeEntry, openSavedExploration]);
 
   // The ✕ in the Connection tab hides the thread; saved connections stay listed.
   const close = useCallback(() => {
@@ -329,6 +332,6 @@ export function useConnection(dependencies: Dependencies) {
     focusRequest, canvasConnection, isTabVisible: !!active || recent.length > 0 || checkpoints.length > 0,
     isPickable, statusFor,
     beginPicking, exitPicking, pickFigure, submitName, cancelSearch, reset, replay, replayActive, close, focusPerson, deleteConnection,
-    endReveal, setCurrentIndex,
+    endReveal, setCurrentIndex, activeEntry, openActiveExploration,
   };
 }

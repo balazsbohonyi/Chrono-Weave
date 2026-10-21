@@ -51,16 +51,60 @@
 .ce-working.is-working { opacity: 1; }
 .ce-working svg { position: absolute; inset: 0; width: 100%; height: 100%; }
 .ce-working.is-working .ce-working-glass { animation: ce-working-scan 2.6s ease-in-out infinite; transform-origin: 50% 50%; }
+/* The full-screen bar's clock: the same glass sweeping and the same pulse, smaller, with no caption. The glass keeps its space, so the bar never jiggles. */
+.ce-clock.is-compact { gap: 6px; margin-right: 0; }
+.ce-clock.is-compact .ce-working { width: 22px; height: 22px; }
+.ce-clock.is-compact .ce-timer { width: auto; }
+.ce-clock.is-compact .ce-timer-value { font-size: 20px; }
+.ce-clock.is-compact .ce-timer-caption { display: none; }
+.ce-clock.is-compact .ce-timer.is-running::before { inset: -9px -8px; }
 @keyframes ce-working-scan { 0%, 100% { transform: translate(-3px, 2px) rotate(-12deg); } 25% { transform: translate(2px, -3px) rotate(6deg); } 50% { transform: translate(3px, 2px) rotate(12deg); } 75% { transform: translate(-2px, 3px) rotate(-6deg); } }
 
 /* Body: the network and the inspection are two glass panels. */
 .connection-explorer-body { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 14px; flex: 1; min-height: 0; position: relative; }
 .connection-explorer-network, .connection-explorer-inspection { background: rgb(var(--color-surface) / .42); border: 1px solid rgb(var(--color-border) / .8); border-radius: 14px; box-shadow: 0 8px 28px rgb(var(--color-shadow) / .1333); }
 .connection-explorer-network { display: flex; flex-direction: column; min-height: 0; position: relative; overflow: hidden; }
-/* Maximized: the inspection panel steps aside (it stays mounted, so its tab, search and scroll survive) and the graph takes the
-   whole body; the header and footer stay. Narrow screens never maximize: there the graph already has the whole body. */
+/* Maximized is real full screen (wide screens only: narrow ones never maximize, there the graph already has the whole body). The graph fills the
+   viewport, with no padding and no width cap. The header and footer are not drawn: their parts float over the graph as the compact bar (.ce-bar)
+   and the inspection panel floats at the right (.is-floating; it stays mounted when hidden, so its tab, search and scroll survive). The year strips
+   are 24px, so the bar and the panel start 34px in. --panel-inset is the strip at the right edge the open panel covers (380px + 14px margins:
+   FLOATING_PANEL_INSET in metrics.ts); what is centred in the graph (the bar, the cards) and the legend keep out of it. */
+.connection-explorer.is-fullscreen { padding: 0; gap: 0; --panel-inset: 0px; }
+.connection-explorer.is-fullscreen > :not(.close-button) { max-width: none; margin-inline: 0; }
+.connection-explorer.is-fullscreen .connection-explorer-body { gap: 0; }
+.connection-explorer.is-fullscreen .connection-explorer-network { border: 0; border-radius: 0; box-shadow: none; }
 .connection-explorer-body.is-maximized { grid-template-columns: minmax(0, 1fr); }
-.connection-explorer-body.is-maximized > .connection-explorer-inspection { display: none; }
+.connection-explorer-body.has-panel { --panel-inset: calc(380px + 28px); }
+.connection-explorer-body.has-panel .net-overlay-row { right: var(--panel-inset); }
+/* The cards that stand at the top centre of the graph (Connected, Search paused, Search interrupted) sit below the bar. */
+.connection-explorer.is-fullscreen :is(.net-success-wrap, .net-resume-wrap, .net-alert-wrap) { top: 100px; }
+.connection-explorer-body.has-panel :is(.net-success-wrap, .net-resume-wrap, .net-alert-wrap) { left: calc((100% - var(--panel-inset)) / 2); }
+.connection-explorer-body.has-panel .net-resume-wrap { width: min(420px, calc(100% - var(--panel-inset) - 32px)); }
+.connection-explorer-body.has-panel .net-alert-wrap { width: min(560px, calc(100% - var(--panel-inset) - 32px)); }
+
+/* The compact bar: the glass of the view controls (.canvas-view-toolbar, from globals.css, with its fixed position replaced) at the top centre. */
+.canvas-view-toolbar.ce-bar { position: absolute; top: 34px; left: 50%; bottom: auto; transform: translateX(-50%); z-index: 4; gap: 10px; padding: 6px 10px; max-width: calc(100% - 28px);
+  overflow-x: auto; scrollbar-width: none; transition: left 180ms ease; }
+.ce-bar::-webkit-scrollbar { display: none; }
+.ce-bar > * { flex: none; }
+.connection-explorer-body.has-panel .ce-bar { left: calc((100% - var(--panel-inset)) / 2); max-width: calc(100% - var(--panel-inset) - 28px); }
+.ce-bar-sides { display: flex; align-items: center; gap: 14px; padding: 0 4px; }
+.ce-bar .ce-degrees { padding: 2px 12px; font-size: 12px; }
+.ce-bar .ce-degrees b { font-size: 16px; }
+.ce-bar-clock { display: inline-flex; align-items: center; padding: 0 6px; border-radius: 10px; cursor: help; }
+.ce-bar-warning { display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 8px; color: rgb(var(--color-danger-text)); cursor: help; }
+.ce-bar-clock:focus-visible, .ce-bar-warning:focus-visible { outline: 2px solid rgb(var(--color-accent-focus)); outline-offset: 2px; }
+/* The action of the phase (Stop, Continue, Reveal) is filled in the connection colour; the rest are plain icons. */
+.ce-bar .canvas-floating-button.is-accent { background: rgb(var(--color-connection)); color: rgb(var(--color-connection-contrast)); }
+.ce-bar .canvas-floating-button.is-accent:hover:not(:disabled), .ce-bar .canvas-floating-button.is-accent:focus-visible { color: rgb(var(--color-connection-contrast)); filter: brightness(1.08); }
+.ce-bar .canvas-floating-button[aria-pressed="true"] { color: rgb(var(--color-accent-text)); background: rgb(var(--color-accent-soft) / .55); }
+
+/* The floating inspection panel: the docked panel's content on glass of its own, over the right of the graph. */
+.connection-explorer-inspection.is-floating { position: absolute; top: 34px; right: 14px; bottom: 34px; width: 380px; z-index: 6; padding: 14px 16px 12px;
+  background: rgb(var(--color-surface) / .72); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); box-shadow: 0 8px 28px rgb(var(--color-shadow) / .22); }
+.net-inspect-actions { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.connection-explorer .net-inspect-actions .net-back { max-width: 200px; }
+.connection-explorer .net-panel-close { display: inline-grid; place-items: center; flex: none; width: 26px; height: 26px; padding: 0; border-radius: 50%; }
 /* The toggle is a bare icon in the corner of the graph, below the year strip, with no panel of its own. */
 .net-maximize { position: absolute; top: 28px; right: 6px; z-index: 3; }
 

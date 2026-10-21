@@ -8,6 +8,7 @@ import { fetchBatchFigureDetails } from '../services/wikiService';
 import { prefersReducedMotion } from '../utils/canvasCamera';
 import SidebarFigureCard, { type FigureDetail } from './SidebarFigureCard';
 import NetworkPortrait from './connectionNetwork/NetworkPortrait';
+import ExplorationIcon from './connectionNetwork/ExplorationIcon';
 import MarkdownContent from './MarkdownContent';
 import Tooltip from './Tooltip';
 import { SixDegreesInfoButton, SixDegreesInfoLink } from './SixDegreesInfo';
@@ -40,10 +41,7 @@ export interface ConnectionPanelProps {
 const OpenExplorationButton: React.FC<{ onOpen: () => void; disabled?: boolean }> = ({ onOpen, disabled }) =>
   <Tooltip text="Open exploration">
     <button type="button" className="connection-open-exploration" aria-label="Open exploration" disabled={disabled} onClick={onOpen}>
-      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <circle cx="5" cy="6" r="2.4" /><circle cx="19" cy="6" r="2.4" /><circle cx="12" cy="18" r="2.4" />
-        <path d="M7.2 7l3.6 9M16.8 7l-3.6 9M7.6 6h8.8" />
-      </svg>
+      <ExplorationIcon />
     </button>
   </Tooltip>;
 
@@ -181,8 +179,8 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({ connection, currentIn
               const isCurrent = [first.id, last.id].sort().join('|') === activeEnds;
               return (
                 <li key={entry.key}>
-                  {/* The card plays the connection; the icon opens the exploration it came from. */}
-                  <div className={`connection-recent-entry ${isCurrent ? 'is-current' : ''} ${isBusy ? 'is-busy' : ''}`}>
+                  {/* The card plays the connection; the icon opens the exploration it came from. The icons only show while the card is hovered or has keyboard focus (see the stylesheet). */}
+                  <div className={`connection-recent-entry has-hover-actions ${isCurrent ? 'is-current' : ''} ${isBusy ? 'is-busy' : ''}`}>
                     <button type="button" className="connection-recent-main" aria-current={isCurrent || undefined} disabled={isBusy} onClick={() => onReplay(entry)}>
                       {pair([first, last])}
                       <span className="connection-recent-names">{first.name} → {last.name}</span>

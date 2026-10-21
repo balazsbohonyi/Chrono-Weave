@@ -69,6 +69,7 @@
 .canvas-header {
     position: fixed;
     inset: 0 0 auto;
+    transition: transform 400ms cubic-bezier(.4, 0, .2, 1), opacity 400ms ease, visibility 0s linear 0s;
     z-index: 50;
     height: 52px;
     display: grid;
@@ -81,6 +82,14 @@
     backdrop-filter: blur(24px);
 }
 .canvas-header-actions, .canvas-header-settings { display: flex; align-items: center; gap: 4px; }
+/* While a connection plays on the stage the header and the category filters step away, and the stage takes the whole height. They leave the tab order (visibility)
+   only once they are gone. */
+.canvas-header.is-away { transform: translateY(-100%); opacity: 0; visibility: hidden; pointer-events: none; transition-delay: 0s, 0s, 400ms; }
+#canvas-category-filters { transition: opacity 400ms ease, visibility 0s linear 0s; }
+#canvas-category-filters.is-away { opacity: 0; visibility: hidden; transition-delay: 0s, 400ms; }
+@media (prefers-reduced-motion: reduce) {
+    .canvas-header, #canvas-category-filters { transition: none; }
+}
 .canvas-header-settings { justify-self: end; }
 .canvas-control-button {
     display: grid;
@@ -520,9 +529,17 @@ input[type=number] {
 .connection-recent-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .connection-recent-main::after { content: ''; position: absolute; inset: 0; border-radius: 8px; }
 .connection-recent-main:disabled { cursor: default; }
-.connection-open-exploration { position: relative; z-index: 1; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; background: none; color: rgb(var(--color-card-muted)); cursor: pointer; transition: color 150ms; }
+.connection-open-exploration { position: relative; z-index: 1; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; background: none; color: rgb(var(--color-card-muted)); cursor: pointer; transition: color 150ms, opacity 150ms; }
 .connection-open-exploration:hover:not(:disabled) { color: rgb(var(--color-content-primary)); }
 .connection-open-exploration:disabled { cursor: default; }
+/* A finished connection's two icons (open the exploration, delete) show only while its card is hovered or has keyboard focus, so the list reads as names and degrees.
+   Their space is kept, so nothing shifts when they appear, and while hidden they take no clicks (a click there plays the connection). Touch screens have no hover: the icons stay.
+   The focus rule is separate on purpose: a browser without :has() would otherwise drop the hover rule with it. */
+@media (hover: hover) {
+  .connection-recent-entry.has-hover-actions .connection-open-exploration { opacity: 0; pointer-events: none; }
+  .connection-recent-entry.has-hover-actions:hover .connection-open-exploration { opacity: 1; pointer-events: auto; }
+  .connection-recent-entry.has-hover-actions:has(:focus-visible) .connection-open-exploration { opacity: 1; pointer-events: auto; }
+}
 .connection-delete-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; padding: 8px 12px; border-radius: 8px; font-size: 13px; color: rgb(var(--color-content-body)); background: rgb(var(--color-surface-muted) / 70%); border: 1px dashed rgb(var(--color-card-border)); }
 .connection-delete-confirm > span { flex: 1 1 100%; }
 .connection-delete-yes, .connection-delete-no { padding: 3px 12px; border-radius: 6px; font-size: 12px; font-weight: 700; border: 1px solid rgb(var(--color-card-border)); }

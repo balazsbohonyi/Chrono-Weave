@@ -8,7 +8,7 @@ import {
 } from '../../services/connectionNetworkView';
 import { formatYear } from '../../utils/formatters';
 import { createWheelClassifier } from '../../utils/wheelGesture';
-import Tooltip from '../Tooltip';
+import ToolButton from './ToolButton';
 import { fitCamera as fitPoints, type Camera, type CameraPoint } from './camera';
 import LayoutMenu from './LayoutMenu';
 import { layoutInfoLabel } from '../LayoutInfo';
@@ -51,9 +51,13 @@ interface Props {
   onPinsChange: () => void;
   onToggleFold: (hostId: string) => void;
   legend: React.ReactNode;
-  // Whether the graph has the whole body to itself, and the way to toggle that (absent when there is no side panel to hide).
+  // Whether the graph has the whole viewport to itself, and the way to switch that on (absent when there is no side panel to hide). While it is
+  // on, the explorer's compact bar has the way back, so the bare icon is not drawn.
   maximized: boolean;
   onToggleMaximize?: () => void;
+  // Width in pixels of the strip at the right edge that the floating panel covers (0 when it is closed). The graph is not resized by it, but
+  // what the camera frames, or pans to, stays in the part that is left.
+  inset?: number;
   // Opens the explanation of the current layout (absent: no help button in the toolbar).
   onOpenLayoutInfo?: () => void;
 }
@@ -70,12 +74,6 @@ const columnLabel = (guide: ColumnGuide, guides: readonly ColumnGuide[], zoom: n
   return room >= 18 || guide.hops % 5 === 0 ? String(guide.hops) : '';
 };
 
-// One icon button of the view controls. A state is shown with `pressed`, an action with just its label.
-const ToolButton: React.FC<{ tip: string; label?: string; pressed?: boolean; disabled?: boolean; haspopup?: boolean; onClick: () => void; children: React.ReactNode }> = ({ tip, label, pressed, disabled, haspopup, onClick, children }) =>
-  <Tooltip text={tip}><button type="button" className="canvas-floating-button" aria-label={label ?? tip} aria-pressed={pressed} disabled={disabled} aria-haspopup={haspopup ? 'dialog' : undefined}
-    onClick={event => { if (event.detail > 0) event.currentTarget.blur(); onClick(); }}>
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{children}</svg>
-  </button></Tooltip>;
 // Keeps receiving a drag that leaves the element; a pointer that is already gone is not an error.
 const capture = (element: Element, pointerId: number) => { try { element.setPointerCapture(pointerId); } catch { /* released */ } };
 const activate = (action: () => void) => (event: React.KeyboardEvent) => {
@@ -190,7 +188,7 @@ const LARGE_DRAWING = 250;
 // so the simulation never re-renders the explorer. The camera is a transform over screen-sized content.
 const NetworkGraph: React.FC<Props> = ({
   view, endpointNames, nameOf, layout, kick, pinned, mode, onModeChange, size, onSize, selection, onSelect, portraits, narrow, reducedMotion,
-  success, solved = null, showChain = true, onReveal, resume = null, reveal, onPinsChange, onToggleFold, legend, maximized, onToggleMaximize, onOpenLayoutInfo,
+  success, solved = null, showChain = true, onReveal, resume = null, reveal, onPinsChange, onToggleFold, legend, maximized, onToggleMaximize, inset = 0, onOpenLayoutInfo,
 }) => {
   const uid = useId().replace(/:/g, '');
   const svg = useRef<SVGSVGElement>(null);
@@ -226,6 +224,8 @@ const NetworkGraph: React.FC<Props> = ({
   sizeRef.current = size;
   const narrowRef = useRef(narrow);
   narrowRef.current = narrow;
+  const insetRef = useRef(inset);
+  insetRef.current = inset;
 
   const apply = useCallback((next: Camera) => { cameraRef.current = next; setCamera(next); }, []);
 
@@ -261,7 +261,7 @@ const NetworkGraph: React.FC<Props> = ({
       const at = layout.position(id);
       if (at && (!only || only.has(id))) points.push({ ...at, r: node.radius + 22, endpoint: node.endpoint !== null });
     }
-    const result = fitPoints(points, sizeRef.current, {
+    const result = fitPoints(points, { width: Math.max(1, sizeRef.current.width - insetRef.current), height: sizeRef.current.height }, {
       everything: everything || !!only, readableZoom: narrowRef.current ? READABLE_ZOOM_NARROW : READABLE_ZOOM,
       minZoom: MIN_ZOOM, maxZoom: 1.25, padding: FIT_PADDING, strip: STRIP_HEIGHT,
     });
@@ -276,13 +276,13 @@ const NetworkGraph: React.FC<Props> = ({
   const centerOn = useCallback((x: number, y: number) => {
     const { width, height } = sizeRef.current, k = cameraRef.current.k;
     userMoved.current = true;
-    apply({ k, x: width / 2 - x * k, y: height / 2 - y * k });
+    apply({ k, x: (width - insetRef.current) / 2 - x * k, y: height / 2 - y * k });
   }, [apply]);
 
   const visibleOnScreen = useCallback((at: Point) => {
     const { width, height } = sizeRef.current, { x, y, k } = cameraRef.current;
     const sx = at.x * k + x, sy = at.y * k + y;
-    return sx > 20 && sx < width - 20 && sy > STRIP_HEIGHT + 8 && sy < height - STRIP_HEIGHT - 8;
+    return sx > 20 && sx < width - insetRef.current - 20 && sy > STRIP_HEIGHT + 8 && sy < height - STRIP_HEIGHT - 8;
   }, []);
 
   // Positions painted by the layout, plus follow-the-graph camera until the user takes over. The camera follows every frame (the
@@ -546,9 +546,9 @@ const NetworkGraph: React.FC<Props> = ({
     {mode === 'time' && ['top', 'bottom'].map(edge => <div key={edge} className={`net-strip is-${edge}`} aria-hidden="true">
       {ticksForAxis.map(year => <span key={year} className="net-tick" style={{ left: sx(year) }}>{formatYear(year)}</span>)}
     </div>)}
-    {onToggleMaximize && <div className="net-maximize">
-      <ToolButton tip={maximized ? 'Show the side panel again' : 'Maximize the graph (hides the side panel)'} label={maximized ? 'Restore the side panel' : 'Maximize the graph'} onClick={onToggleMaximize}>
-        {maximized ? <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7" /> : <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />}
+    {onToggleMaximize && !maximized && <div className="net-maximize">
+      <ToolButton tip="Maximize the graph to the whole screen" label="Maximize the graph" onClick={onToggleMaximize}>
+        <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
       </ToolButton>
     </div>}
     <div className="net-overlay-row">

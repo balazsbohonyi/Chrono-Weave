@@ -18,12 +18,14 @@ interface ControlPanelProps {
   onOpenSettings: () => void;
   onToggleLegend: () => void;
   isLegendOpen: boolean;
+  // Stepped away (and inert, shortcuts included) while a connection plays on the stage, which takes the whole height.
+  away?: boolean;
 }
 
 const ControlPanel: React.FC<ControlPanelProps> = ({
   canvasPrompt, searchQuery, onOpenLauncher, isBuilding, hasFigures, hasCategoryFilters, selectedCategoryCount,
   onSearch, searchResultCount, currentResultIndex, onNextResult, onPrevResult,
-  onOpenSettings, onToggleLegend, isLegendOpen
+  onOpenSettings, onToggleLegend, isLegendOpen, away = false
 }) => {
   const { theme, toggleTheme } = useTheme();
   const themeLabel = theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme';
@@ -74,7 +76,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   }, [hasCategoryFilters, isBuilding, onToggleLegend]);
 
   return (
-    <header ref={header} data-canvas-controls className="canvas-header">
+    <header ref={header} data-canvas-controls className={away ? 'canvas-header is-away' : 'canvas-header'} inert={away}>
       <div className="canvas-header-actions" role="group" aria-label="Canvas actions">
         <Tooltip text="Weave New Canvas" placement="bottom">
           <button type="button" onClick={onOpenLauncher} disabled={isBuilding}

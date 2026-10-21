@@ -264,7 +264,7 @@ Verified in the browser with a synthetic 160-person exploration (dark at 1280 px
 
 ## Maximized graph (2026-10-15)
 
-A bare icon button (no panel, `canvas-floating-button` look) in the top-right corner of the graph, just below the year strip, toggles `maximized` in `ConnectionExplorer`. The body gets `is-maximized`: the inspection panel is `display: none` (still mounted, so its tab, search and scroll survive) and the graph takes the whole width; header and footer stay. Esc restores before it closes (after selection and search). Narrow screens have no button and ignore the state: there the graph already has the whole body and the inspection is a bottom sheet. A selection made while maximized still dims the rest, but its details are in the hidden panel until the graph is restored.
+A bare icon button (no panel, `canvas-floating-button` look) in the top-right corner of the graph, just below the year strip, toggles `maximized` in `ConnectionExplorer`. The body gets `is-maximized`: the inspection panel is `display: none` (still mounted, so its tab, search and scroll survive) and the graph takes the whole width; header and footer stay. Esc restores before it closes (after selection and search). Narrow screens have no button and ignore the state: there the graph already has the whole body and the inspection is a bottom sheet. A selection made while maximized still dims the rest, but its details are in the hidden panel until the graph is restored. **Superseded** by real full screen: see `real-fullscreen-graph.md` (the graph fills the viewport, the header and footer become a floating bar, and the panel floats and shows those details).
 
 ## Out of scope
 

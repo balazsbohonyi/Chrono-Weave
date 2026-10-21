@@ -953,6 +953,7 @@ const App: React.FC = () => {
                 onOpenSettings={() => setIsSettingsOpen(true)}
                 onToggleLegend={() => setIsLegendOpen(prev => !prev)}
                 isLegendOpen={hasLegend && isLegendOpen}
+                away={stageShown}
             />
 
             {hasLegend && <Legend
@@ -964,6 +965,7 @@ const App: React.FC = () => {
                 guestCount={guestIds.size}
                 guestVisibility={guestVisibility}
                 onGuestVisibility={setGuestVisibility}
+                away={stageShown}
             />}
 
             <div className="absolute inset-0 z-0" inert={stageShown}>
@@ -1017,9 +1019,10 @@ const App: React.FC = () => {
             {stageMounted && connection.active && connection.canvasConnection && <ConnectionStage key={connection.active.id} hidden={!stageShown}
                 connection={connection.canvasConnection} chain={connection.active.chain} links={connection.active.links}
                 currentIndex={connection.currentIndex} focus={connection.focusRequest}
-                inset={{ top: hasLegend && isLegendOpen ? 114 : 52, right: isConnectionSidebarOpen && !connection.canvasConnection.animate ? 544 : 0 }}
+                inset={{ right: isConnectionSidebarOpen && !connection.canvasConnection.animate ? 544 : 0 }}
                 canExit={!modalOpen && stageShown} onStep={connection.setCurrentIndex} onEnd={connection.endReveal} onExit={connection.close} onReplay={connection.replayActive}
-                onExplain={openConnectionExplanation} onInspect={handleInspectFigure} onOpenInfo={openSixDegreesInfo} />}
+                onExplain={openConnectionExplanation} onInspect={handleInspectFigure} onOpenInfo={openSixDegreesInfo}
+                onOpenExploration={connection.activeEntry ? connection.openActiveExploration : undefined} />}
 
             {loading && !isLauncherOpen && (
                 <ProgressOverlay title="CONSULTING THE ARCHIVES" />
@@ -1070,6 +1073,7 @@ const App: React.FC = () => {
                 onToggleCollapse={() => setIsSidebarCollapsed(prev => !prev)}
                 selectedCategories={selectedCategories}
                 isLegendOpen={hasLegend && isLegendOpen}
+                fullHeight={stageShown}
                 isGlobalView={selectedYear === null}
             />
 

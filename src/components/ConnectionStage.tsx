@@ -12,6 +12,7 @@ import { bestStageColumns, layoutStage, pointAtProgress } from '../utils/connect
 import FigureCard from './FigureCard';
 import ConnectionThread from './ConnectionThread';
 import NetworkPortrait from './connectionNetwork/NetworkPortrait';
+import ExplorationIcon from './connectionNetwork/ExplorationIcon';
 import Tooltip from './Tooltip';
 import { SixDegreesInfoButton } from './SixDegreesInfo';
 import '../styles/connectionStage.css';
@@ -22,8 +23,8 @@ interface Props {
   links: ConnectionLinkResult[];
   currentIndex: number | null;
   focus: ConnectionFocusRequest | null;
-  // The space the stage must leave free: the canvas header above it and the sidebar beside it.
-  inset: { top: number; right: number };
+  // The space the stage must leave free beside it: the sidebar. It has the whole height otherwise (the canvas header steps away while it is shown).
+  inset: { right: number };
   // False while a dialog is open on top, so that its Escape is its own.
   canExit: boolean;
   // Stepped aside (choosing someone on the canvas): kept as it is, but not shown and not reacting.
@@ -37,6 +38,8 @@ interface Props {
   onInspect: (figure: HistoricalFigure) => void;
   // Opens the explanation of Six Degrees of Separation.
   onOpenInfo?: () => void;
+  // Opens the graph (the exploration) this connection came from. Absent: no button (the connection is not saved yet).
+  onOpenExploration?: () => void;
 }
 
 // The space the title takes at the top, and a little breathing room below the cards.
@@ -50,7 +53,7 @@ const TAIL = [0.035, 0.07, 0.11, 0.16, 0.22];
 // the tip of the thread from person to person, each card lands as the thread reaches it, and its evidence appears beside
 // the link. At the end the camera pulls back and a light runs along the whole thread once. The canvas stays behind,
 // blurred. It is not a dialog: the sidebar next to it (the evidence, the Why buttons) keeps working.
-const ConnectionStage: React.FC<Props> = ({ connection, chain, links, currentIndex, focus, inset, canExit, hidden, onStep, onEnd, onExit, onReplay, onExplain, onInspect, onOpenInfo }) => {
+const ConnectionStage: React.FC<Props> = ({ connection, chain, links, currentIndex, focus, inset, canExit, hidden, onStep, onEnd, onExit, onReplay, onExplain, onInspect, onOpenInfo, onOpenExploration }) => {
   const root = useRef<HTMLElement>(null);
   const gradient = `stage-tip-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
   // How many people stand in a row is chosen once, from the stage's shape when it opens, so cards never move mid-reveal.
@@ -192,8 +195,14 @@ const ConnectionStage: React.FC<Props> = ({ connection, chain, links, currentInd
     onOpenInfo?.();
   };
 
+  // Like asking why, opening the graph takes over from a reveal that is playing.
+  const openExploration = () => {
+    interrupted.current = true; revealRef.current.skip();
+    onOpenExploration?.();
+  };
+
   return <section ref={root} className={`connection-stage ${dragging ? 'is-dragging' : ''}`} data-connection-stage data-sidebar={inset.right > 0 ? 'open' : 'closed'} hidden={hidden}
-    aria-label={`The connection between ${first.name} and ${last.name}`} style={{ top: inset.top, right: inset.right }} onPointerDown={onPointerDown}>
+    aria-label={`The connection between ${first.name} and ${last.name}`} style={{ right: inset.right }} onPointerDown={onPointerDown}>
     <div className="stage-backdrop" aria-hidden="true" style={{ backgroundPosition: `${camera.x * 0.25}px ${camera.y * 0.25}px` }} />
     <div className="stage-world" style={{ transform: `translate(${camera.x}px, ${camera.y}px) scale(${scale})` }}>
       <svg className="stage-threads" width={layout.bounds.width} height={layout.bounds.height} aria-hidden="true">
@@ -241,13 +250,15 @@ const ConnectionStage: React.FC<Props> = ({ connection, chain, links, currentInd
         </div>
       </div>
       <div className="stage-actions">
+        {/* Bare icons, no chrome (like the icons of the sidebar's connection cards): play the connection again, and open its graph. */}
         <Tooltip text="Replay the connection" placement="bottom">
-          <button type="button" className="close-button stage-replay" aria-label="Replay the connection" onClick={onReplay}>
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1" /><path d="M3.5 4.5v4.2h4.2" />
-            </svg>
+          <button type="button" className="stage-icon-button stage-replay" aria-label="Replay the connection" onClick={onReplay}>
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l12-7.5z" /></svg>
           </button>
         </Tooltip>
+        {onOpenExploration && <Tooltip text="Open exploration" placement="bottom">
+          <button type="button" className="stage-icon-button stage-open-graph" aria-label="Open exploration" onClick={openExploration}><ExplorationIcon size={22} /></button>
+        </Tooltip>}
         <button type="button" className="close-button" aria-label="Close the connection" onClick={onExit}>
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M6 6l12 12M6 18L18 6" /></svg>
         </button>

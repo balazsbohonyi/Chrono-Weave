@@ -41,6 +41,10 @@ export function decideConnectionStart(from: HistoricalFigure, target: Connection
   return saved ? { kind: 'replay', saved } : { kind: 'search', target: { figure } };
 }
 
+// The saved connection that is the one on show, found by its two ends (as a saved path is keyed): where its exploration is opened from.
+export const savedEntryFor = (entries: readonly ConnectionPathEntry[], chain: readonly HistoricalFigure[]): ConnectionPathEntry | null =>
+  chain.length < 2 ? null : entries.find(entry => entry.key === connectionPathKey(chain[0].id, chain[chain.length - 1].id)) ?? null;
+
 export function savedConnectionView(saved: Pick<ConnectionPathEntry, 'figures' | 'evidence' | 'contacts'>): ConnectionView {
   const chain = saved.figures;
   return {

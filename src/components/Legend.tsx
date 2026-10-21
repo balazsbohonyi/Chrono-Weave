@@ -16,15 +16,17 @@ interface LegendProps {
   guestCount?: number;
   guestVisibility?: GuestVisibility;
   onGuestVisibility?: (visibility: GuestVisibility) => void;
+  // Stepped away while a connection plays on the stage, which takes the whole height.
+  away?: boolean;
 }
 
 const GUEST_VISIBILITY_LABELS: Record<GuestVisibility, string> = { show: 'Show', dim: 'Dim', hide: 'Hide' };
 
 const Legend: React.FC<LegendProps> = ({ selectedCategories, availableCategories = CATEGORY_LIST, onToggleCategory, isOpen, onToggleOpen,
-  guestCount = 0, guestVisibility = 'show', onGuestVisibility }) => {
+  guestCount = 0, guestVisibility = 'show', onGuestVisibility, away = false }) => {
   return (
-    <div id="canvas-category-filters" data-canvas-controls aria-label="Category filters" aria-hidden={!isOpen} inert={!isOpen}
-      className="fixed top-[52px] left-0 w-full z-[45] flex flex-col items-center pointer-events-none">
+    <div id="canvas-category-filters" data-canvas-controls aria-label="Category filters" aria-hidden={!isOpen || away} inert={!isOpen || away}
+      className={`fixed top-[52px] left-0 w-full z-[45] flex flex-col items-center pointer-events-none${away ? ' is-away' : ''}`}>
       
       {/* Collapsible Content Area */}
       <div

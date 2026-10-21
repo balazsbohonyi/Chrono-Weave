@@ -211,15 +211,103 @@ test('the last button of the view controls explains the current layout: a bare q
   assert.doesNotMatch(markup, /Graph layout<\/p>/);
 });
 
-test('the graph offers a bare maximize icon that hides the side panel, and starts un-maximized', () => {
+test('the graph offers a bare maximize icon, and starts un-maximized with its header and footer', () => {
   const markup = render(build(() => [], true));
   assert.match(markup, /class="net-maximize"[^>]*>(?:(?!<\/div>).)*aria-label="Maximize the graph"/);
-  assert.match(markup, /class="connection-explorer-body "/);
-  assert.doesNotMatch(markup, /is-maximized/);
-  // Maximizing is a class on the body: the panel is hidden (not unmounted, so its tab and search survive) and the graph takes its column.
+  assert.match(markup, /class="connection-explorer-body"/);
+  assert.doesNotMatch(markup, /is-maximized|is-fullscreen|ce-bar|is-floating/);
+  assert.match(markup, /connection-explorer-header/); assert.match(markup, /<footer/); assert.match(markup, /relationship-close/);
+  // Maximizing is real full screen: the shell drops its padding and width cap, and the inspection panel floats over the graph instead of leaving
+  // its column (it stays mounted, hidden when closed, so its tab, search and scroll survive).
   const css = readFileSync('src/styles/connectionExplorer.css', 'utf8');
   assert.match(css, /\.connection-explorer-body\.is-maximized\s*\{\s*grid-template-columns:\s*minmax\(0,\s*1fr\)/);
-  assert.match(css, /\.connection-explorer-body\.is-maximized\s*>\s*\.connection-explorer-inspection\s*\{\s*display:\s*none/);
+  assert.match(css, /\.connection-explorer\.is-fullscreen\s*\{\s*padding:\s*0;\s*gap:\s*0;/);
+  assert.match(css, /\.connection-explorer\.is-fullscreen\s*>\s*:not\(\.close-button\)\s*\{\s*max-width:\s*none/);
+  assert.match(css, /\.connection-explorer-inspection\.is-floating\s*\{\s*position:\s*absolute;/);
+  assert.doesNotMatch(css, /\.is-maximized\s*>\s*\.connection-explorer-inspection\s*\{\s*display:\s*none/);
+});
+
+// The view prefs are read once per mount, so a stub with `maximized` stored is what a remembered full screen looks like.
+const inFullscreen = <T,>(run: () => T): T => {
+  const stored = JSON.stringify({ mode: 'time', showLines: true, maximized: true });
+  (globalThis as { localStorage?: unknown }).localStorage = { getItem: (key: string) => key === 'chrono_sd2_network_view' ? stored : null, setItem: () => {} };
+  try { return run(); } finally { delete (globalThis as { localStorage?: unknown }).localStorage; }
+};
+// The bar is the markup from its container up to the graph, which follows it in the section.
+const barOf = (markup: string) => { const start = markup.indexOf('class="canvas-view-toolbar ce-bar"'); return markup.slice(start, markup.indexOf('<div class="net-graph', start)); };
+const accepted = (people: ContactPerson[], from: number, to: number) => ({ from: people[from].id, to: people[to].id, status: 'accepted' as const, claim: '',
+  assessment: { pair: [people[from].id, people[to].id] as [string, string], verdict: 'accepted' as const, interactionType: 'meeting' as const, evidence: 'They met.', provenance } });
+
+test('full screen replaces the header, footer and top-right X with one floating bar, before the graph, and keeps the panel mounted but hidden', () => {
+  const markup = inFullscreen(() => render(build(() => [], true)));
+  assert.match(markup, /class="connection-explorer is-fullscreen"/);
+  assert.doesNotMatch(markup, /connection-explorer-header|<footer|relationship-close|net-maximize|ce-endpoint/);
+  assert.match(markup, /class="connection-explorer-body is-maximized"/);
+  // The bar comes first in the section: every person and line of the graph is a tab stop, so a bar after it would be unreachable in practice.
+  assert.ok(markup.indexOf('ce-bar') > markup.indexOf('aria-label="Explored contact network"') && markup.indexOf('ce-bar') < markup.indexOf('<div class="net-graph'));
+  // The panel is the floating one, closed until a selection or the bar's icon opens it.
+  assert.match(markup, /<aside class="connection-explorer-inspection[^"]*is-floating" aria-label="Network inspection" hidden=""/);
+  assert.match(markup, /aria-label="Hide the side panel"/);
+  assert.doesNotMatch(markup, /has-panel/);
+});
+
+test('the bar of a paused search: the two portraits with their counts, the still clock, Continue and Start a new search, then the panel icon, Leave full screen and Close', () => {
+  const session = build(people => [accepted(people, 0, 2), { from: people[1].id, to: people[3].id, status: 'unresolved', claim: 'maybe',
+    assessment: { pair: [people[1].id, people[3].id], verdict: 'unresolved', evidence: '', uncertainty: 'Unclear.', provenance } }], true);
+  const bar = barOf(inFullscreen(() => render(session)));
+  // The footer's counts, here with the person's identity ahead of the sentence (the hover text and the accessible name).
+  assert.match(bar, /class="ce-side is-a" role="img" tabindex="0" aria-label="Alpha · 1500–1560 · Scholar — 1 person closer to Alpha than to Beta, through accepted contacts\. The two endpoints are not counted\."/);
+  assert.match(bar, /class="ce-side is-b" role="img" tabindex="0" aria-label="Beta · 1700–1760 · Scholar — 0 people closer to Beta than to Alpha/);
+  assert.match(bar, /class="ce-clock is-compact"/); assert.match(bar, /role="timer"[^>]*aria-label="0 minutes 12 seconds explored"/);
+  assert.doesNotMatch(bar, /ce-working is-working|ce-timer is-running/);
+  // The search stopped on its own limit, so the first button continues it.
+  assert.match(bar, /aria-label="Continue searching"/); assert.match(bar, /aria-label="Start a new search"/);
+  assert.doesNotMatch(bar, /Stop search|aria-label="Reveal"|ce-degrees|ce-bar-warning/);
+  const labels = [...bar.matchAll(/<button[^>]*aria-label="([^"]+)"/g)].map(match => match[1]);
+  assert.deepEqual(labels, ['Continue searching', 'Start a new search', 'People and contacts', 'Leave full screen', 'Close contact exploration']);
+  assert.match(bar, /aria-label="People and contacts" aria-pressed="false"/);
+  // The progress messages are not displayed: the phase is only in the hidden live region (and the clock's hover text, which is not rendered until hovered).
+  assert.equal(bar.match(/Search budget reached/g)?.length, 1);
+  assert.match(bar, /<span class="sr-only" role="status" aria-live="polite">Search budget reached<\/span>/);
+});
+
+test('the bar of a running search shows the working sign and Stop; a failed save adds a warning icon', () => {
+  const session = build(() => [], true);
+  const running = barOf(inFullscreen(() => render(session, { busy: true })));
+  assert.match(running, /class="ce-working is-working"/); assert.match(running, /ce-timer is-running/);
+  assert.match(running, /aria-label="Stop search"/);
+  assert.doesNotMatch(running, /Continue searching|Resume search|Start a new search|aria-label="Reveal"/);
+  assert.doesNotMatch(running, /ce-bar-warning/);
+  const warned = barOf(inFullscreen(() => render({ ...session, saveIssue: 'trimmed' }, { busy: true })));
+  assert.match(warned, /class="ce-bar-warning" role="img" tabindex="0" aria-label="This search is larger than a saved copy can hold/);
+  // A search that stopped for another reason than a limit is resumed rather than continued.
+  const stopped = barOf(inFullscreen(() => render({ ...session, diagnostics: { ...session.diagnostics, stopReason: undefined } })));
+  assert.match(stopped, /aria-label="Resume search"/);
+});
+
+test('the bar of a found or solved connection shows the degrees and Reveal in place of the search buttons, and the centred cards stay', () => {
+  const session = build(people => [accepted(people, 0, 2), accepted(people, 2, 1)], true);
+  const chain = [session.people[0].id, session.people[2].id, session.people[1].id];
+  const foundMarkup = inFullscreen(() => render(session, { success: { degrees: 2 }, onReveal: () => {} }));
+  const found = barOf(foundMarkup);
+  assert.match(found, /class="ce-degrees" aria-label="2 degrees of separation"><b>2<\/b> degrees/);
+  assert.match(found, /aria-label="Reveal"/); assert.doesNotMatch(found, /Stop search|Continue searching|Resume search|Start a new search/);
+  assert.match(foundMarkup, /net-success-wrap/);
+  const solved = barOf(inFullscreen(() => render(session, { solved: { degrees: 1 }, chain, onReveal: () => {} })));
+  assert.match(solved, /class="ce-degrees" aria-label="1 degree of separation"><b>1<\/b> degree/);
+  assert.match(solved, /aria-label="Reveal"/); assert.doesNotMatch(solved, /Stop search|Continue searching|Resume search|Start a new search/);
+  // Reveal sits with the phase actions, before the divider that sets the panel icon and the way out apart.
+  assert.ok(solved.indexOf('aria-label="Reveal"') < solved.indexOf('aria-label="People and contacts"'));
+});
+
+test('the bar exists before the first session: only Leave full screen and Close, so a remembered full screen can always be left', () => {
+  const markup = inFullscreen(() => renderToStaticMarkup(<ConnectionExplorer session={null} busy onStop={() => {}} onContinue={() => {}} onFresh={() => {}} onClose={() => {}} />));
+  const bar = barOf(markup);
+  assert.ok(bar.length > 0);
+  assert.match(bar, /ce-working is-working/);
+  assert.deepEqual([...bar.matchAll(/<button[^>]*aria-label="([^"]+)"/g)].map(match => match[1]), ['Leave full screen', 'Close contact exploration']);
+  assert.doesNotMatch(bar, /ce-side|ce-degrees|People and contacts/);
+  assert.match(markup, /Preparing the contact network/);
 });
 
 test('the AI-supported legend chip is a switch like the others; a solved connection shows it neutral, with a lime chip for the chain', () => {

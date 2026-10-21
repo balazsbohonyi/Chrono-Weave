@@ -33,6 +33,8 @@ interface SidebarProps {
     onToggleCollapse: () => void;
     selectedCategories: Set<FigureCategory>;
     isLegendOpen: boolean;
+    // A connection plays on the stage, which has the whole height: the header and the filters have stepped away, so the sidebar reaches the top.
+    fullHeight?: boolean;
     isGlobalView?: boolean;
     connection?: SidebarConnection;
 }
@@ -59,6 +61,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     onToggleCollapse,
     selectedCategories,
     isLegendOpen,
+    fullHeight = false,
     isGlobalView = false,
     connection
 }) => {
@@ -207,8 +210,8 @@ const Sidebar: React.FC<SidebarProps> = ({
     const transformClass = (hasContent && !isCollapsed) ? 'translate-x-0' : 'translate-x-full';
 
     // Dynamic Top Offset: Align sidebar top with the bottom of the filters bar
-    const topClass = isLegendOpen ? 'top-[114px]' : 'top-[52px]';
-    const heightClass = isLegendOpen ? 'h-[calc(100vh-114px)]' : 'h-[calc(100vh-52px)]';
+    const topClass = fullHeight ? 'top-0' : isLegendOpen ? 'top-[114px]' : 'top-[52px]';
+    const heightClass = fullHeight ? 'h-screen' : isLegendOpen ? 'h-[calc(100vh-114px)]' : 'h-[calc(100vh-52px)]';
 
     const tabClass = (selected: boolean) => `px-3 py-1.5 text-xs font-bold rounded-md transition-all flex items-center gap-2 ${selected ? 'bg-tab-selected text-content-primary shadow-sm' : 'text-content-muted hover:text-content-body bg-transparent'}`;
     const badgeClass = (selected: boolean) => `inline-flex items-center justify-center min-w-[16px] h-[16px] px-1 rounded-full text-[10px] leading-none ${selected ? 'bg-tab-badge text-tab-badge-text' : 'bg-surface-placeholder text-content-secondary'}`;

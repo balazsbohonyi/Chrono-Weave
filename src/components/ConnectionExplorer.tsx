@@ -14,11 +14,16 @@ import NetworkInspector from './connectionNetwork/NetworkInspector';
 import { pushStep, type DetailMemory, type Step } from './connectionNetwork/selectionHistory';
 import NetworkLegend from './connectionNetwork/NetworkLegend';
 import NetworkPortrait from './connectionNetwork/NetworkPortrait';
+import ExplorerClock from './connectionNetwork/ExplorerClock';
+import SideCount from './connectionNetwork/SideCount';
+import CompactBar, { type BarSide } from './connectionNetwork/CompactBar';
+import { barPhase, phaseText } from './connectionNetwork/barPhase';
+import { escapeStep } from './connectionNetwork/escapeLadder';
 import { createPortal } from 'react-dom';
 import LayoutInfoDialog from './LayoutInfo';
 import Tooltip from './Tooltip';
 import { SixDegreesInfoButton } from './SixDegreesInfo';
-import { foldBadgeReach, NARROW_QUERY, nodeRadius, REDUCED_MOTION_QUERY } from './connectionNetwork/metrics';
+import { FLOATING_PANEL_INSET, foldBadgeReach, NARROW_QUERY, nodeRadius, REDUCED_MOTION_QUERY } from './connectionNetwork/metrics';
 import '../styles/connectionExplorer.css';
 
 interface Props {
@@ -42,33 +47,6 @@ const SAVE_ISSUE_TEXT = {
 };
 const midpoint = (person: { birthYear: number; deathYear: number }) => (person.birthYear + person.deathYear) / 2;
 const NO_REVEAL = () => {};
-
-// The explored time ticks every second while a search runs; it is a component of its own so the tick re-renders only the clock,
-// not the graph and the panel.
-const ExplorerClock: React.FC<{ busy: boolean; elapsedMs: number }> = ({ busy, elapsedMs }) => {
-  const [elapsed, setElapsed] = useState(elapsedMs);
-  useEffect(() => {
-    setElapsed(elapsedMs);
-    if (!busy) return;
-    const start = Date.now();
-    const timer = setInterval(() => setElapsed(elapsedMs + Date.now() - start), 1000);
-    return () => clearInterval(timer);
-  }, [busy, elapsedMs]);
-  const minutes = Math.floor(elapsed / 60000), seconds = Math.floor(elapsed / 1000) % 60;
-  return <div className="ce-clock">
-    <span className={`ce-working ${busy ? 'is-working' : ''}`} aria-hidden="true">
-      <svg className="ce-working-glass" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
-        <circle cx="10.5" cy="10.5" r="5.8" /><path d="M15 15l5.5 5.5" />
-      </svg>
-    </span>
-    <div className={`ce-timer ${busy ? 'is-running' : ''}`} role="timer" aria-label={`${minutes} minutes ${seconds} seconds explored`}>
-      {/* Every character has a cell of its own width, so the digits changing never move the clock. */}
-      <span className="ce-timer-value" aria-hidden="true">{`${minutes}:${String(seconds).padStart(2, '0')}`.split('').map((character, index) =>
-        <span key={index} className={character === ':' ? 'ce-colon' : 'ce-digit'}>{character}</span>)}</span>
-      <span className="ce-timer-caption" aria-hidden="true">explored</span>
-    </div>
-  </div>;
-};
 
 // The card over the graph that says why a search stopped: a dialog-style notice with the way on (resume) and a way to put it aside.
 export const SearchFailureNotice: React.FC<{ message: string; onResume: () => void; onDismiss: () => void }> = ({ message, onResume, onDismiss }) =>
@@ -106,12 +84,16 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
   const [reveal, setReveal] = useState<RevealRequest | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [query, setQuery] = useState('');
-  // The graph takes the whole body and the inspection panel steps aside. Narrow screens already give the graph all the room.
+  // Maximized is real full screen: the graph fills the viewport, the header and footer become a floating bar and the inspection panel floats over
+  // the graph, shown while `panelOpen`. Narrow screens already give the graph all the room (the panel is a bottom sheet there).
   // The choice is remembered, not what shows: a narrow screen never maximizes, but must not forget the choice made on a wide one.
   const [maximizedChoice, setMaximized] = useState(() => readNetworkViewPrefs().maximized);
   useEffect(() => saveNetworkViewPrefs({ maximized: maximizedChoice }), [maximizedChoice]);
   const maximized = maximizedChoice && !narrow;
   const hasSelection = !!selection.person || !!selection.edge;
+  // Whether the floating panel is shown in full screen. Selecting opens it, Esc, its × and a click on empty graph space close it; hiding it
+  // leaves the selection as it is (the highlight stays), and the bar's icon brings it back, on the lists when nothing is selected.
+  const [panelOpen, setPanelOpen] = useState(false);
   // The explanation of the current layout, a dialog of its own above the explorer (which is inert meanwhile, like under the Six Degrees one).
   const [layoutInfoOpen, setLayoutInfoOpen] = useState(false);
   const openLayoutInfo = useCallback(() => setLayoutInfoOpen(true), []);
@@ -126,18 +108,22 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
     setExpanded(previous => previous.size ? new Set() : previous);
     if (!next.person && !next.edge) setSheetOpen(false);
   }, []);
-  const select = useCallback((next: NetworkSelection) => { setHistory(previous => previous.length ? [] : previous); setRestored(null); apply(next); }, [apply]);
+  const select = useCallback((next: NetworkSelection) => {
+    setHistory(previous => previous.length ? [] : previous); setRestored(null); apply(next);
+    setPanelOpen(!!next.person || !!next.edge);
+  }, [apply]);
   // From the inspector: also bring the thing into view when it is off-screen, and remember where it was opened from.
   const selectFromPanel = useCallback((next: NetworkSelection, detail?: DetailMemory) => {
     if (selection.person || selection.edge) setHistory(previous => pushStep(previous, { selection, detail }));
     setRestored(null);
     apply(next);
+    setPanelOpen(true);
     setReveal(previous => ({ n: (previous?.n ?? 0) + 1, ...next }));
   }, [apply, selection]);
 
   // A different exploration starts clean; the same one keeps its selection, filters and pins across batches.
   const resetKey = session?.key ?? '';
-  useEffect(() => { setSelection(NO_SELECTION); setExpanded(new Set()); setPinned(new Set()); setReveal(null); setSheetOpen(false); setQuery(''); setHistory([]); setRestored(null); setShowChain(true); }, [resetKey]);
+  useEffect(() => { setSelection(NO_SELECTION); setExpanded(new Set()); setPinned(new Set()); setReveal(null); setSheetOpen(false); setQuery(''); setHistory([]); setRestored(null); setShowChain(true); setPanelOpen(false); }, [resetKey]);
 
   const view = useMemo(() => session ? buildNetworkView(session, { filters, showAccepted, showChain, selection, expanded, pinned, highlightChain: !!success && showChain, chain: chain ?? undefined }) : null,
     [session, filters, showAccepted, showChain, selection, expanded, pinned, success, chain]);
@@ -186,14 +172,42 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
     setRestored(known => ({ n: (known?.n ?? 0) + 1, person: previous.selection.person, detail: previous.detail }));
     setReveal(known => ({ n: (known?.n ?? 0) + 1, ...previous.selection }));
   }, [history, narrow]);
-  // Esc peels back one layer at a time: a contact -> its person -> the lists, a search -> clear, a maximized graph -> restore, otherwise close.
+  // Hiding the floating panel keeps its selection. Focus inside it moves to the dialog first, so it is not dropped when the panel goes.
+  const hidePanel = useCallback(() => {
+    if (document.activeElement instanceof HTMLElement && document.activeElement.closest('.connection-explorer-inspection')) dialog.current?.focus({ preventScroll: true });
+    setPanelOpen(false);
+  }, []);
+  const togglePanel = useCallback(() => setPanelOpen(on => !on), []);
+  // Esc peels back one layer at a time (see `escapeStep`): in full screen the panel, then the full screen; otherwise a contact -> its person -> the lists,
+  // a search -> clear, otherwise close.
   const escape = useRef<() => void>(() => {});
   escape.current = () => {
-    if (hasSelection) back(); else if (sheetOpen) dismissSheet(); else if (query) setQuery(''); else if (maximized) setMaximized(false); else onClose();
+    switch (escapeStep({ maximized, panelOpen, hasSelection, sheetOpen, hasQuery: !!query })) {
+      case 'hide-panel': hidePanel(); break;
+      case 'restore': setMaximized(false); break;
+      case 'back': back(); break;
+      case 'dismiss-sheet': dismissSheet(); break;
+      case 'clear-query': setQuery(''); break;
+      case 'close': onClose();
+    }
   };
   const toggleMaximized = useCallback(() => setMaximized(on => !on), []);
+  const restore = useCallback(() => setMaximized(false), []);
+  // Entering full screen carries a selection over as an open panel, so its detail stays on screen. The control that was pressed goes away
+  // with the change (the bare maximize icon, the bar's Leave full screen): focus then moves to the dialog instead of being dropped on the page.
+  const hasSelectionNow = useRef(hasSelection);
+  hasSelectionNow.current = hasSelection;
+  const wasMaximized = useRef(maximized);
+  useEffect(() => {
+    if (maximized) setPanelOpen(hasSelectionNow.current);
+    if (wasMaximized.current !== maximized && (!document.activeElement || document.activeElement === document.body)) dialog.current?.focus({ preventScroll: true });
+    wasMaximized.current = maximized;
+  }, [maximized]);
   const onEscape = useCallback(() => escape.current(), []);
-  useModalFocus(dialog, true, onEscape);
+  // Opening straight into a remembered full screen, focus starts on the dialog itself: its first control is the bar's first portrait or clock, and
+  // focus there would open its tooltip before anyone pointed at it. (Kept for the life of the overlay: the hook must not restart when full screen is toggled.)
+  const initialFocus = useRef<'container' | 'first-control'>(maximized ? 'container' : 'first-control').current;
+  useModalFocus(dialog, true, onEscape, undefined, initialFocus);
 
   // A trackpad pinch arrives as Ctrl+wheel: wherever it lands on the overlay it must not zoom the whole page.
   useEffect(() => {
@@ -214,6 +228,7 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
   const legend = useMemo(() => view && <NetworkLegend filters={filters} counts={view.counts} onToggle={toggleFilter} narrow={narrow} showAccepted={showAccepted} onToggleAccepted={toggleAccepted} solved={!!solved && showChain}
     chain={!!(success || solved) && !!view.chain} showChain={showChain} onToggleChain={toggleChain} />,
     [view, filters, toggleFilter, narrow, showAccepted, toggleAccepted, solved, success, showChain, toggleChain]);
+  const statusText = phaseText(busy, session?.phase, phase);
   const stopReason = session?.diagnostics.stopReason;
   const stable = stopReason === 'work-budget' || stopReason === 'time-budget';
   // A search that stopped on its own limit invites the person to carry on, instead of leaving them to find the footer button.
@@ -241,28 +256,20 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
     </div>;
   };
 
-  // How many people each endpoint has gathered (the endpoints themselves not counted), with the endpoint's portrait, in the footer.
-  const sideCount = (index: 0 | 1) => {
+  // How many people each endpoint has gathered (the endpoints themselves not counted), with the endpoint's portrait: in the footer, or in the full-screen bar.
+  const sides: BarSide[] = [];
+  if (view) for (const index of [0, 1] as const) {
     const person = endpointPerson(index);
-    if (!person || !view) return null;
-    const count = index === 0 ? view.sides.a : view.sides.b;
-    const other = endpointNames[index === 0 ? 1 : 0];
-    const text = `${count} ${count === 1 ? 'person' : 'people'} closer to ${person.name} than to ${other}, through accepted contacts. The two endpoints are not counted.`;
-    return <Tooltip key={index} text={text} multiline>
-      <span className={`ce-side is-${index === 0 ? 'a' : 'b'}`} role="img" tabIndex={0} aria-label={text}>
-        <span className="ce-side-portrait"><NetworkPortrait person={person} size={32} url={portraits.get(person.id)} /><b className="net-end-badge" aria-hidden="true">{index === 0 ? 'A' : 'B'}</b></span>
-        <strong className="ce-side-count" aria-hidden="true">{count}</strong>
-      </span>
-    </Tooltip>;
-  };
+    if (person) sides.push({ index, person, count: index === 0 ? view.sides.a : view.sides.b, otherName: endpointNames[index === 0 ? 1 : 0], url: portraits.get(person.id) });
+  }
 
   return <>
   <div ref={dialog} role="dialog" aria-modal="true" aria-label={session ? `Contact exploration: ${endpointNames[0]} to ${endpointNames[1]}` : 'Opening contact exploration'}
-    className="connection-explorer" tabIndex={-1} inert={suspended || layoutInfoOpen}>
-    <button type="button" className="close-button relationship-close" aria-label="Close contact exploration" onClick={onClose}>
+    className={maximized ? 'connection-explorer is-fullscreen' : 'connection-explorer'} tabIndex={-1} inert={suspended || layoutInfoOpen}>
+    {!maximized && <button type="button" className="close-button relationship-close" aria-label="Close contact exploration" onClick={onClose}>
       <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 6l12 12M6 18L18 6" /></svg>
-    </button>
-    <header className="connection-explorer-header">
+    </button>}
+    {!maximized && <header className="connection-explorer-header">
       <div className="connection-explorer-kicker-row">
         <p className="connection-explorer-kicker">Six Degrees of Separation · Contact exploration</p>
         {onOpenInfo && <SixDegreesInfoButton onOpen={onOpenInfo} plain />}
@@ -272,7 +279,7 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
           {solved
             ? <button type="button" className="net-reveal net-reveal-header" onClick={onReveal}>
               <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l12-7.5z" /></svg>Reveal</button>
-            : <strong>{busy ? session?.phase ?? phase ?? 'Identifying endpoint' : session?.phase ?? 'Paused'}</strong>}
+            : <strong>{statusText}</strong>}
           {!busy && !success && !solved && <span>No background search</span>}
           {session?.saveIssue && <Tooltip text={SAVE_ISSUE_TEXT[session.saveIssue]} multiline>
             <span className="ce-save-warning" role="status" tabIndex={0} aria-label={SAVE_ISSUE_TEXT[session.saveIssue]}>
@@ -285,22 +292,27 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
           : <p className="ce-opening">Opening contact exploration</p>}
         <ExplorerClock busy={busy} elapsedMs={session?.elapsedMs ?? 0} />
       </div>
-    </header>
-    <div className={`connection-explorer-body ${maximized ? 'is-maximized' : ''}`}>
+    </header>}
+    <div className={['connection-explorer-body', maximized && 'is-maximized', maximized && panelOpen && 'has-panel'].filter(Boolean).join(' ')}>
       <section className="connection-explorer-network" aria-label="Explored contact network">
+        {/* Before the graph, whose people and lines are all tab stops: the bar is the first thing Tab reaches, and where the dialog's focus starts. */}
+        {maximized && <CompactBar phase={barPhase({ hasSession: !!session, busy, success: !!success, solved: !!solved })} busy={busy} elapsedMs={session?.elapsedMs ?? 0} statusText={statusText}
+          sides={sides} degrees={solved?.degrees ?? success?.degrees ?? null} stable={stable} saveWarning={session?.saveIssue ? SAVE_ISSUE_TEXT[session.saveIssue] : undefined}
+          panelOpen={panelOpen} onStop={onStop} onContinue={onContinue} onFresh={onFresh} onReveal={onReveal} onTogglePanel={togglePanel} onRestore={restore} onClose={onClose} />}
         {view
           ? <NetworkGraph view={view} endpointNames={endpointNames} nameOf={name} layout={layout} kick={kick} pinned={pinned} mode={mode} onModeChange={setMode}
             size={size} onSize={resize} selection={selection} onSelect={select} portraits={portraits} narrow={narrow} reducedMotion={reducedMotion}
             success={success} solved={solved} showChain={showChain} onReveal={onReveal} resume={resume} reveal={reveal} onPinsChange={syncPins} onToggleFold={toggleFold} legend={legend}
-            maximized={maximized} onToggleMaximize={narrow ? undefined : toggleMaximized} onOpenLayoutInfo={openLayoutInfo} />
+            maximized={maximized} onToggleMaximize={narrow ? undefined : toggleMaximized} inset={maximized && panelOpen ? FLOATING_PANEL_INSET : 0} onOpenLayoutInfo={openLayoutInfo} />
           : <div className="net-graph"><p className="net-empty">Preparing the contact network…</p></div>}
         {failure && <SearchFailureNotice message={failure} onResume={onContinue} onDismiss={() => setDismissedError(failureKey)} />}
       </section>
       <NetworkInspector session={session} view={view} selection={selection} portraits={portraits} pinned={pinned} narrow={narrow}
-        open={sheetOpen || hasSelection} onSelect={selectFromPanel} onUnpin={unpin} onDismiss={dismissSheet} onBack={back} history={history} restored={restored} query={query} onQueryChange={setQuery} />
+        open={maximized ? panelOpen : sheetOpen || hasSelection} floating={maximized} onHide={hidePanel}
+        onSelect={selectFromPanel} onUnpin={unpin} onDismiss={dismissSheet} onBack={back} history={history} restored={restored} query={query} onQueryChange={setQuery} />
     </div>
-    <footer className="connection-explorer-footer">
-      <div className="ce-footer-info" role="group" aria-label="People found on each side">{view && session && <>{sideCount(0)}{sideCount(1)}</>}</div>
+    {!maximized && <footer className="connection-explorer-footer">
+      <div className="ce-footer-info" role="group" aria-label="People found on each side">{view && session && sides.map(side => <SideCount key={side.index} {...side} />)}</div>
       <p>{!narrow && 'Drag or two-finger scroll to pan · wheel or pinch to zoom · drag people to pin · '}Only accepted contacts can form a chain. Up to 20 intermediate people.</p>
       <div>
         {narrow && <button type="button" onClick={() => setSheetOpen(open => !open)} aria-expanded={sheetOpen}>Overview</button>}
@@ -308,7 +320,7 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
           : session && <><button type="button" className="connection-explorer-primary" onClick={onContinue}>{stable ? 'Continue searching' : 'Resume search'}</button><button type="button" onClick={onFresh}>Start a new search</button></>}
         <button type="button" onClick={onClose}>Back to canvas</button>
       </div>
-    </footer>
+    </footer>}
   </div>
   {layoutInfoOpen && createPortal(<LayoutInfoDialog mode={mode} onClose={closeLayoutInfo} />, document.body)}
   </>;

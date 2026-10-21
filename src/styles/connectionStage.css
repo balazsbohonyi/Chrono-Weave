@@ -1,5 +1,5 @@
 /* The connection stage: the chain's people on a snaking path over the blurred canvas, with a glowing thread. */
-.connection-stage { position: absolute; left: 0; bottom: 0; z-index: 30; overflow: hidden; touch-action: none; user-select: none; cursor: grab;
+.connection-stage { position: absolute; left: 0; top: 0; bottom: 0; z-index: 30; overflow: hidden; touch-action: none; user-select: none; cursor: grab;
   background: rgb(var(--color-surface) / .58); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); animation: stage-in 650ms ease-out both; }
 .connection-stage[data-sidebar='open'] { transition: right 300ms cubic-bezier(.4, 0, .2, 1); }
 /* Same curves as the sidebar (see #canvas-sidebar in globals.css). Closing runs faster (480ms vs 650ms), so the stage's edge stays ahead of the leaving sidebar and the canvas never shows between them. */
@@ -52,7 +52,10 @@
 .stage-degrees.is-final { background: rgb(var(--color-connection)); color: rgb(var(--color-connection-contrast)); transform: scale(1.08); }
 .stage-actions { display: flex; align-items: center; gap: 10px; flex: none; pointer-events: auto; }
 
-.stage-header .close-button:focus-visible { outline: 3px solid rgb(var(--color-accent-focus)); outline-offset: 3px; }
+.stage-header .close-button:focus-visible, .stage-header .stage-icon-button:focus-visible { outline: 3px solid rgb(var(--color-accent-focus)); outline-offset: 3px; }
+/* Replay and Open exploration are bare icons, with no chrome (like the icons of the sidebar's connection cards); the close button keeps its round one. */
+.stage-icon-button { display: inline-grid; place-items: center; flex: none; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 8px; background: none; color: rgb(var(--color-content-secondary)); cursor: pointer; transition: color 150ms; }
+.stage-icon-button:hover { color: rgb(var(--color-content-primary)); }
 
 @media (prefers-reduced-motion: reduce) {
   .connection-stage { animation: none; }

@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import ConnectionPanel, { ConnectionHeader, type ConnectionPanelProps } from '../src/components/ConnectionPanel';
@@ -102,6 +103,25 @@ test('a recent connection plays on the card and reopens its exploration from a b
   assert.doesNotMatch(entry, /<button[^>]*>(?:(?!<\/button>).)*<button/);
   // Without a way to open it, the icon is not drawn.
   assert.doesNotMatch(panel({ recent }), /connection-open-exploration/);
+});
+
+test('the icons of a recent connection show only on hover or keyboard focus, keep their space, and stay on touch screens; a paused exploration keeps its icon', () => {
+  const recent = [{ key: 'one', figures: [a, m, b], evidence: ['x', 'y'], createdAt: 2 }];
+  const markup = panel({ recent, onOpenExploration: () => {}, onDelete: () => {} });
+  const entry = markup.slice(markup.indexOf('Recent connections'));
+  assert.match(entry, /<div class="connection-recent-entry has-hover-actions\s/);
+  assert.equal(entry.match(/class="connection-open-exploration"/g)?.length, 2);
+  const css = readFileSync('src/styles/globals.css', 'utf8');
+  const hover = css.slice(css.indexOf('@media (hover: hover) {\n  .connection-recent-entry.has-hover-actions'));
+  // Hidden by opacity (so their space stays and nothing shifts) and out of the way of clicks, only where there is a hover.
+  assert.match(hover, /\.has-hover-actions \.connection-open-exploration \{ opacity: 0; pointer-events: none; \}/);
+  assert.match(hover, /\.has-hover-actions:hover \.connection-open-exploration \{ opacity: 1; pointer-events: auto; \}/);
+  assert.match(hover, /\.has-hover-actions:has\(:focus-visible\) \.connection-open-exploration \{ opacity: 1; pointer-events: auto; \}/);
+  assert.doesNotMatch(css.replace(/@media \(hover: hover\) \{[^@]*?\n\}\n/, ''), /has-hover-actions/);
+  // A paused exploration's card is not marked: its icon stays visible, as the whole card opens it too.
+  const session = { version: 2, key: 'k', canvasId: 'c', endpoints: ['a', 'b'], candidates: [], rounds: [], attempts: {}, segment: 1, status: 'paused', phase: 'Paused', elapsedMs: 0, updatedAt: 1,
+    diagnostics: { tasks: 0, people: 0, pairs: 0 }, people: [a, b].map(f => ({ ...f, description: '', aliases: [] })) } as unknown as NonNullable<ConnectionPanelProps['checkpoints']>[number];
+  assert.doesNotMatch(panel({ connection: null, checkpoints: [session], onOpenCheckpoint: () => {} }), /has-hover-actions/);
 });
 
 test('a paused exploration shows the same icon instead of the words Open exploration, and the whole card still opens it', () => {
