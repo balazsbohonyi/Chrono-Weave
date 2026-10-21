@@ -9,7 +9,8 @@ import {
 import { formatYear } from '../../utils/formatters';
 import { createWheelClassifier } from '../../utils/wheelGesture';
 import ToolButton from './ToolButton';
-import { fitCamera as fitPoints, type Camera, type CameraPoint } from './camera';
+import { fitCamera as fitPoints, isFarZoom, previewTransform, rectHasPoint, rectHasRect, rectHasSegment, viewRect, type Camera, type CameraPoint, type Rect } from './camera';
+import { GRAPH_PERF_CULLING, GRAPH_PERF_HIDE_PORTRAITS, GRAPH_PERF_LEVEL_OF_DETAIL, GRAPH_PERF_ZOOM_PREVIEW } from './performance';
 import LayoutMenu from './LayoutMenu';
 import { layoutInfoLabel } from '../LayoutInfo';
 import { labelLimit, nodeRadius } from './metrics';
@@ -177,10 +178,23 @@ const setEnds = (paths: Iterable<SVGPathElement>, a: Point, b: Point, previous =
   if (d !== previous) for (const path of paths) path.setAttribute('d', d);
   return d;
 };
-// A person (or line) the layout has not placed yet is kept out of sight until it has, rather than drawn at the origin. What was set
+// A person (or line) the layout has not placed yet is kept out of sight until it has, rather than drawn at the origin; one outside the
+// view is kept out of sight too (`display: none` takes it out of style, layout and paint, which `visibility` would not). What was set
 // is remembered, so a frame does not read every element's style.
 interface Drawn { el: SVGGElement; key: string; visible: boolean }
-const show = (drawn: Drawn, visible: boolean) => { if (drawn.visible !== visible) { drawn.el.style.visibility = visible ? '' : 'hidden'; drawn.visible = visible; } };
+const show = (drawn: Drawn, visible: boolean) => { if (drawn.visible !== visible) { drawn.el.style.display = visible ? '' : 'none'; drawn.visible = visible; } };
+// Room kept around the view, in screen pixels, for what reaches past a person's centre (name, halo) so nothing pops in at the edge.
+const CULL_MARGIN = 120;
+// Below this many drawn people, zooming out keeps names and portraits (see `isFarZoom`).
+const LOD_MIN_PEOPLE = 60;
+// How long without a pointer or wheel event before the drawing's place on the page is read again (see `local`).
+const ORIGIN_KEPT_MS = 250;
+// A zoom gesture is previewed with a CSS transform and committed to the drawing after this long without an event, and at least this often while it goes on.
+const PREVIEW_SETTLE_MS = 120, PREVIEW_COMMIT_MAX_MS = 350;
+// How much more than the view (as a share of the bigger side of the drawing) is drawn when a preview zooms out past what was drawn.
+const PREVIEW_OVERSCAN = 0.5;
+// The year bands and lines reach this many drawing heights (and widths, for the lines) beyond the view, so a zoom preview that shrinks the drawing finds them there.
+const AXIS_PREVIEW_REACH = 3;
 // From this many drawn people and lines, dimming is immediate instead of fading (see the stylesheet).
 const LARGE_DRAWING = 250;
 
@@ -210,8 +224,10 @@ const NetworkGraph: React.FC<Props> = ({
   // The layer over the graph the layout menu is drawn in (see LayoutMenu).
   const [menuHost, setMenuHost] = useState<HTMLDivElement | null>(null);
   const [camera, setCamera] = useState<Camera>({ x: 0, y: 0, k: 1 });
+  // `camera` is what the drawing shows; `cameraRef` is where the camera is (ahead of it while a zoom is being previewed, see `previewTo`).
   const cameraRef = useRef(camera);
-  cameraRef.current = camera;
+  const shown = useRef(camera);
+  shown.current = camera;
   const userMoved = useRef(false);
   // Following the graph normally keeps a readable zoom; "Fit network" asks for everything at once.
   const followAll = useRef(false);
@@ -229,18 +245,26 @@ const NetworkGraph: React.FC<Props> = ({
 
   const apply = useCallback((next: Camera) => { cameraRef.current = next; setCamera(next); }, []);
 
-  const paint = useCallback(() => {
+  // Paints positions, and keeps people and lines outside the view out of the page: they are skipped entirely (no attribute writes) until
+  // they come back, when their remembered `key` no longer matches and they are painted again.
+  // `overscan` (screen pixels, on top of CULL_MARGIN) draws more than the view, for a zoom preview that is about to show more; `painted` is the
+  // world rectangle that was last drawn, so a preview knows when it has outgrown it.
+  const painted = useRef<Rect | null>(null);
+  const paint = useCallback((overscan = 0) => {
+    const { width, height } = sizeRef.current;
+    const inView = GRAPH_PERF_CULLING && width > 0 && height > 0 ? viewRect(cameraRef.current, sizeRef.current, CULL_MARGIN + overscan) : null;
+    painted.current = inView;
     for (const [id, drawn] of nodeEls.current) {
       const at = layout.position(id);
-      show(drawn, !!at);
-      if (!at) continue;
+      show(drawn, !!at && (!inView || rectHasPoint(inView, at)));
+      if (!at || !drawn.visible) continue;
       const key = `translate(${at.x.toFixed(1)} ${at.y.toFixed(1)})`;
       if (key !== drawn.key) { drawn.el.setAttribute('transform', key); drawn.key = key; }
     }
     for (const drawn of edgeEls.current.values()) {
       const a = layout.position(drawn.from), b = layout.position(drawn.to);
-      show(drawn, !!a && !!b);
-      if (a && b) drawn.key = setEnds(drawn.paths, a, b, drawn.key);
+      show(drawn, !!a && !!b && (!inView || rectHasSegment(inView, a, b)));
+      if (a && b && drawn.visible) drawn.key = setEnds(drawn.paths, a, b, drawn.key);
     }
     for (const { anchor, el } of ringEls.current.values()) {
       const at = layout.position(anchor);
@@ -300,10 +324,13 @@ const NetworkGraph: React.FC<Props> = ({
     if (next && (Math.abs(next.x - was.x) > 0.25 || Math.abs(next.y - was.y) > 0.25 || Math.abs(next.k - was.k) > 0.0005)) apply(next);
   }); }, [layout, paint, fitCamera, apply]);
 
+  // Panning, zooming and resizing move what is in view without the layout moving anyone: culling follows them.
+  useLayoutEffect(() => { if (GRAPH_PERF_CULLING) paint(); }, [camera, size.width, size.height, paint]);
+
   // Measure the available area. Layout and drawing work in real screen pixels.
   useLayoutEffect(() => {
     const element = svg.current; if (!element) return;
-    const measure = () => { const box = element.getBoundingClientRect(); if (box.width > 0 && box.height > 0) onSize(Math.round(box.width), Math.round(box.height)); };
+    const measure = () => { origin.current = null; const box = (element.parentElement ?? element).getBoundingClientRect(); if (box.width > 0 && box.height > 0) onSize(Math.round(box.width), Math.round(box.height)); };
     measure();
     if (typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(measure);
@@ -331,15 +358,63 @@ const NetworkGraph: React.FC<Props> = ({
     return () => { litChain.current = null; };
   }, [chainKey]);
 
+  // Zoom gestures (wheel, pinch) move the camera without redrawing: the drawing is scaled as a picture by a CSS transform on the SVG, which costs
+  // neither layout nor a render, and the camera is committed (drawn for real, with the transform cleared) once the gesture pauses and at least
+  // every PREVIEW_COMMIT_MAX_MS while it goes on. Changing the scale of the content itself lays out every person and line again.
+  const settle = useRef<{ timer?: number; since: number }>({ since: 0 });
+  const commit = useCallback(() => { window.clearTimeout(settle.current.timer); settle.current.timer = undefined; setCamera(cameraRef.current); }, []);
+  const schedule = useCallback(() => {
+    const gesture = settle.current, now = performance.now();
+    if (gesture.timer === undefined) gesture.since = now;
+    window.clearTimeout(gesture.timer);
+    if (now - gesture.since >= PREVIEW_COMMIT_MAX_MS) commit(); else gesture.timer = window.setTimeout(commit, PREVIEW_SETTLE_MS);
+  }, [commit]);
+  const showPreview = useCallback(() => {
+    const element = svg.current; if (!element) return;
+    const { s, x, y } = previewTransform(shown.current, cameraRef.current);
+    element.style.transformOrigin = '0 0'; element.style.willChange = 'transform'; element.style.transform = `translate(${x}px, ${y}px) scale(${s})`;
+  }, []);
+  const previewTo = useCallback((next: Camera) => {
+    if (!GRAPH_PERF_ZOOM_PREVIEW) { apply(next); return; }
+    cameraRef.current = next;
+    showPreview();
+    // Zooming out shows more than was drawn: whoever was culled and now falls in the view is drawn (in the drawn camera's own coordinates, which the
+    // transform carries along), and the SVG lets its content show outside its own box (see the stylesheet), so the new edges are not left empty.
+    if (GRAPH_PERF_CULLING && painted.current && !rectHasRect(painted.current, viewRect(cameraRef.current, sizeRef.current, 0))) paint(Math.max(sizeRef.current.width, sizeRef.current.height) * PREVIEW_OVERSCAN);
+    schedule();
+  }, [apply, showPreview, schedule, paint]);
+  // A committed camera is drawn for real: the preview is over, unless the camera has moved on since the commit was asked for.
+  useLayoutEffect(() => {
+    const element = svg.current; if (!element) return;
+    element.style.transform = ''; element.style.willChange = '';
+    window.clearTimeout(settle.current.timer); settle.current.timer = undefined;
+    if (cameraRef.current !== camera) { showPreview(); schedule(); }
+  }, [camera, showPreview, schedule]);
+  useEffect(() => () => window.clearTimeout(settle.current.timer), []);
+
   const zoomBy = useCallback((factor: number, anchor?: Point) => {
     const { width, height } = sizeRef.current, c = cameraRef.current, at = anchor ?? { x: width / 2, y: height / 2 };
     const k = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, c.k * factor)), ratio = k / c.k;
     userMoved.current = true;
-    apply({ k, x: at.x - (at.x - c.x) * ratio, y: at.y - (at.y - c.y) * ratio });
-  }, [apply]);
+    const next = { k, x: at.x - (at.x - c.x) * ratio, y: at.y - (at.y - c.y) * ratio };
+    // A gesture has an anchor (the pointer); the buttons zoom around the middle in one step.
+    if (anchor) previewTo(next); else apply(next);
+  }, [apply, previewTo]);
 
+  // Where the drawing sits on the page (read from the stage around the SVG, which a zoom preview does not transform). Reading it forces a layout whenever the page changed since the last one, and a gesture changes the
+  // page every frame (the camera moves), so a pinch or a pan would lay out the whole drawing on each of its events: the reading is kept for as
+  // long as events keep coming, and taken again after a pause, a resize or a scroll.
+  const origin = useRef<{ left: number; top: number; at: number } | null>(null);
+  useEffect(() => {
+    const forget = () => { origin.current = null; };
+    window.addEventListener('resize', forget); window.addEventListener('scroll', forget, true);
+    return () => { window.removeEventListener('resize', forget); window.removeEventListener('scroll', forget, true); };
+  }, []);
   const local = (event: { clientX: number; clientY: number }): Point => {
-    const box = svg.current!.getBoundingClientRect();
+    const now = performance.now();
+    let box = origin.current;
+    if (!box || now - box.at > ORIGIN_KEPT_MS) { const rect = svg.current!.parentElement!.getBoundingClientRect(); box = { left: rect.left, top: rect.top, at: now }; origin.current = box; }
+    box.at = now;
     return { x: event.clientX - box.left, y: event.clientY - box.top };
   };
   const toWorld = (event: { clientX: number; clientY: number }): Point => {
@@ -450,8 +525,11 @@ const NetworkGraph: React.FC<Props> = ({
   const chainEdges = useMemo(() => coloredChain ? new Set(coloredChain.edgeIds) : null, [coloredChain]);
   const [bandA, bandB] = [0, 1].map(index => view.nodes.find(node => node.endpoint === index)?.person);
   const sx = (year: number) => camera.x + layout.xOf(year) * camera.k;
-  const ticksForAxis = mode === 'time'
-    ? axisTicks(domain[0], domain[1], layout.pixelsPerYear * camera.k, TICK_MIN_SPACING).filter(year => sx(year) > -40 && sx(year) < size.width + 40) : [];
+  const allTicks = mode === 'time' ? axisTicks(domain[0], domain[1], layout.pixelsPerYear * camera.k, TICK_MIN_SPACING) : [];
+  const ticksForAxis = allTicks.filter(year => sx(year) > -40 && sx(year) < size.width + 40);
+  // The lines (and bands) of the time axis are part of the picture a zoom preview scales, so they are drawn well past the view.
+  const axisReach = GRAPH_PERF_ZOOM_PREVIEW ? AXIS_PREVIEW_REACH : 0;
+  const axisLines = axisReach ? allTicks.filter(year => sx(year) > -size.width * axisReach && sx(year) < size.width * (1 + axisReach)) : ticksForAxis;
   const closest = view.closest;
   // With the lines off, only what the user is looking at or the lit chain (of a search that just succeeded, or a solved connection) keeps its line, so selecting a contact still shows it.
   const drawnEdges = useMemo(() => {
@@ -464,6 +542,9 @@ const NetworkGraph: React.FC<Props> = ({
   // The endpoints are drawn last, on top of everybody else, so a crowd never covers them.
   const drawnNodes = useMemo(() => [...view.nodes].sort((x, y) => Number(x.endpoint !== null) - Number(y.endpoint !== null)), [view.nodes]);
   const pinnedCount = pinned.size;
+  const farRef = useRef(false);
+  const far = GRAPH_PERF_LEVEL_OF_DETAIL && drawnNodes.length >= LOD_MIN_PEOPLE && isFarZoom(camera.k, farRef.current);
+  farRef.current = far;
   const clustered = mode === 'cluster', columnar = mode === 'columns', podded = mode === 'category', corridored = mode === 'corridor';
   // Choosing an arrangement also frames the whole picture, which is about to move; the timeline and the free layout keep the camera.
   const chooseLayout = (next: LayoutMode) => { onModeChange(next); if (next !== 'time' && next !== 'free') fit(); };
@@ -488,7 +569,7 @@ const NetworkGraph: React.FC<Props> = ({
   }, [drawnNodes, drawnEdges, rings, columns, corridor, closestVisible, mode, paint]);
 
   // With a solved connection's lines on, every other line steps back (see the stylesheet) so the lime chain stands out.
-  return <div className={['net-graph', success && 'is-success', solved && showChain && showLines && view.chain && 'is-solved', drawnNodes.length + drawnEdges.length >= LARGE_DRAWING && 'is-large'].filter(Boolean).join(' ')}>
+  return <div className={['net-graph', success && 'is-success', solved && showChain && showLines && view.chain && 'is-solved', drawnNodes.length + drawnEdges.length >= LARGE_DRAWING && 'is-large', far && 'is-far', far && GRAPH_PERF_HIDE_PORTRAITS && 'is-far-portraits'].filter(Boolean).join(' ')}>
     <div className="net-stage">
     <svg ref={svg} className="net-svg" role="group" aria-label="Live contact graph"
       onPointerDown={onBackgroundDown} onPointerMove={onBackgroundMove} onPointerUp={onBackgroundUp} onPointerCancel={onBackgroundUp}>
@@ -499,8 +580,8 @@ const NetworkGraph: React.FC<Props> = ({
       </defs>
       {mode === 'time' && <g className="net-axis" aria-hidden="true">
         {[bandA, bandB].map((person, index) => person && <rect key={index} className={index === 0 ? 'net-band-a' : 'net-band-b'}
-          x={sx(person.birthYear)} width={Math.max(2, (person.deathYear - person.birthYear) * layout.pixelsPerYear * camera.k)} y={0} height={size.height} />)}
-        {ticksForAxis.map(year => <line key={year} x1={sx(year)} x2={sx(year)} y1={0} y2={size.height} />)}
+          x={sx(person.birthYear)} width={Math.max(2, (person.deathYear - person.birthYear) * layout.pixelsPerYear * camera.k)} y={-size.height * axisReach} height={size.height * (1 + 2 * axisReach)} />)}
+        {axisLines.map(year => <line key={year} x1={sx(year)} x2={sx(year)} y1={-size.height * axisReach} y2={size.height * (1 + axisReach)} />)}
       </g>}
       <g className="net-content" transform={`translate(${camera.x} ${camera.y}) scale(${camera.k})`}>
         {clustered && <g className="net-orbits" aria-hidden="true">

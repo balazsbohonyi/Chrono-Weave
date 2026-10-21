@@ -35,6 +35,7 @@ Guardrails:
 - Legacy `chrono_path_` / `chrono_contact_` records are retired, never deleted, and never shown as new connections. Migration runs before Follow a Figure pruning.
 - Wikidata is never a `task()`: it moves no request counter, its failures never fail a search, it never re-keys ids and never modifies the canvas.
 - Portraits looked up through `portraitStore` stay there, never written back onto `ContactPerson` or `HistoricalFigure` (a canvas figure's own `imageUrl` is fine).
+- The explorer graph's performance measures (culling, level of detail, portraits at level of detail, zoom preview) are switched by the `GRAPH_PERF_*` constants in `src/components/connectionNetwork/performance.ts` and described in the guide's "Explorer graph" section; keep that section and the switches in step.
 - Virtualized rows have fixed heights: change `ROW_HEIGHT` / `DETAIL_ROW_HEIGHT` and `.net-vlist` together.
 
 ## Git commits

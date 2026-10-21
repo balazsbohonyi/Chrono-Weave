@@ -120,14 +120,18 @@
 .net-overlay-row > .canvas-view-toolbar { flex: none; }
 .net-overlay-row > .net-legend { margin-left: auto; min-width: 0; justify-content: flex-end; }
 .canvas-view-toolbar.net-view-toolbar { position: relative; left: auto; bottom: auto; z-index: auto; }
-.net-stage { position: relative; flex: 1; min-height: 0; }
-.net-svg { position: absolute; inset: 0; display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; user-select: none; }
+.net-stage { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+.net-svg { position: absolute; inset: 0; display: block; width: 100%; height: 100%; overflow: visible; touch-action: none; cursor: grab; user-select: none; }
 .net-svg:active { cursor: grabbing; }
 .net-node, .net-edge, .net-fold { cursor: pointer; outline: none; }
 .net-node:focus, .net-edge:focus, .net-fold:focus, .net-svg:focus { outline: none; }
 /* Dimming fades in a small network. In a large one it is immediate: an opacity transition on every person and line repaints the
    whole drawing each frame for its duration (SVG opacity is not composited), which made selecting someone stutter. */
 .net-graph:not(.is-large) .net-node, .net-graph:not(.is-large) .net-edge { transition: opacity .2s; }
+/* Zoomed far out in a big network (`isFarZoom`), people lose their name and pulse, which are unreadable at that size (and, when GRAPH_PERF_HIDE_PORTRAITS is on, their portrait or initials,
+   the bulk of the image decoding). The endpoints and whoever is selected or on the lit chain keep theirs. */
+.net-graph.is-far .net-node:not(.is-endpoint):not(.is-selected):not(.is-edge-end):not(.is-chain) :is(.net-name, .net-pulse) { display: none; }
+.net-graph.is-far-portraits .net-node:not(.is-endpoint):not(.is-selected):not(.is-edge-end):not(.is-chain) :is(image, .net-initials) { display: none; }
 
 /* Year strips: the same thin glass bars the main canvas uses, so the years stay readable over the graph. */
 .net-strip { position: absolute; left: 0; right: 0; height: 24px; overflow: hidden; z-index: 2; pointer-events: none; background: rgb(var(--color-timeline-axis) / .75); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); }

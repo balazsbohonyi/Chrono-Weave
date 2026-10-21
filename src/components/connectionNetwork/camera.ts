@@ -35,3 +35,40 @@ export function fitCamera(points: CameraPoint[], size: { width: number; height: 
   const k = Math.max(minZoom, Math.min(readableZoom, (width - padding) / Math.max(1, endRight - endLeft)));
   return { camera: { k, x: width / 2 - (endLeft + endRight) / 2 * k, y: height / 2 - (top + bottom) / 2 * k }, whole: false };
 }
+
+export interface Rect { left: number; top: number; right: number; bottom: number }
+
+// The part of the world the camera shows, grown by `margin` screen pixels on every side (the room names, halos and a line's thickness need).
+export function viewRect(camera: Camera, size: { width: number; height: number }, margin: number): Rect {
+  const { x, y, k } = camera, m = margin / k;
+  return { left: -x / k - m, top: -y / k - m, right: (size.width - x) / k + m, bottom: (size.height - y) / k + m };
+}
+
+export const rectHasRect = (outer: Rect, inner: Rect) => inner.left >= outer.left && inner.right <= outer.right && inner.top >= outer.top && inner.bottom <= outer.bottom;
+
+export const rectHasPoint = (rect: Rect, p: { x: number; y: number }) => p.x >= rect.left && p.x <= rect.right && p.y >= rect.top && p.y <= rect.bottom;
+
+// Whether a straight line touches the rectangle (Liang–Barsky). A line with both ends outside still shows when it crosses the view.
+export function rectHasSegment(rect: Rect, a: { x: number; y: number }, b: { x: number; y: number }): boolean {
+  let t0 = 0, t1 = 1;
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const clip = (p: number, q: number) => {
+    if (p === 0) return q >= 0;
+    const t = q / p;
+    if (p < 0) { if (t > t1) return false; if (t > t0) t0 = t; } else { if (t < t0) return false; if (t < t1) t1 = t; }
+    return true;
+  };
+  return clip(-dx, a.x - rect.left) && clip(dx, rect.right - a.x) && clip(-dy, a.y - rect.top) && clip(dy, rect.bottom - a.y);
+}
+
+// Level of detail: zoomed far out, people shrink to plain discs (no names, portraits or pulses; endpoints and whoever is selected keep theirs).
+// The two thresholds differ so a zoom hovering at the edge does not flip back and forth.
+export const FAR_ZOOM_IN = 0.5, FAR_ZOOM_OUT = 0.4;
+export const isFarZoom = (k: number, wasFar: boolean) => k < FAR_ZOOM_OUT || (wasFar && k < FAR_ZOOM_IN);
+
+// The CSS transform (`translate(x, y) scale(s)`, origin at the corner) that makes what is drawn for the camera `shown` look as if it were drawn
+// for `next`: screen = s * (screen position under `shown`) + (x, y).
+export function previewTransform(shown: Camera, next: Camera): { s: number; x: number; y: number } {
+  const s = next.k / shown.k;
+  return { s, x: next.x - s * shown.x, y: next.y - s * shown.y };
+}

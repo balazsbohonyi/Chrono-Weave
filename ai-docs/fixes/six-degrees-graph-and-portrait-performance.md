@@ -179,3 +179,31 @@ the smaller thumbnails noticeably sped up the explorer and the canvas.
 - **Initials when zoomed out.** Show initials instead of portraits when the explorer is zoomed out below about 0.4×.
 - **Canvas rendering.** Draw the explorer graph on a `<canvas>` (possibly an `OffscreenCanvas` in the worker). This is the next big
   step for networks of 500+ drawn people, at the cost of re-implementing hit testing and keyboard accessibility.
+
+## Follow-up: culling, level of detail and zoom preview (2026-10-22)
+
+Switches: `GRAPH_PERF_CULLING`, `GRAPH_PERF_LEVEL_OF_DETAIL`, `GRAPH_PERF_HIDE_PORTRAITS`, `GRAPH_PERF_ZOOM_PREVIEW` in
+`src/components/connectionNetwork/performance.ts`; behavior in `ai-docs/guides/six-degrees-internals.md` ("Explorer graph").
+
+Measured on a production build of a throwaway harness (synthetic 1000-person session, about 915 drawn, headless Chrome, 240 scripted
+frames per scenario, two runs; HEAD built from a stash as the baseline). CPU is summed over all browser processes, so it includes raster.
+
+| Scenario | HEAD | Culling + level of detail | All measures |
+|---|---|---|---|
+| Fit-all pan, mean frame | 61 ms | 25 ms | 22 ms |
+| Fit-all pan, CPU | 40.6 s | 12.3 s | 11.2 s |
+| Zoom 1.0 pan, CPU | 13.8 s | 7.5 s | 7.4 s |
+| Zoom in/out cycle, layout | 1546 ms | 1146 ms | 96 ms |
+| Zoom in/out cycle, CPU | 7.8 s | 4.9 s | 4.5 s |
+
+Findings:
+
+- Changing the scale of the SVG content makes Blink lay out every person and line again ("SVG changed" on each); a translate-only pan costs
+  about a tenth. Hiding edges, nodes or the axis alone barely moved that cost, so the lever is not changing the scale per event.
+- `local()` read `getBoundingClientRect()` on every wheel and pointer event, forcing a layout after each React commit; the reading is now kept
+  while events keep coming.
+- A zoom preview (CSS `scale()` on the `<svg>`, committed on a pause and at least every 350 ms) removes the layout cost, but needs: `overflow:
+  visible` on the SVG, culling against the logical camera with overscan while previewing, and a time axis drawn well past the view, or zooming
+  out shows empty space around what was drawn.
+- Always profile with every switch in its intended state: a preview-only build left in the working tree once hid most of the gain.
+
