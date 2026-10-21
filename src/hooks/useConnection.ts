@@ -253,6 +253,15 @@ export function useConnection(dependencies: Dependencies) {
     reconcileOpened(session);
   }, [cancelSearch, reconcileOpened]);
 
+  // Forgets a paused exploration. Only the saved search goes: the people and contacts it checked stay in the shared knowledge, so a later
+  // search for the same pair (or any other) reuses them instead of asking the model again. Not while a search is running, which may be saving it.
+  const deleteCheckpoint = useCallback((session: ConnectionSession) => {
+    if (search.current) return;
+    setCheckpoints(previous => previous.filter(saved => saved.key !== session.key));
+    setExploration(previous => previous?.key === session.key ? null : previous);
+    void repository.deleteSession(session.key).then(() => setCheckpointRevision(previous => previous + 1));
+  }, [repository]);
+
   // A connection that was already made, reopened as an exploration to look around: the whole network is shown as in any exploration (its chain is
   // only a colour of its lines), nothing can be searched, and Reveal plays the connection on the canvas. Closing it leaves without playing.
   const openSavedExploration = useCallback(async (entry: ConnectionPathEntry) => {
@@ -328,7 +337,7 @@ export function useConnection(dependencies: Dependencies) {
   const endReveal = useCallback(() => setReveal(previous => previous.animate ? { ...previous, animate: false } : previous), []);
 
   return {
-    picking, isConnecting, progress, active, recent, currentIndex, tabRequest, exploration, explorationChain, explorerOpen, openSavedExploration, solved, revealSolved, success, revealConnection, checkpoints, stop, continueSearch, openCheckpoint,
+    picking, isConnecting, progress, active, recent, currentIndex, tabRequest, exploration, explorationChain, explorerOpen, openSavedExploration, solved, revealSolved, success, revealConnection, checkpoints, stop, continueSearch, openCheckpoint, deleteCheckpoint,
     focusRequest, canvasConnection, isTabVisible: !!active || recent.length > 0 || checkpoints.length > 0,
     isPickable, statusFor,
     beginPicking, exitPicking, pickFigure, submitName, cancelSearch, reset, replay, replayActive, close, focusPerson, deleteConnection,

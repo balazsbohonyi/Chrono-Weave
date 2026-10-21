@@ -509,7 +509,7 @@ input[type=number] {
 .net-pair { display: inline-flex; flex: none; }
 .net-pair .net-portrait + .net-portrait { margin-left: -11px; }
 
-.connection-link-body { flex: 1; min-width: 0; padding: 10px 0; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.connection-link-body { flex: 1; min-width: 0; padding: 30px 0; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
 .connection-link-evidence { font-size: 13px; line-height: 1.5; color: rgb(var(--color-content-body)); }
 /* An amber tint over the card colour, so the pill stays solid over the stage's blurred canvas as well as on the sidebar. */
 .connection-link-why { display: inline-flex; align-items: center; padding: 3px 12px; font-size: 12px; font-weight: 700; line-height: 1.35; letter-spacing: .01em; border-radius: 9999px; cursor: pointer;
@@ -532,7 +532,7 @@ input[type=number] {
 .connection-open-exploration { position: relative; z-index: 1; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; background: none; color: rgb(var(--color-card-muted)); cursor: pointer; transition: color 150ms, opacity 150ms; }
 .connection-open-exploration:hover:not(:disabled) { color: rgb(var(--color-content-primary)); }
 .connection-open-exploration:disabled { cursor: default; }
-/* A finished connection's two icons (open the exploration, delete) show only while its card is hovered or has keyboard focus, so the list reads as names and degrees.
+/* The icons of a finished connection and of a paused exploration (open the exploration, delete) show only while its card is hovered or has keyboard focus, so the list reads as names and degrees.
    Their space is kept, so nothing shifts when they appear, and while hidden they take no clicks (a click there plays the connection). Touch screens have no hover: the icons stay.
    The focus rule is separate on purpose: a browser without :has() would otherwise drop the hover rule with it. */
 @media (hover: hover) {

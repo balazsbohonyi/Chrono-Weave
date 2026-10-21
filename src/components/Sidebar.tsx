@@ -6,6 +6,7 @@ import { formatYear } from '../utils/formatters';
 
 import SidebarCardActions from './SidebarCardActions';
 import SidebarFigureCard from './SidebarFigureCard';
+import MeasuredVirtualList from './MeasuredVirtualList';
 import ConnectionPanel, { ConnectionHeader, type ConnectionPanelProps } from './ConnectionPanel';
 import Tooltip from './Tooltip';
 
@@ -40,6 +41,8 @@ interface SidebarProps {
 }
 
 
+
+const figureKey = (figure: HistoricalFigure) => figure.id;
 
 type ListMode = 'FIGURES' | 'EVENTS';
 type ViewMode = ListMode | 'CONNECTION';
@@ -100,6 +103,8 @@ const Sidebar: React.FC<SidebarProps> = ({
     // Refs for tracking positions
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const sidebarRef = useRef<HTMLDivElement>(null);
+    // How tall each card turned out to be, by figure: a list that comes back (another tab) restores its scroll position exactly.
+    const cardHeights = useRef(new Map<string, number>());
 
     // Filter selected figures based on Global Categories First
     const categoryFilteredFigures = useMemo(() => {
@@ -154,25 +159,31 @@ const Sidebar: React.FC<SidebarProps> = ({
     }, [displayFigures]);
 
     // Track scroll position when scrolling and restore when switching view modes
+    // The position is kept in a ref while scrolling and only handed to the state (which re-renders the sidebar and saves the view) once it settles.
+    const livePositions = useRef(scrollPositions);
     useEffect(() => {
         const container = scrollContainerRef.current;
         if (!container || viewMode === 'CONNECTION') return;
 
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const publish = () => { timer = undefined; setScrollPositions({ ...livePositions.current }); };
         const handleScroll = () => {
-            setScrollPositions(prev => ({
-                ...prev,
-                [viewMode]: container.scrollTop
-            }));
+            livePositions.current[viewMode] = container.scrollTop;
+            clearTimeout(timer);
+            timer = setTimeout(publish, 200);
         };
 
-        container.addEventListener('scroll', handleScroll);
-        return () => container.removeEventListener('scroll', handleScroll);
+        container.addEventListener('scroll', handleScroll, { passive: true });
+        return () => {
+            container.removeEventListener('scroll', handleScroll);
+            if (timer !== undefined) { clearTimeout(timer); publish(); }
+        };
     }, [viewMode]);
 
     // Restore scroll position when switching view modes
     useEffect(() => {
         if (scrollContainerRef.current) {
-            scrollContainerRef.current.scrollTop = viewMode === 'CONNECTION' ? 0 : scrollPositions[viewMode];
+            scrollContainerRef.current.scrollTop = viewMode === 'CONNECTION' ? 0 : livePositions.current[viewMode];
         }
     }, [viewMode]);
 
@@ -293,7 +304,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 
             <div
                 ref={scrollContainerRef}
-                className="flex-1 overflow-y-auto p-6 space-y-4 no-scrollbar"
+                className="relative flex-1 overflow-y-auto p-6 space-y-4 no-scrollbar"
             >
                 {viewMode === 'CONNECTION' && connection && (
                     <ConnectionPanel
@@ -326,30 +337,34 @@ const Sidebar: React.FC<SidebarProps> = ({
                     </div>
                 )}
 
-                {viewMode !== 'CONNECTION' && displayFigures.map((fig) => {
-                    const isTracing = tracingId === fig.id;
-
-                    return (
-                        <SidebarFigureCard
-                            key={fig.id}
-                            figure={fig}
-                            detail={detailsMap.get(fig.id)}
-                            isActive={activeTracingFigureId === fig.id}
-                        >
-                            <SidebarCardActions
+                {/* Only the cards near the viewport are in the document: a canvas can list hundreds of people. */}
+                {viewMode !== 'CONNECTION' && displayFigures.length > 0 && (
+                    <MeasuredVirtualList
+                        items={displayFigures}
+                        itemKey={figureKey}
+                        scrollerRef={scrollContainerRef}
+                        heights={cardHeights}
+                        renderItem={fig => (
+                            <SidebarFigureCard
                                 figure={fig}
-                                onDiscover={onDiscover}
-                                onInspect={onInspect}
-                                onConnect={onConnect}
-                                onTrace={handleTrace}
-                                isTracing={isTracing}
-                                isFollowingFigure={isFollowingFigure}
-                                focusFigureId={focusFigureId}
-                                onRelationship={onRelationship}
-                            />
-                        </SidebarFigureCard>
-                    );
-                })}
+                                detail={detailsMap.get(fig.id)}
+                                isActive={activeTracingFigureId === fig.id}
+                            >
+                                <SidebarCardActions
+                                    figure={fig}
+                                    onDiscover={onDiscover}
+                                    onInspect={onInspect}
+                                    onConnect={onConnect}
+                                    onTrace={handleTrace}
+                                    isTracing={tracingId === fig.id}
+                                    isFollowingFigure={isFollowingFigure}
+                                    focusFigureId={focusFigureId}
+                                    onRelationship={onRelationship}
+                                />
+                            </SidebarFigureCard>
+                        )}
+                    />
+                )}
 
                 {viewMode !== 'CONNECTION' && isLoading && (
                     <div className="flex justify-center p-8">

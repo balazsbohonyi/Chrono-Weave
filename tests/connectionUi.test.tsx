@@ -105,23 +105,25 @@ test('a recent connection plays on the card and reopens its exploration from a b
   assert.doesNotMatch(panel({ recent }), /connection-open-exploration/);
 });
 
-test('the icons of a recent connection show only on hover or keyboard focus, keep their space, and stay on touch screens; a paused exploration keeps its icon', () => {
+test('the icons of a recent connection and of a paused exploration show only on hover or keyboard focus, keep their space, and stay on touch screens', () => {
   const recent = [{ key: 'one', figures: [a, m, b], evidence: ['x', 'y'], createdAt: 2 }];
   const markup = panel({ recent, onOpenExploration: () => {}, onDelete: () => {} });
   const entry = markup.slice(markup.indexOf('Recent connections'));
   assert.match(entry, /<div class="connection-recent-entry has-hover-actions\s/);
   assert.equal(entry.match(/class="connection-open-exploration"/g)?.length, 2);
-  const css = readFileSync('src/styles/globals.css', 'utf8');
+  // Line endings differ between checkouts (CRLF on Windows).
+  const css = readFileSync('src/styles/globals.css', 'utf8').replace(/\r\n/g, '\n');
   const hover = css.slice(css.indexOf('@media (hover: hover) {\n  .connection-recent-entry.has-hover-actions'));
   // Hidden by opacity (so their space stays and nothing shifts) and out of the way of clicks, only where there is a hover.
   assert.match(hover, /\.has-hover-actions \.connection-open-exploration \{ opacity: 0; pointer-events: none; \}/);
   assert.match(hover, /\.has-hover-actions:hover \.connection-open-exploration \{ opacity: 1; pointer-events: auto; \}/);
   assert.match(hover, /\.has-hover-actions:has\(:focus-visible\) \.connection-open-exploration \{ opacity: 1; pointer-events: auto; \}/);
   assert.doesNotMatch(css.replace(/@media \(hover: hover\) \{[^@]*?\n\}\n/, ''), /has-hover-actions/);
-  // A paused exploration's card is not marked: its icon stays visible, as the whole card opens it too.
+  // A paused exploration's card is marked the same way: its icons show on hover too (the whole card opens it regardless).
   const session = { version: 2, key: 'k', canvasId: 'c', endpoints: ['a', 'b'], candidates: [], rounds: [], attempts: {}, segment: 1, status: 'paused', phase: 'Paused', elapsedMs: 0, updatedAt: 1,
     diagnostics: { tasks: 0, people: 0, pairs: 0 }, people: [a, b].map(f => ({ ...f, description: '', aliases: [] })) } as unknown as NonNullable<ConnectionPanelProps['checkpoints']>[number];
-  assert.doesNotMatch(panel({ connection: null, checkpoints: [session], onOpenCheckpoint: () => {} }), /has-hover-actions/);
+  const paused = panel({ connection: null, checkpoints: [session], onOpenCheckpoint: () => {}, onDeleteCheckpoint: () => {} });
+  assert.match(paused.slice(paused.indexOf('Paused explorations')), /<div class="connection-recent-entry has-hover-actions\s/);
 });
 
 test('a paused exploration shows the same icon instead of the words Open exploration, and the whole card still opens it', () => {
@@ -133,6 +135,18 @@ test('a paused exploration shows the same icon instead of the words Open explora
   assert.match(section, /class="connection-recent-main"/);
   assert.match(section, /class="connection-open-exploration" aria-label="Open exploration"/);
   assert.doesNotMatch(section, /connection-recent-degrees/);
+});
+
+test('a paused exploration can be deleted, with a delete icon only when the panel can do it', () => {
+  const session = { version: 2, key: 'k', canvasId: 'c', endpoints: ['a', 'b'], candidates: [], rounds: [], attempts: {}, segment: 1, status: 'paused', phase: 'Paused', elapsedMs: 0, updatedAt: 1,
+    diagnostics: { tasks: 0, people: 0, pairs: 0 }, people: [a, b].map(f => ({ ...f, description: '', aliases: [] })) } as unknown as NonNullable<ConnectionPanelProps['checkpoints']>[number];
+  assert.doesNotMatch(panel({ connection: null, checkpoints: [session], onOpenCheckpoint: () => {} }), /Delete exploration/);
+  const markup = panel({ connection: null, checkpoints: [session], onOpenCheckpoint: () => {}, onDeleteCheckpoint: () => {} });
+  const section = markup.slice(markup.indexOf('Paused explorations'));
+  assert.match(section, /<button type="button" class="connection-open-exploration" aria-label="Delete exploration">/);
+  // The icon is a separate button, not nested in the card's main button, and the confirmation only shows once it was clicked.
+  assert.doesNotMatch(section, /<button[^>]*>(?:(?!<\/button>).)*<button/);
+  assert.doesNotMatch(text(section), /Delete this paused exploration/);
 });
 
 test('the picker names the source, explains both ways to choose, and shows why a typed person cannot be chosen', () => {

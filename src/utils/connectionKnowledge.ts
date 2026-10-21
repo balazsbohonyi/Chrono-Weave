@@ -15,6 +15,8 @@ export interface ConnectionRepository {
   loadSession(key: string): Promise<ConnectionSession | null>;
   listSessions(canvasId: string): Promise<ConnectionSession[]>;
   checkpoint(knowledge: ContactKnowledge, session: ConnectionSession): Promise<boolean>;
+  // Forgets a saved search (a paused exploration). The shared knowledge stays: the people and contacts it checked are reused by later searches.
+  deleteSession(key: string): Promise<boolean>;
 }
 const clone = <T>(value: T): T => structuredClone(value);
 const empty = (): State => ({ version: 2, knowledge: { people: [], contacts: [] }, sessions: [] });
@@ -173,6 +175,8 @@ export class MemoryConnectionRepository implements ConnectionRepository {
       .filter(s => s.updatedAt >= Date.now() - KNOWLEDGE_LIMITS.checkpointAgeMs).slice(0, KNOWLEDGE_LIMITS.sessions);
   }
   async checkpoint(knowledge: ContactKnowledge, session: ConnectionSession) { this.merge(knowledge, session); return this.persistent; }
+  protected removeSession(key: string) { this.state.sessions = this.state.sessions.filter(s => s.key !== key); }
+  async deleteSession(key: string) { this.removeSession(key); return this.persistent; }
 }
 
 export class IndexedConnectionRepository extends MemoryConnectionRepository {
@@ -215,25 +219,36 @@ export class IndexedConnectionRepository extends MemoryConnectionRepository {
   async loadKnowledge() { await this.ready; await this.writes; return super.loadKnowledge(); }
   async loadSession(key: string) { await this.ready; await this.writes; return super.loadSession(key); }
   async listSessions(canvasId: string) { await this.ready; await this.writes; return super.listSessions(canvasId); }
+  // Writes the whole state; called only from inside the `writes` queue.
+  private async persist(): Promise<boolean> {
+    if (!this.available || !this.db) return false;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const tx = this.db!.transaction(STORE, 'readwrite');
+        const timer = setTimeout(() => { try { tx.abort(); } catch {} reject(new Error('Checkpoint write timed out.')); }, 5000);
+        tx.oncomplete = () => { clearTimeout(timer); resolve(); };
+        tx.onerror = () => { clearTimeout(timer); reject(tx.error); };
+        tx.onabort = () => { clearTimeout(timer); reject(tx.error); };
+        try { tx.objectStore(STORE).put(clone(this.state), 'state'); }
+        catch (error) { clearTimeout(timer); try { tx.abort(); } catch {} reject(error); }
+      });
+      return true;
+    } catch { this.available = false; return false; }
+  }
   async checkpoint(knowledge: ContactKnowledge, session: ConnectionSession): Promise<boolean> {
     await this.ready;
     const write = this.writes.then(async () => {
       if (!recoverSession(fitSession(session))) return false;
       this.merge(knowledge, session);
-      if (!this.available || !this.db) return false;
-      try {
-        await new Promise<void>((resolve, reject) => {
-          const tx = this.db!.transaction(STORE, 'readwrite');
-          const timer = setTimeout(() => { try { tx.abort(); } catch {} reject(new Error('Checkpoint write timed out.')); }, 5000);
-          tx.oncomplete = () => { clearTimeout(timer); resolve(); };
-          tx.onerror = () => { clearTimeout(timer); reject(tx.error); };
-          tx.onabort = () => { clearTimeout(timer); reject(tx.error); };
-          try { tx.objectStore(STORE).put(clone(this.state), 'state'); }
-          catch (error) { clearTimeout(timer); try { tx.abort(); } catch {} reject(error); }
-        });
-        return true;
-      } catch { this.available = false; return false; }
+      return this.persist();
     });
+    this.writes = write.catch(() => {});
+    return write;
+  }
+  // Queued behind any checkpoint in flight, so a write that started earlier cannot bring the search back.
+  async deleteSession(key: string): Promise<boolean> {
+    await this.ready;
+    const write = this.writes.then(async () => { this.removeSession(key); return this.persist(); });
     this.writes = write.catch(() => {});
     return write;
   }

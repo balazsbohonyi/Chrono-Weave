@@ -22,6 +22,23 @@ test('checkpoints restore pending operations to the queue and are canvas-scoped;
   const saved = await repo.loadSession(session.key); assert.equal(saved?.status, 'paused'); assert.equal(saved?.candidates[0].status, 'proposed');
   assert.equal((await repo.listSessions('other')).length, 0); assert.equal((await repo.listSessions('one')).length, 1);
 });
+test('deleting a paused exploration removes the saved search but keeps the people and contacts it checked', async () => {
+  for (const repo of [new MemoryConnectionRepository(), new IndexedConnectionRepository(undefined)]) {
+    const session = fixture(), other = fixture('two');
+    await repo.checkpoint({ people: session.people, contacts: [] }, session);
+    await repo.checkpoint({ people: other.people, contacts: [] }, other);
+    await repo.deleteSession(session.key);
+    assert.equal(await repo.loadSession(session.key), null);
+    assert.equal((await repo.listSessions('one')).length, 0);
+    // Another canvas's search is untouched, and the shared knowledge still has everyone the deleted search had identified.
+    assert.equal((await repo.listSessions('two')).length, 1);
+    const ids = new Set((await repo.loadKnowledge()).people.map(p => p.id));
+    assert.ok(session.people.every(p => ids.has(p.id)));
+    // Deleting what is not there changes nothing.
+    await repo.deleteSession('missing');
+    assert.equal((await repo.listSessions('two')).length, 1);
+  }
+});
 test('malformed persistence is isolated and record recovery omits arbitrary credential/settings fields', () => {
   const session = fixture(); assert.equal(recoverSession({ ...session, endpoints: ['missing', 'also missing'] }), null);
   const recovered = recoverSession({ ...session, apiKey: 'secret', diagnostics: { ...session.diagnostics, authorization: 'secret' }, people: [...session.people, { name: 'Broken' }] });

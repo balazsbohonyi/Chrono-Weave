@@ -1063,7 +1063,7 @@ const App: React.FC = () => {
                     connection: connection.active, currentIndex: connection.canvasConnection?.animate ? null : connection.currentIndex, recent: connection.recent,
                     canvasIds, isBusy, onClose: connection.close, onReplay: connection.replay, onDelete: connection.deleteConnection,
                     onFocusPerson: connection.focusPerson, onExplain: openConnectionExplanation,
-                    checkpoints: connection.checkpoints, onOpenCheckpoint: connection.openCheckpoint, onOpenExploration: connection.openSavedExploration, onOpenInfo: openSixDegreesInfo,
+                    checkpoints: connection.checkpoints, onOpenCheckpoint: connection.openCheckpoint, onDeleteCheckpoint: connection.deleteCheckpoint, onOpenExploration: connection.openSavedExploration, onOpenInfo: openSixDegreesInfo,
                 }}
                 activeTracingFigureId={relationshipState?.sourceFigure.id}
                 focusFigureId={focusFigure?.id}
