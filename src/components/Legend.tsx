@@ -45,7 +45,7 @@ const Legend: React.FC<LegendProps> = ({ selectedCategories, availableCategories
                     <button
                         key={category}
                         onClick={() => onToggleCategory(category)}
-                        className={`flex items-center gap-2 transition-all duration-300 group outline-none rounded-md p-1.5 border border-transparent ${isDimmed ? 'opacity-50 hover:opacity-70' : 'opacity-100 bg-surface/30 border-border/30'}`}
+                        className={`flex items-center gap-2 transition-all duration-300 group outline-none rounded-md p-1.5 border border-transparent ${isDimmed ? 'opacity-30 hover:opacity-60' : 'opacity-100 bg-surface/30 border-border/30'}`}
                     >
                         <div 
                         className="h-4 w-8 rounded-sm"

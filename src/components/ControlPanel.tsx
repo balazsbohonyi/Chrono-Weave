@@ -61,6 +61,18 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
     return () => window.removeEventListener('keydown', handleShortcut);
   }, [hasFigures, isBuilding, toggleSearch]);
 
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || !(event.ctrlKey || event.metaKey) || !event.shiftKey || event.altKey
+        || (event.key.toLowerCase() !== 'f' && event.code !== 'KeyF')
+        || !hasCategoryFilters || isBuilding || header.current?.closest('[inert]')) return;
+      event.preventDefault();
+      if (!event.repeat) onToggleLegend();
+    };
+    window.addEventListener('keydown', handleShortcut);
+    return () => window.removeEventListener('keydown', handleShortcut);
+  }, [hasCategoryFilters, isBuilding, onToggleLegend]);
+
   return (
     <header ref={header} data-canvas-controls className="canvas-header">
       <div className="canvas-header-actions" role="group" aria-label="Canvas actions">
@@ -72,11 +84,12 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
             </svg>
           </button>
         </Tooltip>
-        <Tooltip text={filterLabel} placement="bottom">
+        <Tooltip text={`${filterLabel} (Ctrl/Cmd + Shift + F)`} placement="bottom">
           <button id="canvas-filter-toggle" type="button" onClick={onToggleLegend}
             disabled={!hasCategoryFilters || isBuilding} className="canvas-control-button canvas-filter-toggle"
             aria-label={filterLabel}
-            aria-pressed={isLegendOpen} aria-expanded={isLegendOpen} aria-controls="canvas-category-filters">
+            aria-pressed={isLegendOpen} aria-expanded={isLegendOpen} aria-controls="canvas-category-filters"
+            aria-keyshortcuts="Control+Shift+F Meta+Shift+F">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
               <path strokeLinecap="round" strokeLinejoin="round" d="M3 4h18l-7 8v7l-4 2v-9L3 4Z" />
             </svg>

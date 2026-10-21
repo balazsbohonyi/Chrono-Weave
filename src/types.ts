@@ -156,8 +156,6 @@ export interface RelationshipExplanation {
     sections: { title: string; content: string }[];
 }
 
-export type InteractionMode = 'select' | 'pan' | 'zoom';
-
 // A person proposed or identified by the model who may not be on the canvas yet.
 export interface NewPerson {
   name: string;

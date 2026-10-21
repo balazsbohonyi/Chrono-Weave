@@ -85,7 +85,7 @@ The solver uses the configured Gemini, OpenRouter or Ollama model without histor
 ### 🏷️ Category Filtering & Legend
 - **8 Figure Categories**: Artists, Business, Entertainers, Explorers, Leaders & Baddies, Scientists, Thinkers, Writers
 - **Historical Events**: Separate category for major historical events (wars, treaties, movements)
-- **Visual Legend**: Open filters with the header's filter icon, toggle categories to focus on specific disciplines, and close the panel with the same icon or its close button
+- **Visual Legend**: Open filters with the header's filter icon or Ctrl/Cmd + Shift + F, toggle categories to focus on specific disciplines, and close the panel with the same icon, the shortcut, or its close button
 - **Color Coding**: Each category has a distinct color for easy identification
 - **Bulk Filtering**: Reset all filters or select multiple categories at once
 - **Active Filter Count**: A small red badge on the filter icon shows how many categories are selected

@@ -52,7 +52,7 @@ graph TD
 Located in `src/components/`, the UI is composed of several interactive elements:
 - **`TimelineCanvas.tsx`**: The core visualization engine. It uses HTML5 Canvas to render the timeline, handling zoom, pan, and drawing the `HistoricalFigure` objects and their relationship links.
 - **`Sidebar.tsx`**: A collapsible panel displaying lists of figures active in a selected year or globally.
-- **`ControlPanel.tsx` & `FloatingToolbar.tsx` & `ActionBar.tsx`**: Toolbars and controls that allow the user to interact with the timeline, search for figures, and manage filters.
+- **`ControlPanel.tsx` & `ActionBar.tsx`**: Toolbars and controls that allow the user to interact with the timeline, search for figures, and manage filters.
 - **`Legend.tsx`**: Manages and displays category filters (Artists, Scientists, Leaders, etc.).
 - **`RelationshipPopover.tsx`**: Displays detailed AI-generated explanations of relationships between historical figures.
 - **`SettingsDialog.tsx`**: Allows users to configure their preferred AI provider (Gemini or OpenRouter) and API keys, saving preferences to local storage.

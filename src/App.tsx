@@ -827,13 +827,18 @@ const App: React.FC = () => {
         }
     };
 
-    // The filters offer the canvas's own categories and those of the connection guests on it. Guests never change the
-    // canvas categories themselves (which Expand Timeline and reloading go by).
+    // The filters offer the categories that have a card on the canvas, guests included (they never change the canvas
+    // categories themselves, which Expand Timeline and reloading go by).
     const availableCategories = useMemo(() => {
-        if (!config.weaveContext || config.weaveContext.activeCategories.includes('ALL')) return CATEGORY_LIST;
-        const guestCategories = new Set(figures.filter(figure => guestIds.has(figure.id)).map(figure => figure.category));
-        return CATEGORY_LIST.filter(category => config.weaveContext!.activeCategories.includes(category) || guestCategories.has(category));
-    }, [config, figures, guestIds]);
+        const present = new Set(figures.map(figure => figure.category));
+        return CATEGORY_LIST.filter(category => present.has(category));
+    }, [figures]);
+    // A selected category whose last card left the canvas leaves the filter too, or it would dim everything with no chip to clear it.
+    useEffect(() => {
+        if (!availableCategories.length) return;
+        setSelectedCategories(previous => [...previous].every(category => availableCategories.includes(category))
+            ? previous : new Set([...previous].filter(category => availableCategories.includes(category))));
+    }, [availableCategories]);
     const hasCategoryFilters = availableCategories.length > 1;
     // The legend also holds the guests' show/dim/hide control, so a canvas with guests has one even with a single category.
     const hasLegend = hasCategoryFilters || guestIds.size > 0;
