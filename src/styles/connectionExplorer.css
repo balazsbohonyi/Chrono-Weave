@@ -1,5 +1,5 @@
-/* Overlay shell: the same glass as the relationship overlay, with the exploration's parts floating on it. */
-.connection-explorer { position: fixed; inset: 0; z-index: 180; display: flex; flex-direction: column; gap: 14px; padding: 22px 28px 20px; background: rgb(var(--color-surface) / 60%); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); color: rgb(var(--color-content-primary)); outline: none; }
+/* Overlay shell: an opaque surface (no blur, which a 4K screen pays for in every frame of a pan) with the exploration's parts floating on it. */
+.connection-explorer { position: fixed; inset: 0; z-index: 180; display: flex; flex-direction: column; gap: 14px; padding: 22px 28px 20px; background: rgb(var(--color-surface)); color: rgb(var(--color-content-primary)); outline: none; }
 .connection-explorer > :not(.close-button) { width: 100%; max-width: 1720px; margin-inline: auto; }
 .connection-explorer button:where(:not(.close-button, .canvas-floating-button)) { border: 1px solid rgb(var(--color-border-strong)); background: rgb(var(--color-surface) / .55); color: inherit; border-radius: 8px; padding: 8px 14px; font-size: 13px; line-height: 1.4; transition: background-color 150ms, border-color 150ms; }
 .connection-explorer button:where(:not(.close-button, .canvas-floating-button)):hover { background: rgb(var(--color-surface-muted) / .85); }
@@ -82,7 +82,10 @@
 .connection-explorer-body.has-panel .net-resume-wrap { width: min(420px, calc(100% - var(--panel-inset) - 32px)); }
 .connection-explorer-body.has-panel .net-alert-wrap { width: min(560px, calc(100% - var(--panel-inset) - 32px)); }
 
-/* The compact bar: the glass of the view controls (.canvas-view-toolbar, from globals.css, with its fixed position replaced) at the top centre. */
+/* The view controls (the compact bar and the graph's toolbar) are plain opaque surfaces here, a step off the graph's own background so they stand out from it: a blur over the moving drawing is redone every frame and costs
+   in proportion to the screen's pixels (see `ai-docs/guides/six-degrees-internals.md`). */
+.connection-explorer .canvas-view-toolbar { background: rgb(var(--color-surface-muted)); border-color: rgb(var(--color-border-strong)); backdrop-filter: none; -webkit-backdrop-filter: none; }
+/* The compact bar: the view controls (.canvas-view-toolbar, from globals.css, with its fixed position replaced) at the top centre. */
 .canvas-view-toolbar.ce-bar { position: absolute; top: 34px; left: 50%; bottom: auto; transform: translateX(-50%); z-index: 4; gap: 10px; padding: 6px 10px; max-width: calc(100% - 28px);
   overflow-x: auto; scrollbar-width: none; transition: left 180ms ease; }
 .ce-bar::-webkit-scrollbar { display: none; }
@@ -99,9 +102,9 @@
 .ce-bar .canvas-floating-button.is-accent:hover:not(:disabled), .ce-bar .canvas-floating-button.is-accent:focus-visible { color: rgb(var(--color-connection-contrast)); filter: brightness(1.08); }
 .ce-bar .canvas-floating-button[aria-pressed="true"] { color: rgb(var(--color-accent-text)); background: rgb(var(--color-accent-soft) / .55); }
 
-/* The floating inspection panel: the docked panel's content on glass of its own, over the right of the graph. */
+/* The floating inspection panel: the docked panel's content on a surface of its own, over the right of the graph. */
 .connection-explorer-inspection.is-floating { position: absolute; top: 34px; right: 14px; bottom: 34px; width: 380px; z-index: 6; padding: 14px 16px 12px;
-  background: rgb(var(--color-surface) / .72); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); box-shadow: 0 8px 28px rgb(var(--color-shadow) / .22); }
+  background: rgb(var(--color-surface)); box-shadow: 0 8px 28px rgb(var(--color-shadow) / .22); }
 .net-inspect-actions { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .connection-explorer .net-inspect-actions .net-back { max-width: 200px; }
 .connection-explorer .net-panel-close { display: inline-grid; place-items: center; flex: none; width: 26px; height: 26px; padding: 0; border-radius: 50%; }
@@ -128,13 +131,13 @@
 /* Dimming fades in a small network. In a large one it is immediate: an opacity transition on every person and line repaints the
    whole drawing each frame for its duration (SVG opacity is not composited), which made selecting someone stutter. */
 .net-graph:not(.is-large) .net-node, .net-graph:not(.is-large) .net-edge { transition: opacity .2s; }
-/* Zoomed far out in a big network (`isFarZoom`), people lose their name and pulse, which are unreadable at that size (and, when GRAPH_PERF_HIDE_PORTRAITS is on, their portrait or initials,
+/* Zoomed far out in a big network (`isFarZoom`), people lose their name, pulse and "+n" fold badge, which are unreadable at that size (and, when GRAPH_PERF_HIDE_PORTRAITS is on, their portrait or initials,
    the bulk of the image decoding). The endpoints and whoever is selected or on the lit chain keep theirs. */
-.net-graph.is-far .net-node:not(.is-endpoint):not(.is-selected):not(.is-edge-end):not(.is-chain) :is(.net-name, .net-pulse) { display: none; }
+.net-graph.is-far .net-node:not(.is-endpoint):not(.is-selected):not(.is-edge-end):not(.is-chain) :is(.net-name, .net-pulse, .net-fold) { display: none; }
 .net-graph.is-far-portraits .net-node:not(.is-endpoint):not(.is-selected):not(.is-edge-end):not(.is-chain) :is(image, .net-initials) { display: none; }
 
-/* Year strips: the same thin glass bars the main canvas uses, so the years stay readable over the graph. */
-.net-strip { position: absolute; left: 0; right: 0; height: 24px; overflow: hidden; z-index: 2; pointer-events: none; background: rgb(var(--color-timeline-axis) / .75); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); }
+/* Year strips: thin opaque bars, so the years stay readable over the graph. */
+.net-strip { position: absolute; left: 0; right: 0; height: 24px; overflow: hidden; z-index: 2; pointer-events: none; background: rgb(var(--color-timeline-axis)); }
 .net-strip.is-top { top: 0; }
 .net-strip.is-bottom { bottom: 0; }
 .net-tick { position: absolute; top: 0; bottom: 0; transform: translateX(-50%); font-size: 12px; font-weight: 700; line-height: 1; white-space: nowrap; color: rgb(var(--color-timeline-axis-label)); }
@@ -200,11 +203,11 @@
 .net-layout-trigger { position: relative; }
 .net-layout-trigger::after { content: ''; position: absolute; right: 4px; bottom: 4px; border: 3.5px solid transparent; border-top-width: 0; border-bottom-color: currentColor; opacity: .75; }
 .net-layout-trigger[aria-expanded="true"] { color: rgb(var(--color-accent-text)); background: rgb(var(--color-accent-soft) / .55); }
-/* The menu is a second toolbar: the same glass (translucent surface, border, blur, shadow) as the view controls, in a layer over the graph. */
+/* The menu is a second toolbar: the same surface (border, shadow) as the view controls, in a layer over the graph. */
 .net-menu-host { position: absolute; inset: 0; z-index: 8; pointer-events: none; }
 .net-menu-host > * { pointer-events: auto; }
 .net-layout-menu { position: absolute; display: flex; flex-direction: column; gap: 4px; padding: 6px; min-width: 168px; max-width: calc(100% - 16px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none;
-  border: 1px solid rgb(var(--color-border) / 50%); border-radius: 14px; background: rgb(var(--color-surface) / 60%); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); box-shadow: 0 4px 16px rgb(var(--color-shadow) / 12%); }
+  border: 1px solid rgb(var(--color-border-strong)); border-radius: 14px; background: rgb(var(--color-surface-muted)); box-shadow: 0 4px 16px rgb(var(--color-shadow) / 12%); }
 .net-layout-menu::-webkit-scrollbar { display: none; }
 .connection-explorer .net-layout-item { display: flex; align-items: center; gap: 12px; flex: none; height: 36px; width: 100%; padding: 0 14px 0 8px; border: none; border-radius: 8px; background: transparent; color: rgb(var(--color-content-muted)); font-size: 13px; font-weight: 600; white-space: nowrap; cursor: pointer; transition: color 150ms; }
 .connection-explorer .net-layout-item > span { color: rgb(var(--color-content-primary)); transition: color 150ms; }
@@ -293,9 +296,9 @@
 
 /* Legend / filters */
 .net-legend { display: flex; flex-wrap: wrap; gap: 6px; }
-.connection-explorer .net-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: 11px; backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); background: rgb(var(--color-surface) / .6); color: rgb(var(--color-content-secondary)); border: 1px solid rgb(var(--color-border-strong)); }
-.net-chip.is-fixed { border-style: solid; background: rgb(var(--color-surface-muted) / .6); }
-.connection-explorer .net-chip.is-on { background: rgb(var(--color-surface-muted) / .9); color: rgb(var(--color-content-primary)); border-color: rgb(var(--color-content-primary)); font-weight: 600; }
+.connection-explorer .net-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: 11px; background: rgb(var(--color-surface)); color: rgb(var(--color-content-secondary)); border: 1px solid rgb(var(--color-border-strong)); }
+.net-chip.is-fixed { border-style: solid; background: rgb(var(--color-surface-muted)); }
+.connection-explorer .net-chip.is-on { background: rgb(var(--color-surface-muted)); color: rgb(var(--color-content-primary)); border-color: rgb(var(--color-content-primary)); font-weight: 600; }
 .net-chip b { font-weight: 700; }
 .net-chip i { display: inline-block; width: 20px; height: 2px; background: currentColor; }
 .net-chip.is-accepted i { height: 3px; background: rgb(var(--color-connection)); }
