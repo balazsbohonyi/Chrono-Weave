@@ -22,6 +22,23 @@ test('checkpoints restore pending operations to the queue and are canvas-scoped;
   const saved = await repo.loadSession(session.key); assert.equal(saved?.status, 'paused'); assert.equal(saved?.candidates[0].status, 'proposed');
   assert.equal((await repo.listSessions('other')).length, 0); assert.equal((await repo.listSessions('one')).length, 1);
 });
+test('deleting a paused exploration removes the saved search but keeps the people and contacts it checked', async () => {
+  for (const repo of [new MemoryConnectionRepository(), new IndexedConnectionRepository(undefined)]) {
+    const session = fixture(), other = fixture('two');
+    await repo.checkpoint({ people: session.people, contacts: [] }, session);
+    await repo.checkpoint({ people: other.people, contacts: [] }, other);
+    await repo.deleteSession(session.key);
+    assert.equal(await repo.loadSession(session.key), null);
+    assert.equal((await repo.listSessions('one')).length, 0);
+    // Another canvas's search is untouched, and the shared knowledge still has everyone the deleted search had identified.
+    assert.equal((await repo.listSessions('two')).length, 1);
+    const ids = new Set((await repo.loadKnowledge()).people.map(p => p.id));
+    assert.ok(session.people.every(p => ids.has(p.id)));
+    // Deleting what is not there changes nothing.
+    await repo.deleteSession('missing');
+    assert.equal((await repo.listSessions('two')).length, 1);
+  }
+});
 test('malformed persistence is isolated and record recovery omits arbitrary credential/settings fields', () => {
   const session = fixture(); assert.equal(recoverSession({ ...session, endpoints: ['missing', 'also missing'] }), null);
   const recovered = recoverSession({ ...session, apiKey: 'secret', diagnostics: { ...session.diagnostics, authorization: 'secret' }, people: [...session.people, { name: 'Broken' }] });
@@ -143,4 +160,29 @@ test('a running search reports when its latest progress could not be saved, but 
   // Whatever the flag says, it is a note for the screen and is not saved.
   const repository = new Storage(false, true), session = await run(repository);
   assert.equal('saveIssue' in (await repository.loadSession(session.key))!, false);
+});
+
+// A minimal IndexedDB: one store, `get`/`put` by key, and a transaction that completes on the next tick.
+function fakeIndexedDb() {
+  const stored = new Map<string, unknown>(); const writes: unknown[] = [];
+  const db = { onversionchange: null as unknown, close() {}, createObjectStore() {}, transaction() {
+    const tx: Record<string, any> = { error: null, oncomplete: null, onerror: null, onabort: null, abort() {},
+      objectStore: () => ({
+        get: (key: string) => { const request: Record<string, any> = { result: stored.get(key), onsuccess: null }; setTimeout(() => { request.onsuccess?.(); tx.oncomplete?.(); }, 0); return request; },
+        put: (value: unknown, key: string) => { stored.set(key, structuredClone(value)); writes.push(key); setTimeout(() => tx.oncomplete?.(), 0); },
+      }) };
+    return tx;
+  } };
+  const factory = { open() { const request: Record<string, any> = { result: db, onupgradeneeded: null, onsuccess: null, onerror: null, onblocked: null }; setTimeout(() => request.onsuccess?.(), 0); return request; } };
+  return { factory: factory as unknown as IDBFactory, writes };
+}
+test('a checkpoint inside a search is written once, a moment later; one that ends a run is written before it settles', async () => {
+  const { factory, writes } = fakeIndexedDb(); const repo = new IndexedConnectionRepository(factory); const session = fixture();
+  assert.equal(await repo.checkpoint({ people: session.people, contacts: [] }, session, { deferWrite: true }), true);
+  await repo.checkpoint({ people: session.people, contacts: [] }, { ...session, phase: 'Second' }, { deferWrite: true });
+  assert.equal(writes.length, 0, 'nothing is written while the search is running');
+  assert.equal((await repo.loadSession(session.key))!.phase, 'Second', 'this page already has the progress');
+  await repo.checkpoint({ people: session.people, contacts: [] }, { ...session, phase: 'Done' });
+  assert.equal(writes.length, 1, 'the final checkpoint wrote everything');
+  assert.equal((await new IndexedConnectionRepository(factory).loadSession(session.key))!.phase, 'Done');
 });

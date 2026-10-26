@@ -4,13 +4,14 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { readFileSync } from 'node:fs';
 import ConnectionStage from '../src/components/ConnectionStage';
+import ExplorationIcon from '../src/components/connectionNetwork/ExplorationIcon';
 import type { HistoricalFigure } from '../src/types';
 
 const person = (id: string, name: string): HistoricalFigure => ({ id, name, birthYear: 1500, deathYear: 1560, occupation: 'Painter', category: 'ARTISTS' });
 const [a, m, b] = [person('a', 'Anna Alpha'), person('m', 'Marco Middle'), person('b', 'Bruno Beta')];
 const links = [{ from: a, to: m, evidence: 'Anna and Marco shared a workshop in Florence.' }, { from: m, to: b, evidence: 'Marco taught Bruno to paint.' }];
 const render = (animate: boolean, hidden = false) => renderToStaticMarkup(<ConnectionStage connection={{ nodeIds: ['a', 'm', 'b'], playId: 1, animate }} chain={[a, m, b]} links={links}
-  currentIndex={null} focus={null} inset={{ top: 52, right: 544 }} canExit hidden={hidden} onStep={() => {}} onEnd={() => {}} onExit={() => {}} onReplay={() => {}} onExplain={() => {}} onInspect={() => {}} />);
+  currentIndex={null} focus={null} inset={{ right: 544 }} canExit hidden={hidden} onStep={() => {}} onEnd={() => {}} onExit={() => {}} onReplay={() => {}} onExplain={() => {}} onInspect={() => {}} />);
 
 test('a finished connection shows everyone, the whole thread, every caption with its Why button, and the degrees', () => {
   const markup = render(false);
@@ -37,7 +38,7 @@ test('a finished connection shows everyone, the whole thread, every caption with
 test('the clamped captions show the evidence as plain words, without Markdown symbols', () => {
   const withMarkdown = [{ from: a, to: m, evidence: 'In 1657 Anna sent Marco *De Ratiociniis* and a **long** [letter](https://example.org).' }, links[1]];
   const markup = renderToStaticMarkup(<ConnectionStage connection={{ nodeIds: ['a', 'm', 'b'], playId: 1, animate: false }} chain={[a, m, b]} links={withMarkdown}
-    currentIndex={null} focus={null} inset={{ top: 52, right: 0 }} canExit hidden={false} onStep={() => {}} onEnd={() => {}} onExit={() => {}} onReplay={() => {}} onExplain={() => {}} onInspect={() => {}} />);
+    currentIndex={null} focus={null} inset={{ right: 0 }} canExit hidden={false} onStep={() => {}} onEnd={() => {}} onExit={() => {}} onReplay={() => {}} onExplain={() => {}} onInspect={() => {}} />);
   assert.match(markup, /<p>In 1657 Anna sent Marco De Ratiociniis and a long letter\.<\/p>/);
   assert.doesNotMatch(markup, /\*|https:\/\/example\.org/);
 });
@@ -65,8 +66,8 @@ test('the stage is a labelled region, not a dialog, so the sidebar next to it ke
   assert.doesNotMatch(markup, /role="dialog"|aria-modal/);
   // Its controls must not be mistaken for the canvas's own (the canvas listens for wheel events over those).
   assert.doesNotMatch(markup, /canvas-floating-button|data-canvas-controls/);
-  // It sits clear of the header and the sidebar.
-  assert.match(markup, /style="top:52px;right:544px"/);
+  // It sits clear of the sidebar and has the whole height: the canvas header steps away while it is shown.
+  assert.match(markup, /style="right:544px"/);
 });
 
 test('the stage can step aside while the canvas is needed (choosing the other end), and stays mounted', () => {
@@ -74,4 +75,26 @@ test('the stage can step aside while the canvas is needed (choosing the other en
   assert.match(render(false, true), /<section[^>]*\shidden=""/);
   // The stylesheet really hides it: `hidden` alone loses to the stage's own display rules otherwise.
   assert.match(readFileSync('src/styles/connectionStage.css', 'utf8'), /\.connection-stage\[hidden\]\s*\{\s*display:\s*none/);
+});
+
+test('the header offers Replay and Open exploration as bare icons and keeps the round Close button; the stage has the whole height', () => {
+  const stage = (onOpenExploration?: () => void) => renderToStaticMarkup(<ConnectionStage connection={{ nodeIds: ['a', 'm', 'b'], playId: 1, animate: false }} chain={[a, m, b]} links={links}
+    currentIndex={null} focus={null} inset={{ right: 544 }} canExit hidden={false} onStep={() => {}} onEnd={() => {}} onExit={() => {}} onReplay={() => {}} onExplain={() => {}} onInspect={() => {}}
+    onOpenExploration={onOpenExploration} />);
+  const markup = stage(() => {});
+  const actions = markup.slice(markup.indexOf('class="stage-actions"'));
+  // Replay is a play icon with no chrome; Open exploration has the icon of the sidebar's connection cards (the same component).
+  assert.match(actions, /<button type="button" class="stage-icon-button stage-replay" aria-label="Replay the connection"><svg[^>]*fill="currentColor"[^>]*><path d="M7 4\.5v15l12-7\.5z"><\/path><\/svg><\/button>/);
+  assert.match(actions, /<button type="button" class="stage-icon-button stage-open-graph" aria-label="Open exploration">/);
+  assert.ok(actions.includes(renderToStaticMarkup(<ExplorationIcon size={22} />)));
+  // Replay, then the graph, then Close; only Close keeps its round chrome.
+  assert.ok(actions.indexOf('Replay the connection') < actions.indexOf('Open exploration') && actions.indexOf('Open exploration') < actions.indexOf('Close the connection'));
+  assert.equal(actions.match(/close-button/g)?.length, 1);
+  // A connection that is not saved yet has no graph to open: no button.
+  assert.doesNotMatch(stage(), /Open exploration|stage-open-graph/);
+  // The stage leaves room for the sidebar only; the canvas header has stepped away, so it starts at the top.
+  assert.match(markup, /<section[^>]*style="right:544px"/);
+  const css = readFileSync('src/styles/connectionStage.css', 'utf8');
+  assert.match(css, /\.connection-stage \{ position: absolute; left: 0; top: 0; bottom: 0;/);
+  assert.match(css, /\.stage-icon-button \{[^}]*border: 0;[^}]*background: none;/);
 });

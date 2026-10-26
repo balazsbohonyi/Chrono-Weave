@@ -8,6 +8,7 @@ import { fetchBatchFigureDetails } from '../services/wikiService';
 import { prefersReducedMotion } from '../utils/canvasCamera';
 import SidebarFigureCard, { type FigureDetail } from './SidebarFigureCard';
 import NetworkPortrait from './connectionNetwork/NetworkPortrait';
+import ExplorationIcon from './connectionNetwork/ExplorationIcon';
 import MarkdownContent from './MarkdownContent';
 import Tooltip from './Tooltip';
 import { SixDegreesInfoButton, SixDegreesInfoLink } from './SixDegreesInfo';
@@ -22,10 +23,14 @@ export interface ConnectionPanelProps {
   isBusy: boolean;
   onClose: () => void;
   onReplay: (entry: ConnectionPathEntry) => void;
+  // Forgets a connection, and the people it brought in that no other connection needs.
+  onDelete?: (entry: ConnectionPathEntry) => void;
   onFocusPerson: (figure: HistoricalFigure) => void;
   onExplain: (from: HistoricalFigure, to: HistoricalFigure, contact?: ContactAssessment) => void;
   checkpoints?: ConnectionSession[];
   onOpenCheckpoint?: (session: ConnectionSession) => void;
+  // Forgets a paused exploration (its people and contacts stay saved for later searches).
+  onDeleteCheckpoint?: (session: ConnectionSession) => void;
   // Reopens the exploration graph of a connection that was already made (its chain lit, with Reveal to play it).
   onOpenExploration?: (entry: ConnectionPathEntry) => void;
   // Opens the explanation of Six Degrees of Separation.
@@ -38,9 +43,15 @@ export interface ConnectionPanelProps {
 const OpenExplorationButton: React.FC<{ onOpen: () => void; disabled?: boolean }> = ({ onOpen, disabled }) =>
   <Tooltip text="Open exploration">
     <button type="button" className="connection-open-exploration" aria-label="Open exploration" disabled={disabled} onClick={onOpen}>
-      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <circle cx="5" cy="6" r="2.4" /><circle cx="19" cy="6" r="2.4" /><circle cx="12" cy="18" r="2.4" />
-        <path d="M7.2 7l3.6 9M16.8 7l-3.6 9M7.6 6h8.8" />
+      <ExplorationIcon />
+    </button>
+  </Tooltip>;
+
+const DeleteConnectionButton: React.FC<{ onDelete: () => void; disabled?: boolean; label?: string }> = ({ onDelete, disabled, label = 'Delete connection' }) =>
+  <Tooltip text={label}>
+    <button type="button" className="connection-open-exploration" aria-label={label} disabled={disabled} onClick={onDelete}>
+      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3" />
       </svg>
     </button>
   </Tooltip>;
@@ -90,8 +101,11 @@ export const ConnectionHeader: React.FC<{ connection: ActiveConnection; onClose:
 // The Connection tab: the chain from one person to the other with the verified evidence for every
 // link, and the connections already made on this canvas.
 const ConnectionPanel: React.FC<ConnectionPanelProps> = ({ connection, currentIndex, recent, canvasIds, isBusy, onClose,
-  onReplay, onFocusPerson, onExplain, renderActions, checkpoints = [], onOpenCheckpoint, onOpenExploration, onOpenInfo }) => {
+  onReplay, onDelete, onFocusPerson, onExplain, renderActions, checkpoints = [], onOpenCheckpoint, onDeleteCheckpoint, onOpenExploration, onOpenInfo }) => {
   const [details, setDetails] = useState<Map<string, FigureDetail>>(new Map());
+  // The connection, or the paused exploration, whose deletion waits for a second click.
+  const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
+  const [confirmingCheckpoint, setConfirmingCheckpoint] = useState<string | null>(null);
   const chainRef = useRef<HTMLOListElement>(null);
   const known = connection?.chain ?? [];
   const chainKey = known.map(person => person.id).join('|');
@@ -150,14 +164,23 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({ connection, currentIn
       )}
 
       {checkpoints.length > 0 && <section className="connection-recent" aria-label="Paused contact explorations"><h4>Paused explorations</h4><ul>{checkpoints.map(session => <li key={session.key}>
-        {/* The whole card opens the exploration (the main button's overlay), and so does the icon. */}
-        <div className={`connection-recent-entry ${isBusy ? 'is-busy' : ''}`}>
+        {/* The whole card opens the exploration (the main button's overlay), and so does the icon. The icons only show while the card is hovered or has keyboard focus, as on a finished connection. */}
+        <div className={`connection-recent-entry has-hover-actions ${isBusy ? 'is-busy' : ''}`}>
           <button type="button" className="connection-recent-main" disabled={isBusy} onClick={() => onOpenCheckpoint?.(session)}>
             {pair(ends(session))}
             <span className="connection-recent-names">{ends(session).map(person => person.name).join(' → ')}</span>
           </button>
           <OpenExplorationButton disabled={isBusy} onOpen={() => onOpenCheckpoint?.(session)} />
-        </div></li>)}</ul></section>}
+          {onDeleteCheckpoint && <DeleteConnectionButton label="Delete exploration" disabled={isBusy} onDelete={() => setConfirmingCheckpoint(session.key)} />}
+        </div>
+        {onDeleteCheckpoint && confirmingCheckpoint === session.key && (
+          <div className="connection-delete-confirm" role="group" aria-label={`Delete the exploration ${ends(session).map(person => person.name).join(' → ')}`}>
+            <span>Delete this paused exploration? The people and contacts it checked stay saved, so a new search reuses them.</span>
+            <button type="button" className="connection-delete-yes" disabled={isBusy} onClick={() => { setConfirmingCheckpoint(null); onDeleteCheckpoint(session); }}>Delete</button>
+            <button type="button" className="connection-delete-no" onClick={() => setConfirmingCheckpoint(null)}>Cancel</button>
+          </div>
+        )}
+      </li>)}</ul></section>}
       {recent.length > 0 && (
         <section className="connection-recent" aria-label="Recent connections">
           <h4>Recent connections</h4>
@@ -168,15 +191,23 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({ connection, currentIn
               const isCurrent = [first.id, last.id].sort().join('|') === activeEnds;
               return (
                 <li key={entry.key}>
-                  {/* The card plays the connection; the icon opens the exploration it came from. */}
-                  <div className={`connection-recent-entry ${isCurrent ? 'is-current' : ''} ${isBusy ? 'is-busy' : ''}`}>
+                  {/* The card plays the connection; the icon opens the exploration it came from. The icons only show while the card is hovered or has keyboard focus (see the stylesheet). */}
+                  <div className={`connection-recent-entry has-hover-actions ${isCurrent ? 'is-current' : ''} ${isBusy ? 'is-busy' : ''}`}>
                     <button type="button" className="connection-recent-main" aria-current={isCurrent || undefined} disabled={isBusy} onClick={() => onReplay(entry)}>
                       {pair([first, last])}
                       <span className="connection-recent-names">{first.name} → {last.name}</span>
                     </button>
                     {onOpenExploration && <OpenExplorationButton disabled={isBusy} onOpen={() => onOpenExploration(entry)} />}
+                    {onDelete && <DeleteConnectionButton disabled={isBusy} onDelete={() => setConfirmingDelete(entry.key)} />}
                     <span className="connection-recent-degrees"><b>{entry.figures.length - 1}</b> {entry.figures.length - 1 === 1 ? 'degree' : 'degrees'}</span>
                   </div>
+                  {onDelete && confirmingDelete === entry.key && (
+                    <div className="connection-delete-confirm" role="group" aria-label={`Delete ${first.name} → ${last.name}`}>
+                      <span>Delete this connection? People only it added leave the canvas.</span>
+                      <button type="button" className="connection-delete-yes" disabled={isBusy} onClick={() => { setConfirmingDelete(null); onDelete(entry); }}>Delete</button>
+                      <button type="button" className="connection-delete-no" onClick={() => setConfirmingDelete(null)}>Cancel</button>
+                    </div>
+                  )}
                 </li>
               );
             })}

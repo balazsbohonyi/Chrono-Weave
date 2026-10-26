@@ -22,6 +22,12 @@ export interface CanvasConfig {
   layoutVersion: number;
   layoutSelection: CanvasLayoutSelection;
   seedFigureId?: string;
+  // People Six Degrees connections brought in (see utils/connectionGuests): figure id to the saved path keys that need them.
+  guests?: Record<string, string[]>;
+  // Guests moved to the main canvas: still listed in `guests` (so the move can be undone), laid out with everyone else.
+  movedToMain?: string[];
+  // Categories that only such moves added to `weaveContext.activeCategories`, taken out again when no one needs them.
+  movedCategories?: FigureCategory[];
 }
 
 export interface SidebarViewState {
@@ -40,6 +46,7 @@ export interface CanvasViewSnapshot {
   searchQuery: string;
   highlightedFigureIds: string[];
   currentSearchIndex: number;
+  guestVisibility: 'show' | 'dim' | 'hide';
 }
 
 export interface CanvasSnapshot {
@@ -148,8 +155,6 @@ export interface RelationshipExplanation {
     summary: string;
     sections: { title: string; content: string }[];
 }
-
-export type InteractionMode = 'select' | 'pan' | 'zoom';
 
 // A person proposed or identified by the model who may not be on the canvas yet.
 export interface NewPerson {

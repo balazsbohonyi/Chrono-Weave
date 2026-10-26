@@ -32,6 +32,10 @@ interface Props {
   // The search text lives in the shell so that Escape can clear it before it closes the overlay.
   query: string;
   onQueryChange: (query: string) => void;
+  // The full-screen explorer floats this panel over the graph: `open` then says whether it is shown (it stays mounted when hidden, so its
+  // tab, search and scroll survive), and `onHide` hides it without clearing the selection.
+  floating?: boolean;
+  onHide?: () => void;
 }
 
 // A clamped excerpt: Markdown in the stored text would only show as stray symbols, so it is stripped before cutting.
@@ -42,7 +46,7 @@ const excerpt = (text: string, max = 96) => {
 const interaction = (contact: CandidateContact) => contact.assessment?.interactionType?.replace(/-/g, ' ') ?? '';
 const detailOf = (contact: CandidateContact) => contact.assessment?.evidence || contact.assessment?.uncertainty || contact.blockedReason || contact.claim || 'Awaiting assessment';
 
-const NetworkInspector: React.FC<Props> = ({ session, view, selection, portraits, pinned, narrow, open, onSelect, onUnpin, onDismiss, onBack, history, restored, query, onQueryChange }) => {
+const NetworkInspector: React.FC<Props> = ({ session, view, selection, portraits, pinned, narrow, open, onSelect, onUnpin, onDismiss, onBack, history, restored, query, onQueryChange, floating = false, onHide }) => {
   const [tab, setTab] = useState<InspectorTab>('people');
   const [openGroups, setOpenGroups] = useState<ReadonlySet<string>>(() => new Set());
   // A different exploration starts on the first tab with every group folded.
@@ -175,13 +179,20 @@ const NetworkInspector: React.FC<Props> = ({ session, view, selection, portraits
   const HINT = 'Select a person or contact to read the stored evidence. Inspection does not make additional AI requests.';
   const back = backLabel(history, tab, name);
 
-  return <aside className={`connection-explorer-inspection ${narrow ? 'is-sheet' : ''} ${narrow && open ? 'is-open' : ''}`} aria-label="Network inspection" hidden={narrow && !open}>
+  const headAction = hasSelection
+    ? <button type="button" className="net-back" onClick={onBack} title={back} aria-label={back.replace('←', 'Back to')}>{back}</button>
+    : <Tooltip text={HINT} multiline placement="bottom"><button type="button" className="net-help" aria-label={HINT}>?</button></Tooltip>;
+
+  return <aside className={`connection-explorer-inspection ${narrow ? 'is-sheet' : ''} ${narrow && open ? 'is-open' : ''}${floating ? ' is-floating' : ''}`} aria-label="Network inspection" hidden={(narrow || floating) && !open}>
     {narrow && <button type="button" className="net-sheet-close" onClick={onDismiss} aria-label="Close inspection">×</button>}
     <div className="net-inspect-head">
       <h3>Inspect the exploration</h3>
-      {hasSelection
-        ? <button type="button" className="net-back" onClick={onBack} title={back} aria-label={back.replace('←', 'Back to')}>{back}</button>
-        : <Tooltip text={HINT} multiline placement="bottom"><button type="button" className="net-help" aria-label={HINT}>?</button></Tooltip>}
+      {floating
+        ? <div className="net-inspect-actions">{headAction}
+          <button type="button" className="net-panel-close" onClick={onHide} aria-label="Hide the side panel" title="Hide the side panel (Esc)">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M6 18L18 6" /></svg>
+          </button></div>
+        : headAction}
     </div>
     {hasSelection && <div className="net-detail">{selectedPerson && session ? renderPerson(selectedPerson) : selectedEdge ? renderEdge(selectedEdge) : null}</div>}
     <div className="net-browser" hidden={hasSelection}>

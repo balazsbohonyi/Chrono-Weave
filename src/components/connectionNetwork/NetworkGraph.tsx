@@ -8,8 +8,10 @@ import {
 } from '../../services/connectionNetworkView';
 import { formatYear } from '../../utils/formatters';
 import { createWheelClassifier } from '../../utils/wheelGesture';
-import Tooltip from '../Tooltip';
-import { fitCamera as fitPoints, type Camera, type CameraPoint } from './camera';
+import ToolButton from './ToolButton';
+import ActivityCaption from './ActivityCaption';
+import { fitCamera as fitPoints, isFarZoom, previewTransform, rectHasPoint, rectHasRect, rectHasSegment, viewRect, type Camera, type CameraPoint, type Rect } from './camera';
+import { GRAPH_PERF_CULLING, GRAPH_PERF_EXTENDED_ANIMATIONS, GRAPH_PERF_HIDE_PORTRAITS, GRAPH_PERF_LEVEL_OF_DETAIL, GRAPH_PERF_ZOOM_PREVIEW } from './performance';
 import LayoutMenu from './LayoutMenu';
 import { layoutInfoLabel } from '../LayoutInfo';
 import { labelLimit, nodeRadius } from './metrics';
@@ -40,7 +42,7 @@ interface Props {
   narrow: boolean;
   reducedMotion: boolean;
   success: { degrees: number } | null;
-  // A connection that was already made, reopened to explore: nothing is dimmed or framed and its chain is lime, lines on or off (Reveal is in the header).
+  // A connection that was already made, reopened to explore: nothing is framed, everyone off the chain is dimmed until something is selected, and its chain is lime, lines on or off (Reveal is in the header).
   solved?: { degrees: number } | null;
   // Whether the chain of a found or solved connection is lit (lime); off, it looks like any other AI-supported contacts.
   showChain?: boolean;
@@ -51,11 +53,19 @@ interface Props {
   onPinsChange: () => void;
   onToggleFold: (hostId: string) => void;
   legend: React.ReactNode;
-  // Whether the graph has the whole body to itself, and the way to toggle that (absent when there is no side panel to hide).
+  // Whether the graph has the whole viewport to itself, and the way to switch that on (absent when there is no side panel to hide). While it is
+  // on, the explorer's compact bar has the way back, so the bare icon is not drawn.
   maximized: boolean;
   onToggleMaximize?: () => void;
+  // Width in pixels of the strip at the right edge that the floating panel covers (0 when it is closed). The graph is not resized by it, but
+  // what the camera frames, or pans to, stays in the part that is left.
+  inset?: number;
   // Opens the explanation of the current layout (absent: no help button in the toolbar).
   onOpenLayoutInfo?: () => void;
+  // Whether the search is also drawn along lines and in a caption (see `GRAPH_PERF_EXTENDED_ANIMATIONS`).
+  extendedAnimations?: boolean;
+  // Hears how wide the activity caption is while it is shown (0 when not), for the full-screen bar to make room for.
+  onCaptionWidth?: (width: number) => void;
 }
 
 const sideClass = (node: NetworkNode) => node.endpoint !== null ? `is-endpoint is-end-${node.endpoint === 0 ? 'a' : 'b'}` : `is-side-${node.side}`;
@@ -70,12 +80,6 @@ const columnLabel = (guide: ColumnGuide, guides: readonly ColumnGuide[], zoom: n
   return room >= 18 || guide.hops % 5 === 0 ? String(guide.hops) : '';
 };
 
-// One icon button of the view controls. A state is shown with `pressed`, an action with just its label.
-const ToolButton: React.FC<{ tip: string; label?: string; pressed?: boolean; disabled?: boolean; haspopup?: boolean; onClick: () => void; children: React.ReactNode }> = ({ tip, label, pressed, disabled, haspopup, onClick, children }) =>
-  <Tooltip text={tip}><button type="button" className="canvas-floating-button" aria-label={label ?? tip} aria-pressed={pressed} disabled={disabled} aria-haspopup={haspopup ? 'dialog' : undefined}
-    onClick={event => { if (event.detail > 0) event.currentTarget.blur(); onClick(); }}>
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{children}</svg>
-  </button></Tooltip>;
 // Keeps receiving a drag that leaves the element; a pointer that is already gone is not an error.
 const capture = (element: Element, pointerId: number) => { try { element.setPointerCapture(pointerId); } catch { /* released */ } };
 const activate = (action: () => void) => (event: React.KeyboardEvent) => {
@@ -120,12 +124,21 @@ const EdgeLayer = memo(function EdgeLayer({ edges, selection, focus, chainEdges,
   })}</>;
 });
 
+// What the search is doing, drawn as lines of its own between two people (they are painted like any other line, from their data-from / data-to):
+// a beam from each person whose contacts are sought toward the other end of the chain, or a comet between the endpoints while a seed route is asked for.
+interface Beam { id: string; from: string; to: string; kind: 'a' | 'b' | 'seed' }
+const BeamLayer = memo(function BeamLayer({ beams }: { beams: readonly Beam[] }) {
+  return <>{beams.map(beam => <g key={beam.id} data-edge={beam.id} data-from={beam.from} data-to={beam.to} className={`net-edge net-beam is-beam-${beam.kind}`} aria-hidden="true">
+    <path className="net-edge-halo" /><path className="net-edge-line" pathLength={beam.kind === 'seed' ? 100 : undefined} /><path className="net-edge-hit" />
+  </g>)}</>;
+});
+
 interface NodeItemProps {
   id: string; name: string; years: string; category: NetworkNode['person']['category']; endpoint: 0 | 1 | null; label: string; className: string;
-  selected: boolean; r: number; url?: string; clip: string; pinned: boolean; active: boolean; shownName: string; foldCount: number; foldExpanded: boolean;
+  selected: boolean; r: number; url?: string; clip: string; pinned: boolean; active: boolean; working: string; shownName: string; foldCount: number; foldExpanded: boolean;
   handlers: NodeHandlers; onSelect: (selection: NetworkSelection) => void; onToggleFold: (hostId: string) => void;
 }
-const NodeItem = memo(function NodeItem({ id, name, years, category, endpoint, label, className, selected, r, url, clip, pinned, active, shownName, foldCount, foldExpanded, handlers, onSelect, onToggleFold }: NodeItemProps) {
+const NodeItem = memo(function NodeItem({ id, name, years, category, endpoint, label, className, selected, r, url, clip, pinned, active, working, shownName, foldCount, foldExpanded, handlers, onSelect, onToggleFold }: NodeItemProps) {
   const isEndpoint = endpoint !== null;
   const select = () => onSelect({ person: id });
   return <g data-net-interactive data-node={id} role="button" tabIndex={0} aria-label={label} aria-pressed={selected}
@@ -134,7 +147,9 @@ const NodeItem = memo(function NodeItem({ id, name, years, category, endpoint, l
     <title>{`${name} (${years})`}</title>
     <g className="net-node-body">
       {isEndpoint && <g className="net-beacon" aria-hidden="true"><circle className="net-halo" r={r + 28} /><circle className="net-halo-ring" r={r + 14} /></g>}
-      {active && <circle className="net-pulse" r={r + 9} />}
+      {working.startsWith('asked') && <g className="net-ripple-set" aria-hidden="true"><circle className="net-ripple" r={r + 3} /><circle className="net-ripple" r={r + 3} /><circle className="net-ripple" r={r + 3} /></g>}
+      {working === 'identity' && <circle className="net-scan" r={r + 8} aria-hidden="true" />}
+      {active && <g className="net-pulse-set" aria-hidden="true"><circle className="net-pulse-halo" r={r + 6} /><circle className="net-pulse" r={r + 6} /><circle className="net-pulse" r={r + 6} /><circle className="net-pulse" r={r + 6} /></g>}
       <circle className="net-select-ring" r={r + 8} />
       <circle className="net-ring" r={r + 3} />
       <circle className="net-disc" r={r} fill={CATEGORY_COLORS[category]} />
@@ -154,8 +169,8 @@ const NodeItem = memo(function NodeItem({ id, name, years, category, endpoint, l
   </g>;
 });
 
-const NodeLayer = memo(function NodeLayer({ nodes, folds, selection, focus, chainNodes, narrow, portraits, failed, pinned, endpointNames, clips, handlers, onSelect, onToggleFold }: {
-  nodes: NetworkNode[]; folds: NetworkFold[]; selection: NetworkSelection; focus: Focus; chainNodes: ReadonlySet<string> | null; narrow: boolean;
+const NodeLayer = memo(function NodeLayer({ nodes, folds, selection, focus, chainNodes, workingEnds, narrow, portraits, failed, pinned, endpointNames, clips, handlers, onSelect, onToggleFold }: {
+  nodes: NetworkNode[]; folds: NetworkFold[]; selection: NetworkSelection; focus: Focus; chainNodes: ReadonlySet<string> | null; workingEnds: string; narrow: boolean;
   portraits: Map<string, string>; failed: ReadonlyMap<string, string>; pinned: ReadonlySet<string>; endpointNames: [string, string];
   clips: { endpoint: string; person: string }; handlers: NodeHandlers; onSelect: (selection: NetworkSelection) => void; onToggleFold: (hostId: string) => void;
 }) {
@@ -163,11 +178,11 @@ const NodeLayer = memo(function NodeLayer({ nodes, folds, selection, focus, chai
   return <>{nodes.map(node => {
     const isEndpoint = node.endpoint !== null, fold = foldOf.get(node.id), isPinned = pinned.has(node.id), name = node.person.name;
     const selected = selection.person === node.id, onEdge = !!selection.edge && !!focus?.nodes.has(node.id);
-    const className = `net-node ${sideClass(node)} ${node.supported ? 'is-supported' : 'is-tentative'} ${selected ? 'is-selected' : ''} ${onEdge ? 'is-edge-end' : ''} ${focus && !focus.nodes.has(node.id) ? 'is-dim' : ''} ${chainNodes?.has(node.id) ? 'is-chain' : ''} ${node.active ? 'is-active' : ''}`;
+    const className = `net-node ${sideClass(node)} ${node.supported ? 'is-supported' : 'is-tentative'} ${selected ? 'is-selected' : ''} ${onEdge ? 'is-edge-end' : ''} ${focus && !focus.nodes.has(node.id) ? 'is-dim' : ''} ${chainNodes?.has(node.id) ? 'is-chain' : ''} ${node.active ? 'is-active' : ''} ${isEndpoint && workingEnds.includes(node.endpoint === 0 ? 'a' : 'b') ? 'is-working-end' : ''} ${node.working ? `is-${node.working.kind}${node.working.side ? `-${node.working.side}` : ''}` : ''}`;
     return <NodeItem key={node.id} id={node.id} name={name} years={`${node.person.birthYear}–${node.person.deathYear}`} category={node.person.category}
       endpoint={node.endpoint} label={`${name}, ${describeSide(node, endpointNames)}${isPinned ? ', pinned' : ''}`} className={className} selected={selected}
       r={nodeRadius(isEndpoint, narrow)} url={failed.get(node.id) !== portraits.get(node.id) ? portraits.get(node.id) : undefined} clip={isEndpoint ? clips.endpoint : clips.person}
-      pinned={isPinned} active={node.active} shownName={isEndpoint ? truncateName(name, ENDPOINT_NAME_LIMIT) : truncateName(name, labelLimit(narrow))}
+      pinned={isPinned} active={node.active} working={node.working ? `${node.working.kind}${node.working.side ? `-${node.working.side}` : ''}` : ''} shownName={isEndpoint ? truncateName(name, ENDPOINT_NAME_LIMIT) : truncateName(name, labelLimit(narrow))}
       foldCount={fold?.ids.length ?? 0} foldExpanded={!!fold?.expanded} handlers={handlers} onSelect={onSelect} onToggleFold={onToggleFold} />;
   })}</>;
 });
@@ -179,18 +194,33 @@ const setEnds = (paths: Iterable<SVGPathElement>, a: Point, b: Point, previous =
   if (d !== previous) for (const path of paths) path.setAttribute('d', d);
   return d;
 };
-// A person (or line) the layout has not placed yet is kept out of sight until it has, rather than drawn at the origin. What was set
+// A person (or line) the layout has not placed yet is kept out of sight until it has, rather than drawn at the origin; one outside the
+// view is kept out of sight too (`display: none` takes it out of style, layout and paint, which `visibility` would not). What was set
 // is remembered, so a frame does not read every element's style.
 interface Drawn { el: SVGGElement; key: string; visible: boolean }
-const show = (drawn: Drawn, visible: boolean) => { if (drawn.visible !== visible) { drawn.el.style.visibility = visible ? '' : 'hidden'; drawn.visible = visible; } };
+const show = (drawn: Drawn, visible: boolean) => { if (drawn.visible !== visible) { drawn.el.style.display = visible ? '' : 'none'; drawn.visible = visible; } };
+// Room kept around the view, in screen pixels, for what reaches past a person's centre (name, halo) so nothing pops in at the edge.
+const CULL_MARGIN = 120;
+// Below this many drawn people, zooming out keeps names and portraits (see `isFarZoom`).
+const LOD_MIN_PEOPLE = 60;
+// How long without a pointer or wheel event before the drawing's place on the page is read again (see `local`).
+const ORIGIN_KEPT_MS = 250;
+// A zoom gesture is previewed with a CSS transform and committed to the drawing after this long without an event, and at least this often while it goes on.
+const PREVIEW_SETTLE_MS = 120, PREVIEW_COMMIT_MAX_MS = 350;
+// How much more than the view (as a share of the bigger side of the drawing) is drawn when a preview zooms out past what was drawn.
+const PREVIEW_OVERSCAN = 0.5;
+// The year bands and lines reach this many drawing heights (and widths, for the lines) beyond the view, so a zoom preview that shrinks the drawing finds them there.
+const AXIS_PREVIEW_REACH = 3;
 // From this many drawn people and lines, dimming is immediate instead of fading (see the stylesheet).
 const LARGE_DRAWING = 250;
+// How long a line flashes after its contact is decided (the stylesheet's `net-decided` animations last about as long).
+const DECIDED_FLASH_MS = 1600;
 
 // The drawing: an SVG whose structure React renders and whose positions the layout paints directly,
 // so the simulation never re-renders the explorer. The camera is a transform over screen-sized content.
 const NetworkGraph: React.FC<Props> = ({
   view, endpointNames, nameOf, layout, kick, pinned, mode, onModeChange, size, onSize, selection, onSelect, portraits, narrow, reducedMotion,
-  success, solved = null, showChain = true, onReveal, resume = null, reveal, onPinsChange, onToggleFold, legend, maximized, onToggleMaximize, onOpenLayoutInfo,
+  success, solved = null, showChain = true, onReveal, resume = null, reveal, onPinsChange, onToggleFold, legend, maximized, onToggleMaximize, inset = 0, onOpenLayoutInfo, extendedAnimations = GRAPH_PERF_EXTENDED_ANIMATIONS, onCaptionWidth,
 }) => {
   const uid = useId().replace(/:/g, '');
   const svg = useRef<SVGSVGElement>(null);
@@ -212,8 +242,10 @@ const NetworkGraph: React.FC<Props> = ({
   // The layer over the graph the layout menu is drawn in (see LayoutMenu).
   const [menuHost, setMenuHost] = useState<HTMLDivElement | null>(null);
   const [camera, setCamera] = useState<Camera>({ x: 0, y: 0, k: 1 });
+  // `camera` is what the drawing shows; `cameraRef` is where the camera is (ahead of it while a zoom is being previewed, see `previewTo`).
   const cameraRef = useRef(camera);
-  cameraRef.current = camera;
+  const shown = useRef(camera);
+  shown.current = camera;
   const userMoved = useRef(false);
   // Following the graph normally keeps a readable zoom; "Fit network" asks for everything at once.
   const followAll = useRef(false);
@@ -226,21 +258,31 @@ const NetworkGraph: React.FC<Props> = ({
   sizeRef.current = size;
   const narrowRef = useRef(narrow);
   narrowRef.current = narrow;
+  const insetRef = useRef(inset);
+  insetRef.current = inset;
 
   const apply = useCallback((next: Camera) => { cameraRef.current = next; setCamera(next); }, []);
 
-  const paint = useCallback(() => {
+  // Paints positions, and keeps people and lines outside the view out of the page: they are skipped entirely (no attribute writes) until
+  // they come back, when their remembered `key` no longer matches and they are painted again.
+  // `overscan` (screen pixels, on top of CULL_MARGIN) draws more than the view, for a zoom preview that is about to show more; `painted` is the
+  // world rectangle that was last drawn, so a preview knows when it has outgrown it.
+  const painted = useRef<Rect | null>(null);
+  const paint = useCallback((overscan = 0) => {
+    const { width, height } = sizeRef.current;
+    const inView = GRAPH_PERF_CULLING && width > 0 && height > 0 ? viewRect(cameraRef.current, sizeRef.current, CULL_MARGIN + overscan) : null;
+    painted.current = inView;
     for (const [id, drawn] of nodeEls.current) {
       const at = layout.position(id);
-      show(drawn, !!at);
-      if (!at) continue;
+      show(drawn, !!at && (!inView || rectHasPoint(inView, at)));
+      if (!at || !drawn.visible) continue;
       const key = `translate(${at.x.toFixed(1)} ${at.y.toFixed(1)})`;
       if (key !== drawn.key) { drawn.el.setAttribute('transform', key); drawn.key = key; }
     }
     for (const drawn of edgeEls.current.values()) {
       const a = layout.position(drawn.from), b = layout.position(drawn.to);
-      show(drawn, !!a && !!b);
-      if (a && b) drawn.key = setEnds(drawn.paths, a, b, drawn.key);
+      show(drawn, !!a && !!b && (!inView || rectHasSegment(inView, a, b)));
+      if (a && b && drawn.visible) drawn.key = setEnds(drawn.paths, a, b, drawn.key);
     }
     for (const { anchor, el } of ringEls.current.values()) {
       const at = layout.position(anchor);
@@ -261,7 +303,7 @@ const NetworkGraph: React.FC<Props> = ({
       const at = layout.position(id);
       if (at && (!only || only.has(id))) points.push({ ...at, r: node.radius + 22, endpoint: node.endpoint !== null });
     }
-    const result = fitPoints(points, sizeRef.current, {
+    const result = fitPoints(points, { width: Math.max(1, sizeRef.current.width - insetRef.current), height: sizeRef.current.height }, {
       everything: everything || !!only, readableZoom: narrowRef.current ? READABLE_ZOOM_NARROW : READABLE_ZOOM,
       minZoom: MIN_ZOOM, maxZoom: 1.25, padding: FIT_PADDING, strip: STRIP_HEIGHT,
     });
@@ -276,13 +318,13 @@ const NetworkGraph: React.FC<Props> = ({
   const centerOn = useCallback((x: number, y: number) => {
     const { width, height } = sizeRef.current, k = cameraRef.current.k;
     userMoved.current = true;
-    apply({ k, x: width / 2 - x * k, y: height / 2 - y * k });
+    apply({ k, x: (width - insetRef.current) / 2 - x * k, y: height / 2 - y * k });
   }, [apply]);
 
   const visibleOnScreen = useCallback((at: Point) => {
     const { width, height } = sizeRef.current, { x, y, k } = cameraRef.current;
     const sx = at.x * k + x, sy = at.y * k + y;
-    return sx > 20 && sx < width - 20 && sy > STRIP_HEIGHT + 8 && sy < height - STRIP_HEIGHT - 8;
+    return sx > 20 && sx < width - insetRef.current - 20 && sy > STRIP_HEIGHT + 8 && sy < height - STRIP_HEIGHT - 8;
   }, []);
 
   // Positions painted by the layout, plus follow-the-graph camera until the user takes over. The camera follows every frame (the
@@ -300,10 +342,13 @@ const NetworkGraph: React.FC<Props> = ({
     if (next && (Math.abs(next.x - was.x) > 0.25 || Math.abs(next.y - was.y) > 0.25 || Math.abs(next.k - was.k) > 0.0005)) apply(next);
   }); }, [layout, paint, fitCamera, apply]);
 
+  // Panning, zooming and resizing move what is in view without the layout moving anyone: culling follows them.
+  useLayoutEffect(() => { if (GRAPH_PERF_CULLING) paint(); }, [camera, size.width, size.height, paint]);
+
   // Measure the available area. Layout and drawing work in real screen pixels.
   useLayoutEffect(() => {
     const element = svg.current; if (!element) return;
-    const measure = () => { const box = element.getBoundingClientRect(); if (box.width > 0 && box.height > 0) onSize(Math.round(box.width), Math.round(box.height)); };
+    const measure = () => { origin.current = null; const box = (element.parentElement ?? element).getBoundingClientRect(); if (box.width > 0 && box.height > 0) onSize(Math.round(box.width), Math.round(box.height)); };
     measure();
     if (typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(measure);
@@ -331,15 +376,63 @@ const NetworkGraph: React.FC<Props> = ({
     return () => { litChain.current = null; };
   }, [chainKey]);
 
+  // Zoom gestures (wheel, pinch) move the camera without redrawing: the drawing is scaled as a picture by a CSS transform on the SVG, which costs
+  // neither layout nor a render, and the camera is committed (drawn for real, with the transform cleared) once the gesture pauses and at least
+  // every PREVIEW_COMMIT_MAX_MS while it goes on. Changing the scale of the content itself lays out every person and line again.
+  const settle = useRef<{ timer?: number; since: number }>({ since: 0 });
+  const commit = useCallback(() => { window.clearTimeout(settle.current.timer); settle.current.timer = undefined; setCamera(cameraRef.current); }, []);
+  const schedule = useCallback(() => {
+    const gesture = settle.current, now = performance.now();
+    if (gesture.timer === undefined) gesture.since = now;
+    window.clearTimeout(gesture.timer);
+    if (now - gesture.since >= PREVIEW_COMMIT_MAX_MS) commit(); else gesture.timer = window.setTimeout(commit, PREVIEW_SETTLE_MS);
+  }, [commit]);
+  const showPreview = useCallback(() => {
+    const element = svg.current; if (!element) return;
+    const { s, x, y } = previewTransform(shown.current, cameraRef.current);
+    element.style.transformOrigin = '0 0'; element.style.willChange = 'transform'; element.style.transform = `translate(${x}px, ${y}px) scale(${s})`;
+  }, []);
+  const previewTo = useCallback((next: Camera) => {
+    if (!GRAPH_PERF_ZOOM_PREVIEW) { apply(next); return; }
+    cameraRef.current = next;
+    showPreview();
+    // Zooming out shows more than was drawn: whoever was culled and now falls in the view is drawn (in the drawn camera's own coordinates, which the
+    // transform carries along), and the SVG lets its content show outside its own box (see the stylesheet), so the new edges are not left empty.
+    if (GRAPH_PERF_CULLING && painted.current && !rectHasRect(painted.current, viewRect(cameraRef.current, sizeRef.current, 0))) paint(Math.max(sizeRef.current.width, sizeRef.current.height) * PREVIEW_OVERSCAN);
+    schedule();
+  }, [apply, showPreview, schedule, paint]);
+  // A committed camera is drawn for real: the preview is over, unless the camera has moved on since the commit was asked for.
+  useLayoutEffect(() => {
+    const element = svg.current; if (!element) return;
+    element.style.transform = ''; element.style.willChange = '';
+    window.clearTimeout(settle.current.timer); settle.current.timer = undefined;
+    if (cameraRef.current !== camera) { showPreview(); schedule(); }
+  }, [camera, showPreview, schedule]);
+  useEffect(() => () => window.clearTimeout(settle.current.timer), []);
+
   const zoomBy = useCallback((factor: number, anchor?: Point) => {
     const { width, height } = sizeRef.current, c = cameraRef.current, at = anchor ?? { x: width / 2, y: height / 2 };
     const k = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, c.k * factor)), ratio = k / c.k;
     userMoved.current = true;
-    apply({ k, x: at.x - (at.x - c.x) * ratio, y: at.y - (at.y - c.y) * ratio });
-  }, [apply]);
+    const next = { k, x: at.x - (at.x - c.x) * ratio, y: at.y - (at.y - c.y) * ratio };
+    // A gesture has an anchor (the pointer); the buttons zoom around the middle in one step.
+    if (anchor) previewTo(next); else apply(next);
+  }, [apply, previewTo]);
 
+  // Where the drawing sits on the page (read from the stage around the SVG, which a zoom preview does not transform). Reading it forces a layout whenever the page changed since the last one, and a gesture changes the
+  // page every frame (the camera moves), so a pinch or a pan would lay out the whole drawing on each of its events: the reading is kept for as
+  // long as events keep coming, and taken again after a pause, a resize or a scroll.
+  const origin = useRef<{ left: number; top: number; at: number } | null>(null);
+  useEffect(() => {
+    const forget = () => { origin.current = null; };
+    window.addEventListener('resize', forget); window.addEventListener('scroll', forget, true);
+    return () => { window.removeEventListener('resize', forget); window.removeEventListener('scroll', forget, true); };
+  }, []);
   const local = (event: { clientX: number; clientY: number }): Point => {
-    const box = svg.current!.getBoundingClientRect();
+    const now = performance.now();
+    let box = origin.current;
+    if (!box || now - box.at > ORIGIN_KEPT_MS) { const rect = svg.current!.parentElement!.getBoundingClientRect(); box = { left: rect.left, top: rect.top, at: now }; origin.current = box; }
+    box.at = now;
     return { x: event.clientX - box.left, y: event.clientY - box.top };
   };
   const toWorld = (event: { clientX: number; clientY: number }): Point => {
@@ -450,8 +543,11 @@ const NetworkGraph: React.FC<Props> = ({
   const chainEdges = useMemo(() => coloredChain ? new Set(coloredChain.edgeIds) : null, [coloredChain]);
   const [bandA, bandB] = [0, 1].map(index => view.nodes.find(node => node.endpoint === index)?.person);
   const sx = (year: number) => camera.x + layout.xOf(year) * camera.k;
-  const ticksForAxis = mode === 'time'
-    ? axisTicks(domain[0], domain[1], layout.pixelsPerYear * camera.k, TICK_MIN_SPACING).filter(year => sx(year) > -40 && sx(year) < size.width + 40) : [];
+  const allTicks = mode === 'time' ? axisTicks(domain[0], domain[1], layout.pixelsPerYear * camera.k, TICK_MIN_SPACING) : [];
+  const ticksForAxis = allTicks.filter(year => sx(year) > -40 && sx(year) < size.width + 40);
+  // The lines (and bands) of the time axis are part of the picture a zoom preview scales, so they are drawn well past the view.
+  const axisReach = GRAPH_PERF_ZOOM_PREVIEW ? AXIS_PREVIEW_REACH : 0;
+  const axisLines = axisReach ? allTicks.filter(year => sx(year) > -size.width * axisReach && sx(year) < size.width * (1 + axisReach)) : ticksForAxis;
   const closest = view.closest;
   // With the lines off, only what the user is looking at or the lit chain (of a search that just succeeded, or a solved connection) keeps its line, so selecting a contact still shows it.
   const drawnEdges = useMemo(() => {
@@ -463,7 +559,46 @@ const NetworkGraph: React.FC<Props> = ({
   }, [view.edges, view.focus, showLines, selection.edge, chainEdges]);
   // The endpoints are drawn last, on top of everybody else, so a crowd never covers them.
   const drawnNodes = useMemo(() => [...view.nodes].sort((x, y) => Number(x.endpoint !== null) - Number(y.endpoint !== null)), [view.nodes]);
+  // The lines the search itself draws: from each person whose contacts are asked about toward the far end of the chain (the beams), or between
+  // the endpoints while a seed route is asked for (the comet).
+  const beams = useMemo<Beam[]>(() => {
+    const activity = view.activity; if (!activity || (!extendedAnimations && activity.kind !== 'seed')) return [];
+    const ends = [0, 1].map(index => view.nodes.find(node => node.endpoint === index)?.id);
+    if (!ends[0] || !ends[1]) return [];
+    if (activity.kind === 'seed') return [{ id: 'beam:seed', from: ends[0], to: ends[1], kind: 'seed' }];
+    if (activity.kind !== 'discover') return [];
+    const present = new Set(view.nodes.map(node => node.id));
+    return activity.people.flatMap(({ id, side }): Beam[] => {
+      const goal = side === 'a' ? ends[1]! : ends[0]!;
+      return side && id !== goal && present.has(id) ? [{ id: `beam:${id}`, from: id, to: goal, kind: side }] : [];
+    });
+  }, [view.activity, view.nodes, extendedAnimations]);
+  // Which end of the chain the search is working outward from right now ('a', 'b', both, or none), for the endpoints' halos to breathe.
+  const workingEnds = !extendedAnimations ? '' : view.activity?.kind === 'seed' ? 'ab' : view.activity?.kind === 'discover' ? ['a', 'b'].filter(side => view.activity!.people.some(person => person.side === side)).join('') : '';
+  // A line whose contact has just been decided flashes for a moment: accepted lights up, unresolved flickers grey. The class is set on the
+  // line itself and removed when the flash ends, so no render of the graph is needed for it.
+  const lastStatus = useRef(new Map<string, string>());
+  const flashTimers = useRef(new Set<number>());
+  useEffect(() => {
+    const now = new Map<string, string>(), fresh: Array<[string, string]> = [];
+    for (const edge of view.edges) {
+      now.set(edge.id, edge.status);
+      if (lastStatus.current.get(edge.id) === 'checking' && (edge.status === 'accepted' || edge.status === 'unresolved')) fresh.push([edge.id, `just-${edge.status}`]);
+    }
+    lastStatus.current = now;
+    if (!extendedAnimations || reducedMotion) return;
+    for (const [id, flash] of fresh) {
+      const el = edgeEls.current.get(id)?.el; if (!el) continue;
+      el.classList.add(flash);
+      const timer = window.setTimeout(() => { flashTimers.current.delete(timer); el.classList.remove(flash); }, DECIDED_FLASH_MS);
+      flashTimers.current.add(timer);
+    }
+  }, [view.edges, reducedMotion, extendedAnimations]);
+  useEffect(() => () => { for (const timer of flashTimers.current) window.clearTimeout(timer); }, []);
   const pinnedCount = pinned.size;
+  const farRef = useRef(false);
+  const far = GRAPH_PERF_LEVEL_OF_DETAIL && drawnNodes.length >= LOD_MIN_PEOPLE && isFarZoom(camera.k, farRef.current);
+  farRef.current = far;
   const clustered = mode === 'cluster', columnar = mode === 'columns', podded = mode === 'category', corridored = mode === 'corridor';
   // Choosing an arrangement also frames the whole picture, which is about to move; the timeline and the free layout keep the camera.
   const chooseLayout = (next: LayoutMode) => { onModeChange(next); if (next !== 'time' && next !== 'free') fit(); };
@@ -485,10 +620,10 @@ const NetworkGraph: React.FC<Props> = ({
     }
     nodeEls.current = nodes; edgeEls.current = edges;
     paint();
-  }, [drawnNodes, drawnEdges, rings, columns, corridor, closestVisible, mode, paint]);
+  }, [drawnNodes, drawnEdges, beams, rings, columns, corridor, closestVisible, mode, paint]);
 
   // With a solved connection's lines on, every other line steps back (see the stylesheet) so the lime chain stands out.
-  return <div className={['net-graph', success && 'is-success', solved && showChain && showLines && view.chain && 'is-solved', drawnNodes.length + drawnEdges.length >= LARGE_DRAWING && 'is-large'].filter(Boolean).join(' ')}>
+  return <div className={['net-graph', success && 'is-success', extendedAnimations && 'is-extended', solved && showChain && showLines && view.chain && 'is-solved', drawnNodes.length + drawnEdges.length >= LARGE_DRAWING && 'is-large', far && 'is-far', far && GRAPH_PERF_HIDE_PORTRAITS && 'is-far-portraits'].filter(Boolean).join(' ')}>
     <div className="net-stage">
     <svg ref={svg} className="net-svg" role="group" aria-label="Live contact graph"
       onPointerDown={onBackgroundDown} onPointerMove={onBackgroundMove} onPointerUp={onBackgroundUp} onPointerCancel={onBackgroundUp}>
@@ -499,8 +634,8 @@ const NetworkGraph: React.FC<Props> = ({
       </defs>
       {mode === 'time' && <g className="net-axis" aria-hidden="true">
         {[bandA, bandB].map((person, index) => person && <rect key={index} className={index === 0 ? 'net-band-a' : 'net-band-b'}
-          x={sx(person.birthYear)} width={Math.max(2, (person.deathYear - person.birthYear) * layout.pixelsPerYear * camera.k)} y={0} height={size.height} />)}
-        {ticksForAxis.map(year => <line key={year} x1={sx(year)} x2={sx(year)} y1={0} y2={size.height} />)}
+          x={sx(person.birthYear)} width={Math.max(2, (person.deathYear - person.birthYear) * layout.pixelsPerYear * camera.k)} y={-size.height * axisReach} height={size.height * (1 + 2 * axisReach)} />)}
+        {axisLines.map(year => <line key={year} x1={sx(year)} x2={sx(year)} y1={-size.height * axisReach} y2={size.height * (1 + axisReach)} />)}
       </g>}
       <g className="net-content" transform={`translate(${camera.x} ${camera.y}) scale(${camera.k})`}>
         {clustered && <g className="net-orbits" aria-hidden="true">
@@ -534,21 +669,22 @@ const NetworkGraph: React.FC<Props> = ({
           })}
         </g>}
         {corridored && corridor && <g className="net-corridor" aria-hidden="true" ref={el => { corridorEl.current = el; }} data-a={corridor.from} data-b={corridor.to}><path /></g>}
+        <BeamLayer beams={beams} />
         <EdgeLayer edges={drawnEdges} selection={selection} focus={view.focus} chainEdges={chainEdges} nameOf={nameOf} onSelect={onSelect} />
         {closestVisible && <g className="net-gap" ref={el => { gapEl.current = el; }} data-a={closest.a} data-b={closest.b}>
           <title>{closestApproachLabel(closest, nameOf)}</title>
           <path className="net-gap-line" /><path className="net-gap-hit" />
         </g>}
-        <NodeLayer nodes={drawnNodes} folds={view.folds} selection={selection} focus={view.focus} chainNodes={chainNodes} narrow={narrow} portraits={portraits}
+        <NodeLayer nodes={drawnNodes} folds={view.folds} selection={selection} focus={view.focus} chainNodes={chainNodes} workingEnds={workingEnds} narrow={narrow} portraits={portraits}
           failed={failed} pinned={pinned} endpointNames={endpointNames} clips={clips} handlers={handlers} onSelect={onSelect} onToggleFold={onToggleFold} />
       </g>
     </svg>
     {mode === 'time' && ['top', 'bottom'].map(edge => <div key={edge} className={`net-strip is-${edge}`} aria-hidden="true">
       {ticksForAxis.map(year => <span key={year} className="net-tick" style={{ left: sx(year) }}>{formatYear(year)}</span>)}
     </div>)}
-    {onToggleMaximize && <div className="net-maximize">
-      <ToolButton tip={maximized ? 'Show the side panel again' : 'Maximize the graph (hides the side panel)'} label={maximized ? 'Restore the side panel' : 'Maximize the graph'} onClick={onToggleMaximize}>
-        {maximized ? <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7" /> : <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />}
+    {onToggleMaximize && !maximized && <div className="net-maximize">
+      <ToolButton tip="Maximize the graph to the whole screen" label="Maximize the graph" onClick={onToggleMaximize}>
+        <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
       </ToolButton>
     </div>}
     <div className="net-overlay-row">
@@ -575,8 +711,8 @@ const NetworkGraph: React.FC<Props> = ({
     </div>
     <div className="net-menu-host" ref={setMenuHost} />
     </div>
+    {!success && !resume && <ActivityCaption activity={view.activity} nameOf={nameOf} belowStrip={mode === 'time'} onWidth={onCaptionWidth} />}
     {success && <div className="net-success-wrap">
-      <div className="net-success" role="status">Connected · {success.degrees} {success.degrees === 1 ? 'degree' : 'degrees'}<small>Look the chain over, then press Reveal to play it</small></div>
       <button type="button" className="net-reveal" onClick={onReveal} autoFocus>Reveal</button>
     </div>}
     {resume && !success && <div className="net-resume-wrap">

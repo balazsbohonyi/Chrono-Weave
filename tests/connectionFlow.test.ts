@@ -1,13 +1,12 @@
 import { saveTestConnectionPath as saveConnectionPath } from './connectionFixtures';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { decideConnectionStart, finishedExploration, reconcileSession, runConnectionSearch, settleConnection, savedConnectionView, type CanvasState, type ConnectionFlowEffects } from '../src/services/connectionFlow';
+import { decideConnectionStart, finishedExploration, reconcileSession, runConnectionSearch, settleConnection, savedConnectionView, savedEntryFor, type CanvasState, type ConnectionFlowEffects } from '../src/services/connectionFlow';
 import { figurePerson, identifyPerson, sessionKey, type ConnectionSession, type ContactAssessment, type ContactPerson } from '../src/services/connectionGraph';
 import type { WikidataResolver } from '../src/services/wikidataService';
 import { findConnection } from '../src/services/connectionPath';
 import { MemoryConnectionRepository } from '../src/utils/connectionKnowledge';
-import { listConnectionPaths, readConnectionPath,  wovenFigureIds } from '../src/utils/connectionPaths';
-import { emptyClusters } from '../src/utils/discoveryClusters';
+import { connectionPathKey, listConnectionPaths, readConnectionPath,  wovenFigureIds } from '../src/utils/connectionPaths';
 import { MemoryStorage } from './helpers';
 import { A, B, M, N, TWIN_RIGHT, TWIN_WRONG, assertRequestAccounting, fakeContacts, person, twinWikidata } from './connectionFixtures';
 import type { IAIService } from '../src/types';
@@ -17,10 +16,9 @@ import type { IAIService } from '../src/types';
 // failure is kept and thrown by verify() once the search is over.
 function recorder(current = true) {
   let failure: unknown;
-  const log: string[] = [], canvas: CanvasState = { figures: [A, B], config: { start: 1400, end: 1800, layoutMode: 'timeline', layoutVersion: 3, layoutSelection: 'manual' },
-    clusters: emptyClusters(), placements: {}, selectedCategories: new Set() };
+  const log: string[] = [], canvas: CanvasState = { figures: [A, B], config: { start: 1400, end: 1800, layoutMode: 'timeline', layoutVersion: 3, layoutSelection: 'manual' } };
   const effects: ConnectionFlowEffects = { isCurrent: () => current, progress: () => {}, canvas: () => canvas,
-    applyWoven: woven => { log.push('weave'); canvas.figures = woven.figures; }, pathsChanged: () => log.push('paths'), show: () => log.push('show'),
+    applyWoven: woven => { log.push('weave'); canvas.figures = woven.figures; canvas.config = woven.config; }, pathsChanged: () => log.push('paths'), show: () => log.push('show'),
     exploration: session => { try { assertRequestAccounting(session.diagnostics); } catch (error) { failure ??= error; } log.push(session.status); }, failPicking: () => log.push('picker'), notify: (_message, type) => log.push(type) };
   return { effects, log, canvas, verify: () => { if (failure) throw failure; } };
 }
@@ -37,6 +35,9 @@ test('settlement validates accepted contacts, uses the current canvas and persis
   assert.equal(r.canvas.figures.filter(p => p.name === M.name).length, 1);
   const saved = readConnectionPath(storage, r.canvas.figures, A.id, B.id)!;
   assert.ok(saved); assert.equal(saved.contacts?.length, 3); assert.equal(wovenFigureIds(storage).size, 1);
+  // The person woven in is a guest of this connection; the endpoints and the person already on the canvas are not.
+  const woven = [...wovenFigureIds(storage)][0];
+  assert.deepEqual(r.canvas.config.guests, { [woven]: [connectionPathKey(A.id, B.id)] });
   assert.equal(savedConnectionView(saved).links[0].contact?.verdict, 'accepted');
 });
 test('stale, incomplete, structurally invalid and nonconnected results never weave or save', async () => {
@@ -186,4 +187,17 @@ test('a made connection reopens as the whole exploration every time, also after 
   assert.deepEqual(again.chain, [ids.a, ids.right, ids.z], 'the chain runs through the survivor');
   assert.equal(again.session.people.length, 4, 'the saved exploration, not a small one rebuilt from the chain');
   assert.equal(again.session.status, 'connected');
+});
+
+test('the saved entry of the connection on show is found by its two ends, whichever way round, and is absent until it is saved', () => {
+  const storage = new MemoryStorage();
+  saveConnectionPath(storage, [A, M, N, B], ['x', 'y', 'z']);
+  const entries = listConnectionPaths(storage, [A, M, N, B]);
+  assert.equal(entries.length, 1);
+  assert.equal(savedEntryFor(entries, [A, M, N, B])?.key, connectionPathKey(A.id, B.id));
+  assert.equal(savedEntryFor(entries, [B, N, M, A])?.key, connectionPathKey(A.id, B.id));
+  // Another pair, a chain with no ends, or nothing saved yet: no entry (the stage then has no button to open the graph).
+  assert.equal(savedEntryFor(entries, [A, M, N]), null);
+  assert.equal(savedEntryFor(entries, [A]), null);
+  assert.equal(savedEntryFor([], [A, M, N, B]), null);
 });

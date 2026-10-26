@@ -2,6 +2,7 @@ import type { FigureCategory, HistoricalFigure, LayoutData, DiscoveryCluster, Cl
 import type { TimelineLayoutResult } from '../utils/timelineLayout';
 import type { CanvasCamera } from '../utils/canvasCamera';
 import type { ConnectionFocusRequest, ConnectionReveal } from '../hooks/useConnectionReveal';
+import type { ConnectionPathEntry } from '../utils/connectionPaths';
 
 export interface CanvasProps {
   figures: HistoricalFigure[];
@@ -32,6 +33,17 @@ export interface CanvasProps {
   onCanvasInteraction?: () => void;
   isBusy?: boolean;
   selectedCategories: Set<FigureCategory>;
+  // Six Degrees guests: laid out apart from everyone else, and dimmed when the legend says so.
+  guestIds?: ReadonlySet<string>;
+  dimGuests?: boolean;
+  onPromoteGuest?: (figure: HistoricalFigure) => void;
+  // Guests moved to the main canvas, which can be moved back.
+  movedToMainIds?: ReadonlySet<string>;
+  onDemoteGuest?: (figure: HistoricalFigure) => void;
+  // The saved connections each person is on, the portraits of their ends, and playing one.
+  connectionsByFigure?: ReadonlyMap<string, ConnectionPathEntry[]>;
+  connectionPortraits?: ReadonlyMap<string, string>;
+  onShowConnection?: (entry: ConnectionPathEntry) => void;
   isLegendCollapsed: boolean;
   seedFigureId?: string;
   isSidebarOpen?: boolean;

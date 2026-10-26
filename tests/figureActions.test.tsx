@@ -27,6 +27,14 @@ test('an unresolved Follow a Figure focus cannot expand from an arbitrary card',
   assert.deepEqual(actions({ isFollowingFigure: true, focusFigureId: 'focus', onRelationship: undefined }), ['inspect', 'trace']);
 });
 
+test('connection guests get no View Relationship or expansion, but can move to the main canvas and back', () => {
+  const move = () => {};
+  assert.deepEqual(actions({ isFollowingFigure: true, focusFigureId: 'focus', isGuest: true, onPromote: move, onConnect: move }), ['inspect', 'trace', 'connect', 'promote']);
+  assert.deepEqual(actions({ isGuest: true, onPromote: move }), ['inspect', 'trace', 'promote']);
+  // Moved to the main canvas: an ordinary person again, who can be moved back.
+  assert.deepEqual(actions({ onDemote: move }), ['inspect', 'trace', 'demote', 'discover']);
+});
+
 test('events remain limited to details regardless of the mapping policy', () => {
   const event = { ...figure, category: 'EVENTS' as const };
   assert.deepEqual(actions({ figure: event }), ['inspect']);

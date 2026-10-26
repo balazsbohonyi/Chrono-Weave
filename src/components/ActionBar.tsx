@@ -13,8 +13,17 @@ interface ActionBarProps {
     isFollowingFigure?: boolean;
     focusFigureId?: string;
     onRelationship?: (figure: HistoricalFigure) => void;
+    isGuest?: boolean;
+    onPromote?: (figure: HistoricalFigure) => void;
+    onDemote?: (figure: HistoricalFigure) => void;
     style: React.CSSProperties;
 }
+
+const itemClass = `
+    w-full flex items-center gap-3 px-3 py-1.5 text-base font-normal transition-all text-left group
+    disabled:opacity-50 disabled:cursor-not-allowed
+    text-accent-heading hover:bg-accent-soft/40 hover:text-accent-emphasis border-b border-border-subtle/30 last:border-b-0
+`;
 
 const ActionBar: React.FC<ActionBarProps> = ({
     figure,
@@ -27,9 +36,11 @@ const ActionBar: React.FC<ActionBarProps> = ({
     isFollowingFigure = false,
     focusFigureId,
     onRelationship,
+    isGuest = false,
+    onPromote,
+    onDemote,
     style
 }) => {
-
     // Prevent events from reaching the canvas
     const preventCanvasInteraction = (e: React.PointerEvent | React.MouseEvent) => {
         e.stopPropagation();
@@ -44,7 +55,10 @@ const ActionBar: React.FC<ActionBarProps> = ({
         isDiscovering,
         isFollowingFigure,
         focusFigureId,
-        onRelationship
+        onRelationship,
+        onPromote,
+        onDemote,
+        isGuest
     });
 
     return (
@@ -68,11 +82,7 @@ const ActionBar: React.FC<ActionBarProps> = ({
                             item.onClick(event);
                         }}
                         disabled={item.isLoading}
-                        className={`
-                        w-full flex items-center gap-3 px-3 py-1.5 text-base font-normal transition-all text-left group
-                        disabled:opacity-50 disabled:cursor-not-allowed
-                        text-accent-heading hover:bg-accent-soft/40 hover:text-accent-emphasis border-b border-border-subtle/30 last:border-b-0
-                    `}
+                        className={itemClass}
                     >
                         <div className="flex-shrink-0 text-accent-text group-hover:text-accent-text-hover transition-colors">
                             {item.isLoading ? (

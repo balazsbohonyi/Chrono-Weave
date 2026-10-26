@@ -177,6 +177,8 @@ return (totalWidthPx / BASE_PIXELS_PER_YEAR) + 5; // +5 years buffer
 
 `KEEP_DISCOVERY_CLUSTERS` in `src/constants.ts` controls retention. Each expansion records only the source and verified newly added figures. Existing related figures are shown in the relationship overlay without becoming members. Retained members reserve their previous rows before new members and ordinary figures are placed. Shared members keep a single original placement. Short-event labels are retained along with bar rows.
 
+Guests of Six Degrees connections (`CanvasConfig.guests`) are never cluster members: `calculateCanvasTimelineLayout` lays out everyone else with the clusters as above, then lays the guests out on their own in a band below, after one empty row (`guestRow`) that holds the "From connections" header.
+
 Membership and placements are stored under `chrono_timeline_clusters`, scoped to the saved figures' identities and dates. A successful rebuild resets them; a failed rebuild preserves them. With retention disabled, metadata is ignored on load and the temporary cluster is released when the relationship overlay closes. Detail dialogs do not release placement.
 
 The relationship cards appear in a separate scrollable overlay opened immediately by mapping or expansion, with progress feedback while loading. The source is centered alone above alternating three/two-card or four/three-card rows of connected figures. There are no relationship curves on the overlay or canvas, and no floating launcher. Relationship detail cards reveal floating biography icons on hover or keyboard focus without adding height; closing either biography restores the same explanation and its scroll position. The overlay scrollbar is hidden while scrolling remains available.

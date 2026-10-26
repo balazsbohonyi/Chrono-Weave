@@ -7,13 +7,13 @@ import {
   acceptedDistances, ambiguousBridge, blockedContact, canvasPerson, duplicateKeeper, figurePerson, GAP_HINT_MIN_YEARS, identifyPerson, resolvableDuplicates, routeDistances, samePerson, selectFrontier, temporalGap,
   sessionKey, shortestContactPath, validAccepted, validPerson, mergeResolvedIdentity, emptyPairAsks, emptyRequestCounts, needsWikidata, proposalKey, reconcileIdentities,
   CONNECTION_REQUEST_KINDS, PAIR_ASK_REASONS,
-  type AmbiguousBridge, type CandidateContact, type ContactAssessment, type ContactKnowledge, type ContactPerson, type ConnectionSession, type ConnectionRequestKind, type PairAskReason,
+  type AmbiguousBridge, type CandidateContact, type ContactAssessment, type ContactKnowledge, type ContactPerson, type ConnectionSession, type ConnectionRequestKind, type PairAskReason, type SearchActivity,
 } from './connectionGraph';
 import { formatYear } from '../utils/formatters';
 import { validationRetryCount } from './jsonResponse';
 import { withProvenance } from './connectionAI';
 import { MemoryConnectionRepository, sessionExceedsLimits, type ConnectionRepository } from '../utils/connectionKnowledge';
-import { withAbort } from './utils';
+import { onRetryWait, withAbort } from './utils';
 import type { WikidataOutcome, WikidataResolver } from './wikidataService';
 
 export interface ConnectionFeasibility { feasible: boolean; gapYears: number; peopleNeeded: number; message: string | null }
@@ -127,26 +127,35 @@ export async function findConnection(options: ConnectionSearchOptions): Promise<
     options.onProgress?.({ label: session.phase });
   };
   let savingExpected = false;
-  const checkpoint = async () => {
-    emit();
-    try { session!.persistent = await repo.checkpoint(knowledge, session!); }
+  // A checkpoint inside the search keeps the progress for this page and lets the repository write it a moment later (`deferWrite`); the ones
+  // that end a run write at once. Writing everything on every request would stall the page for as long as the search is large.
+  const checkpoint = async (deferWrite = false) => {
+    if (!deferWrite) emit(); // a deferred save settles at once, and the snapshot after it carries the same state
+    try { session!.persistent = await repo.checkpoint(knowledge, session!, { deferWrite }); }
     catch { session!.persistent = false; }
     // Saving that never worked (private browsing, no storage) has its own note; the person is told when progress is lost or cut down.
     session!.saveIssue = session!.persistent ? (sessionExceedsLimits(session!) ? 'trimmed' : undefined) : savingExpected ? 'failed' : undefined;
     emit();
   };
   // `issued` records what the request carries, and runs only once the request is actually going out.
-  const task = async <T>(kind: ConnectionRequestKind, label: string, call: () => Promise<T>, issued?: () => void): Promise<T> => {
+  // `about` is what the request is about, shown on the graph while it runs (see `SearchActivity`).
+  const task = async <T>(kind: ConnectionRequestKind, label: string, call: () => Promise<T>, issued?: () => void, about?: Omit<SearchActivity, 'kind' | 'waitUntil'>): Promise<T> => {
     signal.throwIfAborted();
     if (tasks >= limits.tasks) throw new DOMException('Search work budget reached.', 'QuotaExceededError');
-    tasks++; requests[kind]++; issued?.(); session!.phase = label; emit();
+    tasks++; requests[kind]++; issued?.(); session!.phase = label; session!.activity = about && { kind, ...about }; emit();
     const retriesBefore = validationRetryCount();
     try {
       const result = await withAbort(call(), signal);
       signal.throwIfAborted();
       return result;
-    } finally { validationRetries += validationRetryCount() - retriesBefore; } // Requests are serial, so the delta is this request's.
+    } finally { validationRetries += validationRetryCount() - retriesBefore; if (session) session.activity = undefined; } // Requests are serial, so the delta is this request's.
   };
+  // A request that waits to be tried again after a rate limit says so, until it goes out.
+  const stopWatchingWaits = onRetryWait(until => {
+    const activity = session?.activity;
+    if (!session || !activity) return;
+    session.activity = { ...activity, waitUntil: until ?? undefined }; emit();
+  });
   // Wikidata says who a person is (a QID: two records with one are one person) and when they lived. Best effort and never a model request, so
   // it is no `task` and moves no request counter: a person it cannot answer for is identified by name and years exactly as before, and
   // is asked about again by a later search. A person is asked about at most once per segment, whatever the answer.
@@ -229,9 +238,14 @@ export async function findConnection(options: ConnectionSearchOptions): Promise<
     session.segment++; session.status = 'searching'; session.error = undefined;
     session.runStartedAt = started;
     session.persistent = repo.persistent; savingExpected = repo.persistent; session.saveIssue = undefined;
-    for (const p of session.people) if (!knowledge.people.some(k => k.id === p.id)) knowledge.people.push(p);
-    for (const c of session.candidates) if (c.assessment && c.status === 'accepted' && validAccepted(c.assessment, new Map(knowledge.people.map(p => [p.id, p])))
-      && !knowledge.contacts.some(existing => pairKey(...existing.pair) === pairKey(...c.assessment!.pair) && existing.verdict === 'accepted')) knowledge.contacts.push(c.assessment);
+    // Indexed once: a long search holds hundreds of people and thousands of pairs, and scanning for each of them blocks the page for seconds.
+    const knownIds = new Set(knowledge.people.map(p => p.id));
+    for (const p of session.people) if (!knownIds.has(p.id)) { knowledge.people.push(p); knownIds.add(p.id); }
+    const acceptedKeys = new Set(knowledge.contacts.filter(existing => existing.verdict === 'accepted').map(existing => pairKey(...existing.pair)));
+    const knownById = new Map(knowledge.people.map(p => [p.id, p]));
+    for (const c of session.candidates) if (c.assessment && c.status === 'accepted' && validAccepted(c.assessment, knownById) && !acceptedKeys.has(pairKey(...c.assessment.pair))) {
+      knowledge.contacts.push(c.assessment); acceptedKeys.add(pairKey(...c.assessment.pair));
+    }
     for (const c of session.candidates) { if (c.status === 'checking') c.status = c.assessment?.verdict ?? 'proposed'; c.failures = undefined; }
     // People already known that Wikidata has not been asked about: the duplicates a saved search or the shared knowledge already holds are
     // found here, by their item, and become one person with the right years.
@@ -258,18 +272,23 @@ export async function findConnection(options: ConnectionSearchOptions): Promise<
       }
       return personIndex;
     };
-    const addPerson = (p: ContactPerson) => { if (!session!.people.some(item => item.id === p.id)) session!.people.push(p); };
+    let sessionIds = new Set<string>(), sessionIdsOf: ContactPerson[] | null = null, sessionIdsLength = -1;
+    const sessionPeopleIds = () => {
+      if (sessionIdsOf !== session!.people || sessionIdsLength !== session!.people.length) { sessionIdsOf = session!.people; sessionIdsLength = sessionIdsOf.length; sessionIds = new Set(sessionIdsOf.map(p => p.id)); }
+      return sessionIds;
+    };
+    const addPerson = (p: ContactPerson) => { if (!sessionPeopleIds().has(p.id)) { session!.people.push(p); sessionIds.add(p.id); sessionIdsLength = session!.people.length; } };
     // Reach for every decision about whether a chain can exist (frontier, join pairs, clusters): the same graph `shortestContactPath` routes
     // over, so "reachable from both ends" always means a chain exists. `attachShared` keeps `acceptedDistances`: it only decides which
     // people are shown and saved with the session.
     const reachOf = (id: string) => routeDistances(id, knowledge.people, knowledge.contacts, [from.id, to.id]);
     const attachShared = () => {
       for (const endpoint of [from.id, to.id]) for (const id of acceptedDistances(endpoint, knowledge.people, knowledge.contacts).keys()) addPerson(byId().get(id)!);
-      const ids = new Set(session!.people.map(p => p.id));
+      const ids = sessionPeopleIds(), candidateByPair = new Map(session!.candidates.map(e => [pairKey(e.from, e.to), e]));
       for (const c of knowledge.contacts) if (validAccepted(c, byId()) && c.pair.every(id => ids.has(id))) {
-        const key = pairKey(...c.pair), old = session!.candidates.find(e => pairKey(e.from, e.to) === key);
+        const key = pairKey(...c.pair), old = candidateByPair.get(key);
         if (old) { old.status = 'accepted'; old.assessment = c; }
-        else session!.candidates.push({ from: c.pair[0], to: c.pair[1], claim: '', status: 'accepted', assessment: c });
+        else { const added: CandidateContact = { from: c.pair[0], to: c.pair[1], claim: '', status: 'accepted', assessment: c }; session!.candidates.push(added); candidateByPair.set(key, added); }
       }
     };
     // An accepted chain that runs through a name stored with conflicting date records is not a route. Before the search spends anything
@@ -285,7 +304,7 @@ export async function findConnection(options: ConnectionSearchOptions): Promise<
         const key = `duplicates:${canonicalName(name)}`, context = JSON.stringify([provenance.provider, provenance.model, records.map(p => [p.birthYear, p.deathYear])]);
         if (session!.attempts[key]?.context === context) continue;
         identityChecks++;
-        const resolved = await task('identity', `Resolving which dates are right for ${name}`, () => options.service.resolveFigure(name, signal));
+        const resolved = await task('identity', `Resolving which dates are right for ${name}`, () => options.service.resolveFigure(name, signal), undefined, { people: records.map(record => ({ id: record.id })) });
         session!.attempts[key] = { context, segment: session!.segment, count: 1 };
         const keeper = resolved && validPerson(resolved) ? duplicateKeeper(records, resolved) : undefined;
         if (!keeper) continue;
@@ -363,7 +382,8 @@ export async function findConnection(options: ConnectionSearchOptions): Promise<
       const reasons = batch.map(({ candidate: c, focused }): PairAskReason => focused ? 'focused' : session!.attempts[pairKey(c.from, c.to)] ? 'contextChange' : 'fresh');
       for (const { candidate: c, focused } of batch) { c.status = 'checking'; c.pendingFocused = focused; }
       const results = await task(kind, batch.every(a => a.focused) ? 'Reassessing promising contacts' : 'Independently assessing contacts',
-        () => options.service.assessPersonalContacts(pairs, signal), () => { assessBatches.push(batch.length); for (const reason of reasons) pairAsks[reason]++; });
+        () => options.service.assessPersonalContacts(pairs, signal), () => { assessBatches.push(batch.length); for (const reason of reasons) pairAsks[reason]++; },
+        { people: [], pairs: batch.map(({ candidate: c }): [string, string] => [c.from, c.to]) });
       for (const { candidate: c, focused } of batch) {
         const result = results.find(r => pairKey(...r.pair) === pairKey(c.from, c.to));
         const record = result && withProvenance(result, provenance);
@@ -382,10 +402,10 @@ export async function findConnection(options: ConnectionSearchOptions): Promise<
           && r.verdict === record.verdict && (record.verdict === 'accepted' || (r.provenance.provider === provenance.provider && r.provenance.model === provenance.model))));
         knowledge.contacts.push(record); triedPairs++;
       }
-      await checkpoint(); signal.throwIfAborted();
+      await checkpoint(true); signal.throwIfAborted();
       return outcome();
     };
-    await checkpoint(); signal.throwIfAborted();
+    await checkpoint(true); signal.throwIfAborted();
     let result = await outcome(); if (result) return result;
     if (overlaps(from, to)) {
       propose(from, to, 'Direct endpoint contact candidate');
@@ -394,7 +414,8 @@ export async function findConnection(options: ConnectionSearchOptions): Promise<
     const seedContext = JSON.stringify([provenance.provider, provenance.model, [from.id, to.id].sort(), options.figures.map(p => p.id).sort()]);
     if (session.seedContext !== seedContext) {
       const proposal = await task('seed', 'Proposing one seed route', () => options.service.fetchConnectionPath(options.from, options.to,
-        { catalog: buildPathCatalog(options.figures, options.from, options.to), maxIntermediates: MAX_PATH_INTERMEDIATES }, signal))
+        { catalog: buildPathCatalog(options.figures, options.from, options.to), maxIntermediates: MAX_PATH_INTERMEDIATES }, signal), undefined,
+        { people: [{ id: from.id, side: 'a' }, { id: to.id, side: 'b' }] })
         .catch(error => { signal.throwIfAborted(); if (/unusable data|invalid|path|proposal/i.test(error.message) && !/auth|HTTP|API|network|quota|rate/i.test(error.message)) return null; throw error; });
       session.seedContext = seedContext;
       if (proposal) {
@@ -414,7 +435,7 @@ export async function findConnection(options: ConnectionSearchOptions): Promise<
           for (let i = 0; i < materialized.length - 1; i++) propose(materialized[i]!, materialized[i + 1]!, proposal.links[i]?.claim ?? 'Seed route candidate', true);
         }
       }
-      await checkpoint();
+      await checkpoint(true);
     }
     while (tasks < limits.tasks && addedPeople < limits.people && triedPairs < limits.pairs) {
       signal.throwIfAborted();
@@ -449,7 +470,8 @@ export async function findConnection(options: ConnectionSearchOptions): Promise<
         sources: sources.map((p, i) => ({ person: p, round: rounds[i].round + 1, previous: rounds[i].proposed.flatMap(id => byId().get(id) ?? []), goal: goalOf(p) })),
         target: fromSources.length ? to : from, references, limit: limits.candidates,
         ...(gap && gap.years >= GAP_HINT_MIN_YEARS ? { gap: { fromYear: gap.fromYear, toYear: gap.toYear } } : {}),
-      }, signal), () => { discoverSources.push(sources.length); });
+      }, signal), () => { discoverSources.push(sources.length); },
+        { people: sources.map(p => ({ id: p.id, side: fromSources.includes(p) ? 'a' as const : 'b' as const })) });
       const found = await askWikidata(discoveries.map(d => d.person));
       for (const round of rounds) {
         let added = 0;
@@ -476,8 +498,8 @@ export async function findConnection(options: ConnectionSearchOptions): Promise<
       for (const [a, b] of aliases) {
         const identityKey = `identity:${pairKey(a.id, b.id)}`, context = attemptContext(a, b);
         if (session.attempts[identityKey]?.context === context || tasks + 2 > limits.tasks) continue;
-        const resolvedA = await task('identity', `Resolving identity of ${a.name}`, () => options.service.resolveFigure(a.name, signal));
-        const resolvedB = await task('identity', `Resolving identity of ${b.name}`, () => options.service.resolveFigure(b.name, signal));
+        const resolvedA = await task('identity', `Resolving identity of ${a.name}`, () => options.service.resolveFigure(a.name, signal), undefined, { people: [{ id: a.id }] });
+        const resolvedB = await task('identity', `Resolving identity of ${b.name}`, () => options.service.resolveFigure(b.name, signal), undefined, { people: [{ id: b.id }] });
         session.attempts[identityKey] = { context, segment: session.segment, count: 1 };
         if (resolvedA && resolvedB && validPerson(resolvedA) && validPerson(resolvedB) && samePerson(resolvedA, resolvedB)
           && resolvedA.birthYear === a.birthYear && resolvedA.deathYear === a.deathYear) {
@@ -490,7 +512,7 @@ export async function findConnection(options: ConnectionSearchOptions): Promise<
       }
       // Known people remain eligible. Explicitly check promising overlaps between the frontiers.
       for (const source of sources) for (const other of (fromSources.includes(source) ? toCluster : fromCluster).slice(0, 2)) if (!blockedContact(source, other)) propose(source, other, 'Cross-frontier contact candidate');
-      await checkpoint();
+      await checkpoint(true);
     }
     if (session.status === 'searching') { session.status = 'paused'; session.phase = 'Search budget reached'; session.diagnostics.stopReason = 'work-budget'; }
   } catch (error) {
@@ -500,7 +522,8 @@ export async function findConnection(options: ConnectionSearchOptions): Promise<
     session.phase = deadline.signal.aborted ? 'Search time budget reached' : paused ? 'Search paused' : 'Search interrupted';
     session.diagnostics.stopReason = deadline.signal.aborted ? 'time-budget' : options.signal.aborted ? 'cancelled' : paused ? 'work-budget' : 'transport-error';
     if (!paused) session.error = getUserErrorMessage(error, 'Contact search failed. Update Settings or resume later.');
-  } finally { clearTimeout(timer); }
+  } finally { clearTimeout(timer); stopWatchingWaits(); }
+  session!.activity = undefined;
   for (const c of session!.candidates) if (c.status === 'checking') c.status = c.assessment?.verdict ?? 'proposed';
   await checkpoint();
   return { status: session!.status as 'paused' | 'explored' | 'error', session: structuredClone(session!), error: session!.error };

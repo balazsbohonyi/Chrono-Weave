@@ -1,11 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { findConnection, classifyConnectionTarget, checkConnectionFeasibility, resolveConnectionTarget, type ConnectionSearchOptions } from '../src/services/connectionPath';
+import type { ConnectionSession } from '../src/services/connectionGraph';
 import { MemoryConnectionRepository } from '../src/utils/connectionKnowledge';
 import { acceptedDistances, ambiguousBridge, duplicateKeeper, figurePerson, identifyPerson, resolvableDuplicates, routeDistances, shortestContactPath, type ContactAssessment, type ContactPerson } from '../src/services/connectionGraph';
 import type { HistoricalFigure, IAIService } from '../src/types';
 import { MemoryStorage } from './helpers';
 import { pairKey } from '../src/services/pathService';
+import { waitToRetry } from '../src/services/utils';
 
 import { person, fakeContacts, ambiguousBridgeRepository, A, B, M, N, BRIDGE, BRIDGE_TWIN, CLEAN_BRIDGE, proposal, assertRequestAccounting } from './connectionFixtures';
 // Every snapshot and every finished segment must keep the request accounting consistent. A failure inside
@@ -330,4 +332,22 @@ test('a record retired by a merge never replaces the figure that was asked for, 
   const resumed = await run({ service: fakeContacts([]).service, repository, from: twin, figures: [twin, B], session: saved.session! });
   assert.equal(resumed.status, 'connected'); assert.equal(resumed.session!.key.includes(survivor.id), true); assert.deepEqual(resumed.session!.retiredKeys, [saved.session!.key]);
   if (resumed.status === 'connected') assert.equal(resumed.chain[0].id, twin.id);
+});
+test('the session says what the running request is about, including a wait for a rate limit, and never keeps it', async () => {
+  const { service } = fakeContacts([[A, M], [M, N], [N, B]]);
+  const discover = service.discoverPersonalContacts.bind(service);
+  service.discoverPersonalContacts = async (request, signal) => { await waitToRetry(1, signal); return discover(request, signal); };
+  const seen: Array<NonNullable<ConnectionSession['activity']>> = [];
+  const repository = new MemoryConnectionRepository();
+  const result = await run({ service, repository, onSnapshot: session => { if (session.activity) seen.push(structuredClone(session.activity)); } });
+  assert.equal(result.status, 'connected');
+  const kinds = new Set(seen.map(activity => activity.kind));
+  for (const kind of ['seed', 'discover', 'assess']) assert.ok(kinds.has(kind as never), `${kind} request announced`);
+  const asked = seen.find(activity => activity.kind === 'discover')!;
+  assert.deepEqual(asked.people.map(person => person.side).sort(), ['a', 'b']);
+  assert.ok(seen.some(activity => activity.kind === 'discover' && activity.waitUntil), 'the wait is announced');
+  assert.ok(seen.some(activity => activity.kind === 'discover' && !activity.waitUntil), 'and ends');
+  assert.ok(seen.filter(activity => activity.kind === 'assess').every(activity => activity.pairs?.length));
+  assert.equal(result.session?.activity, undefined);
+  assert.ok(!JSON.stringify(await repository.loadSession(result.session!.key)).includes('activity'));
 });

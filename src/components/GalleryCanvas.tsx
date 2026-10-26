@@ -7,8 +7,10 @@ import { useFigurePortraits } from '../hooks/useFigurePortraits';
 import { isRevealedAt, useConnectionReveal } from '../hooks/useConnectionReveal';
 import FigureCard from './FigureCard';
 import ActionBar from './ActionBar';
+import ConnectionMenu from './ConnectionMenu';
 import ConnectionThread from './ConnectionThread';
 import CanvasToolbar from './CanvasToolbar';
+import GuestSectionHeader from './GuestSectionHeader';
 import { centerCameraOnBounds, pinchCamera, zoomCameraAt, type CanvasCamera, type Point } from '../utils/canvasCamera';
 import { listenForCanvasWheel } from '../utils/canvasWheel';
 
@@ -17,7 +19,7 @@ const SIDEBAR_WIDTH = 544; // Sidebar's w-[34rem] at the application's 16px base
 
 const GalleryCanvas: React.FC<CanvasProps> = ({ figures, modalActive, highlightedFigureIds, focusedFigureId,
   isSearchFocusActive = false, onDiscover, onTrace, onInspect, onRelationship,
-  isFollowingFigure = false,
+  isFollowingFigure = false, guestIds, dimGuests = false, onPromoteGuest, movedToMainIds, onDemoteGuest, connectionsByFigure, connectionPortraits, onShowConnection,
   isDiscovering = false, onCanvasInteraction, isBusy = false, selectedCategories,
   isLegendCollapsed, seedFigureId, isSidebarOpen = false, relationshipSourceId, initialCamera, onCameraChange, onToggleLayout,
   onConnect, pickingSource = null, isPickable, onPick, connection, connectionCurrentId, connectionFocus, onConnectionStep, onConnectionRevealEnd, onConnectionExit }) => {
@@ -26,13 +28,14 @@ const GalleryCanvas: React.FC<CanvasProps> = ({ figures, modalActive, highlighte
   useLayoutEffect(() => { onCameraChange?.(camera); }, [camera, onCameraChange]);
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
   const [isDragging, setIsDragging] = useState(false);
-  const [actions, setActions] = useState<{ id: string; top: number; left: number } | null>(null);
+  // The figure's actions, or (from its connection chip) the menu of the connections it came from.
+  const [actions, setActions] = useState<{ id: string; top: number; left: number; menu: 'actions' | 'connections' } | null>(null);
   const drag = useRef<Drag | null>(null);
   const pointers = useRef(new Map<number, Point>());
   const hadMultiplePointers = useRef(false);
   const trackpadUntil = useRef(0);
   const previousLayout = useRef<ReturnType<typeof calculateGalleryLayout> | null>(null);
-  const layout = useMemo(() => calculateGalleryLayout(figures), [figures]);
+  const layout = useMemo(() => calculateGalleryLayout(figures, guestIds), [figures, guestIds]);
   const headerHeight = isLegendCollapsed ? 52 : 114;
   const usableWidth = Math.max(1, viewport.width - (isSidebarOpen ? SIDEBAR_WIDTH : 0));
   const searchActive = isSearchFocusActive && highlightedFigureIds.length > 0;
@@ -193,7 +196,7 @@ const GalleryCanvas: React.FC<CanvasProps> = ({ figures, modalActive, highlighte
     };
   }, [actions, modalActive]);
 
-  const activateFigure = (figure: HistoricalFigure, point: Point) => {
+  const activateFigure = (figure: HistoricalFigure, point: Point, onChip = false) => {
     // A click on a ghosted person leaves the connection view, then acts as an ordinary click.
     if (connection && !pickingSource && !chainOrder.has(figure.id)) onConnectionExit?.();
     // Choosing the other end of a Six Degrees chain: a card picks, and never opens actions.
@@ -203,9 +206,10 @@ const GalleryCanvas: React.FC<CanvasProps> = ({ figures, modalActive, highlighte
       return;
     }
     if (isBusy || isDiscovering || modalActive) return;
-    if (!onDiscover || !onTrace || !onInspect) return;
+    const menu = onChip && connectionsByFigure?.get(figure.id)?.length && onShowConnection ? 'connections' : 'actions';
+    if (menu === 'actions' && (!onDiscover || !onTrace || !onInspect)) return;
     const bounds = containerRef.current!.getBoundingClientRect();
-    setActions({ id: figure.id,
+    setActions({ id: figure.id, menu,
       left: Math.max(0, Math.min(point.x - bounds.left, bounds.width - 240)),
       top: Math.max(0, Math.min(point.y - bounds.top, bounds.height - 140)),
     });
@@ -268,7 +272,7 @@ const GalleryCanvas: React.FC<CanvasProps> = ({ figures, modalActive, highlighte
       const id = target?.closest('[data-figure-id]')?.getAttribute('data-figure-id');
       const figure = figures.find(figure => figure.id === id);
       if (figure && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
-        activateFigure(figure, { x: event.clientX, y: event.clientY });
+        activateFigure(figure, { x: event.clientX, y: event.clientY }, !!target?.closest('[data-connection-chip]'));
       } else if (!id) setActions(null);
     }
     const remaining = [...pointers.current.entries()][0];
@@ -296,6 +300,8 @@ const GalleryCanvas: React.FC<CanvasProps> = ({ figures, modalActive, highlighte
       <div data-gallery-board className="absolute top-0 left-0 will-change-transform"
         style={{ width: layout.bounds.width, height: layout.bounds.height, transformOrigin: 'top left',
           transform: `translate(${camera.x}px, ${camera.y}px) scale(${camera.scale})` }}>
+        {layout.sections.map(section => <GuestSectionHeader key={section.label} label={section.label} count={section.count}
+          left={0} top={section.y} width={layout.bounds.width} fontSize={18} />)}
         {layout.placements.map(({ figure, x, y }) => {
           const isFocused = searchActive && focusedFigureId === figure.id;
           const isPickingSource = pickingSource?.id === figure.id;
@@ -304,15 +310,17 @@ const GalleryCanvas: React.FC<CanvasProps> = ({ figures, modalActive, highlighte
           // While a connection is shown only its people are lit, each once the thread has reached it (and
           // whatever the category filter says); everyone else is ghosted.
           const isGhosted = !!connection && !pickingSource && !searchActive && (!isChained || !isRevealedAt(reveal.progress, chainIndex));
+          const isGuest = !!guestIds?.has(figure.id);
           const isDimmed = pickingSource ? !isPickingSource && !isPickable?.(figure)
             : searchActive ? !isFocused : isGhosted || (!connection && selectedCategories.size > 0 && !selectedCategories.has(figure.category));
+          const isGuestDimmed = !isDimmed && isGuest && dimGuests && !connection && !pickingSource;
           return <FigureCard key={figure.id} figure={figure} imageUrl={figure.imageUrl || portraits.get(figure.id)} zoom={camera.scale}
-            isSource={figure.id === seedFigureId || isPickingSource} data-figure-id={figure.id}
+            isSource={figure.id === seedFigureId || isPickingSource} isGuest={isGuest} connections={connectionsByFigure?.get(figure.id)} connectionPortraits={connectionPortraits} data-figure-id={figure.id}
             aria-label={pickingSource ? `Connect ${pickingSource.name} to ${figure.name}` : `Actions for ${figure.name}`}
             aria-disabled={pickingSource ? isDimmed || isPickingSource : undefined}
             className={`gallery-card ${isFocused ? 'gallery-focused' : ''} ${isChained ? 'gallery-connected' : ''} ${isChained && connectionCurrentId === figure.id ? 'gallery-current' : ''}`}
             style={{ left: x, top: y, width: GALLERY_CARD_WIDTH, height: GALLERY_CARD_HEIGHT,
-              opacity: isGhosted ? 0.07 : isDimmed ? 0.15 : 1, filter: isDimmed ? 'grayscale(1)' : undefined }}
+              opacity: isGhosted ? 0.07 : isDimmed ? 0.15 : isGuestDimmed ? 0.4 : 1, filter: isDimmed || isGuestDimmed ? 'grayscale(1)' : undefined }}
             badge={isChained && connection ? { number: chainIndex + 1, scale: Math.min(2.5, Math.max(1, 1 / camera.scale)) } : undefined}
             onFocus={() => {
               // Keyboard navigation reveals off-screen cards at the current zoom.
@@ -338,11 +346,18 @@ const GalleryCanvas: React.FC<CanvasProps> = ({ figures, modalActive, highlighte
           </svg>
         )}
       </div>
-      {actionFigure && actions && onDiscover && onTrace && onInspect && !isDiscovering && !isBusy && !pickingSource && (
+      {actionFigure && actions?.menu === 'connections' && onShowConnection && !isDiscovering && !isBusy && !pickingSource && (
+        <ConnectionMenu entries={connectionsByFigure?.get(actionFigure.id) ?? []} portraits={connectionPortraits} onShow={onShowConnection}
+          onDismiss={() => setActions(null)} style={{ top: actions.top, left: actions.left }} />
+      )}
+      {actionFigure && actions?.menu === 'actions' && onDiscover && onTrace && onInspect && !isDiscovering && !isBusy && !pickingSource && (
         <ActionBar figure={actionImage ? { ...actionFigure, imageUrl: actionImage } : actionFigure}
           onDiscover={onDiscover} onTrace={onTrace} onInspect={onInspect} onConnect={onConnect} isDiscovering={isDiscovering}
           onDismiss={() => setActions(null)}
           isFollowingFigure={isFollowingFigure} focusFigureId={seedFigureId} onRelationship={onRelationship}
+          isGuest={!!guestIds?.has(actionFigure.id)}
+          onPromote={guestIds?.has(actionFigure.id) ? onPromoteGuest : undefined}
+          onDemote={movedToMainIds?.has(actionFigure.id) ? onDemoteGuest : undefined}
           style={{ top: actions.top, left: actions.left }} />
       )}
     </div>

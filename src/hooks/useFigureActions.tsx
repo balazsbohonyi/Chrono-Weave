@@ -22,6 +22,13 @@ interface UseFigureActionsProps {
     isFollowingFigure?: boolean;
     focusFigureId?: string;
     onRelationship?: (figure: HistoricalFigure) => void;
+    // Given only for a guest of a Six Degrees connection: moves them into the main canvas. Until then they are not
+    // expanded from, since what is found around them would join the canvas as if it were about them.
+    onPromote?: (figure: HistoricalFigure) => void;
+    // Given only for a guest moved to the main canvas: puts them back in the "From connections" group.
+    onDemote?: (figure: HistoricalFigure) => void;
+    // A guest of a Six Degrees connection: the general relationship check with the focus figure does not apply to them.
+    isGuest?: boolean;
 }
 
 export const useFigureActions = ({
@@ -34,13 +41,16 @@ export const useFigureActions = ({
     isTracing = false,
     isFollowingFigure = false,
     focusFigureId,
-    onRelationship
+    onRelationship,
+    onPromote,
+    onDemote,
+    isGuest = false
 }: UseFigureActionsProps): ActionItem[] => {
     const isEvent = figure.category === 'EVENTS';
     const isFocus = figure.id === focusFigureId;
 
     const actions: (ActionItem | null)[] = [
-        isFollowingFigure && focusFigureId && !isFocus && onRelationship ? {
+        isFollowingFigure && focusFigureId && !isFocus && onRelationship && !isGuest ? {
             id: 'relationship',
             label: 'View Relationship',
             icon: (
@@ -102,7 +112,37 @@ export const useFigureActions = ({
             isLoading: false,
             isVisible: true
         } : null,
-        !isEvent && (!isFollowingFigure || isFocus) ? {
+        onPromote ? {
+            id: 'promote',
+            label: "Move to Main Canvas",
+            icon: (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19V5m0 0l-6 6m6-6l6 6" />
+                </svg>
+            ),
+            onClick: (e: React.MouseEvent) => {
+                e.stopPropagation();
+                onPromote(figure);
+            },
+            isLoading: false,
+            isVisible: true
+        } : null,
+        onDemote ? {
+            id: 'demote',
+            label: "Move Back to Connections",
+            icon: (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v14m0 0l-6-6m6 6l6-6" />
+                </svg>
+            ),
+            onClick: (e: React.MouseEvent) => {
+                e.stopPropagation();
+                onDemote(figure);
+            },
+            isLoading: false,
+            isVisible: true
+        } : null,
+        !isEvent && !onPromote && (!isFollowingFigure || isFocus) ? {
             id: 'discover',
             label: "Expand Timeline",
             icon: (

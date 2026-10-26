@@ -1,5 +1,6 @@
 import React, { useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { isFocusVisible } from '../utils/focusVisible';
 
 interface TooltipProps {
     text: string;
@@ -39,7 +40,7 @@ const Tooltip: React.FC<TooltipProps> = ({ text, children, placement = 'top', mu
 
     return <span ref={trigger} className="ui-tooltip-trigger"
         onPointerEnter={() => setIsVisible(true)} onPointerLeave={() => setIsVisible(false)}
-        onFocus={() => setIsVisible(true)} onBlur={() => setIsVisible(false)}
+        onFocus={event => { if (isFocusVisible(event.target)) setIsVisible(true); }} onBlur={() => setIsVisible(false)}
         onClickCapture={() => setIsVisible(false)}
         onKeyDown={event => { if (event.key === 'Escape') setIsVisible(false); }}>
         {React.cloneElement(children, { 'aria-describedby': isVisible ? [children.props['aria-describedby'], id].filter(Boolean).join(' ') : children.props['aria-describedby'] })}

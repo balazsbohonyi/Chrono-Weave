@@ -75,7 +75,7 @@ test('the explorer header, the stage header, the sidebar and the picker each car
   assert.match(explorer({ suspended: true }), /class="connection-explorer"[^>]*inert/);
 
   const stage = (onOpenInfo?: () => void) => renderToStaticMarkup(<ConnectionStage connection={{ nodeIds: ['a', 'm', 'b'], playId: 1, animate: false }} chain={[a, m, b]} links={connected.links}
-    currentIndex={null} focus={null} inset={{ top: 52, right: 0 }} canExit hidden={false} onStep={() => {}} onEnd={() => {}} onExit={() => {}} onReplay={() => {}} onExplain={() => {}} onInspect={() => {}} onOpenInfo={onOpenInfo} />);
+    currentIndex={null} focus={null} inset={{ right: 0 }} canExit hidden={false} onStep={() => {}} onEnd={() => {}} onExit={() => {}} onReplay={() => {}} onExplain={() => {}} onInspect={() => {}} onOpenInfo={onOpenInfo} />);
   const stageMarkup = stage(() => {});
   assert.match(stageMarkup, /What is Six Degrees of Separation\?/);
   // It sits right after the degrees badge, and is a bare icon: the round buttons are only Replay and Close.

@@ -31,7 +31,9 @@ import { figurePerson, identifyPerson, type ContactAssessment } from './services
 import { recordedContactSection } from './services/connectionAI';
 import ConnectionStage from './components/ConnectionStage';
 import SixDegreesInfoDialog from './components/SixDegreesInfo';
-import type { WovenCanvas } from './utils/weaveConnection';
+import { activeGuestIds, figureConnections, moveBackToConnections, moveToMain, type GuestVisibility } from './utils/connectionGuests';
+import { connectionEnds } from './components/ConnectionPair';
+import { useNetworkPortraits } from './hooks/useNetworkPortraits';
 import { isConfigValid, providerNames } from './utils/providerConfig';
 import { filterTimelineFigures } from './utils/timelineFigures';
 import { saveRelationshipMap } from './utils/relationshipCache';
@@ -121,6 +123,10 @@ const App: React.FC = () => {
 
     // Category Filter State
     const [selectedCategories, setSelectedCategories] = useState<Set<FigureCategory>>(new Set());
+    // People Six Degrees connections brought in are shown apart; the legend can dim or hide them.
+    const [guestVisibility, setGuestVisibility] = useState<GuestVisibility>('show');
+    const guestIds = useMemo(() => activeGuestIds(config), [config.guests, config.movedToMain]);
+    const movedToMainIds = useMemo(() => new Set(config.movedToMain ?? []), [config.movedToMain]);
 
     const [knownRelationships, setKnownRelationships] = useState<Map<string, Set<string>>>(new Map());
 
@@ -201,15 +207,16 @@ const App: React.FC = () => {
     }, []);
 
     const connection = useConnection({
-        figures, config, clusters: clusterState, selectedCategories, storage: canvasStorage.current, service: aiService,
+        figures, config, storage: canvasStorage.current, service: aiService,
         canvasId: activeCanvas?.id ?? 'empty', provenance: { provider: getEffectiveConfig().provider, model: getEffectiveConfig().model },
-        getPlacements: () => currentPlacements.current,
         begin: beginRelationshipAction,
-        applyWoven: (woven: WovenCanvas) => {
-            setFigures(woven.figures);
-            setConfig(woven.config);
-            setClusterState(woven.clusters);
-            setSelectedCategories(woven.selectedCategories);
+        applyCanvas: canvas => {
+            const kept = new Set(canvas.figures.map(figure => figure.id));
+            setFigures(canvas.figures);
+            setConfig(canvas.config);
+            // People a deleted connection took along leave the selection and the search results too.
+            setSelectedFigures(previous => previous.every(figure => kept.has(figure.id)) ? previous : previous.filter(figure => kept.has(figure.id)));
+            setHighlightedFigureIds(previous => previous.every(id => kept.has(id)) ? previous : previous.filter(id => kept.has(id)));
         },
         hideSidebar: () => setIsSidebarCollapsed(true),
         notify: (message, type) => setToast({ message, type }),
@@ -231,7 +238,7 @@ const App: React.FC = () => {
         ...activeCanvas, config, figures, clusters: clusterState, cache: {},
         view: { cameras: cameras.current, selectedYear, selectedFigureIds: selectedFigures.map(figure => figure.id),
             selectedCategories: [...selectedCategories], isSidebarCollapsed, isLegendOpen, sidebar: sidebarView.current,
-            searchQuery, highlightedFigureIds, currentSearchIndex },
+            searchQuery, highlightedFigureIds, currentSearchIndex, guestVisibility },
     } : null;
     useLayoutEffect(() => { latestSnapshot.current = currentSnapshot; });
 
@@ -287,6 +294,7 @@ const App: React.FC = () => {
         setSelectedCategories(new Set(canvas.view.selectedCategories));
         setIsSidebarCollapsed(canvas.view.isSidebarCollapsed);
         setIsLegendOpen(canvas.view.isLegendOpen);
+        setGuestVisibility(canvas.view.guestVisibility);
         setSearchQuery(canvas.view.searchQuery);
         const highlights = canvas.view.highlightedFigureIds.filter(id => data.some(figure => figure.id === id));
         setHighlightedFigureIds(highlights);
@@ -316,7 +324,7 @@ const App: React.FC = () => {
     useEffect(() => {
         if (cacheLoaded && activeCanvas) scheduleSave();
     }, [cacheLoaded, activeCanvas, config, figures, clusterState, selectedYear, selectedFigures, selectedCategories,
-        isSidebarCollapsed, isLegendOpen, searchQuery, highlightedFigureIds, currentSearchIndex, scheduleSave]);
+        isSidebarCollapsed, isLegendOpen, searchQuery, highlightedFigureIds, currentSearchIndex, guestVisibility, scheduleSave]);
 
     useEffect(() => {
         const saveWhenHidden = () => { if (document.visibilityState === 'hidden') persistCurrentCanvas(); };
@@ -473,6 +481,10 @@ const App: React.FC = () => {
 
     const runRelationshipAction = async (sourceFigure: HistoricalFigure, action: 'map' | 'expand') => {
         const storage = canvasStorage.current;
+        if (action === 'expand' && guestIds.has(sourceFigure.id)) {
+            setToast({ message: `${sourceFigure.name} came from a connection. Move them to the main canvas before expanding from them.`, type: 'info' });
+            return;
+        }
         if (action === 'expand' && config.weaveContext?.mode === 'figure'
             && getCanvasFocusFigure(figures, config.weaveContext, config.seedFigureId)?.id !== sourceFigure.id) {
             setToast({ message: 'Follow a Figure canvases can only be expanded from the focus figure.', type: 'info' });
@@ -815,10 +827,46 @@ const App: React.FC = () => {
         }
     };
 
-    const availableCategories = useMemo(() => config.weaveContext && !config.weaveContext.activeCategories.includes('ALL')
-        ? CATEGORY_LIST.filter(category => config.weaveContext!.activeCategories.includes(category))
-        : CATEGORY_LIST, [config]);
+    // The filters offer the categories that have a card on the canvas, guests included (they never change the canvas
+    // categories themselves, which Expand Timeline and reloading go by).
+    const availableCategories = useMemo(() => {
+        const present = new Set(figures.map(figure => figure.category));
+        return CATEGORY_LIST.filter(category => present.has(category));
+    }, [figures]);
+    // A selected category whose last card left the canvas leaves the filter too, or it would dim everything with no chip to clear it.
+    useEffect(() => {
+        if (!availableCategories.length) return;
+        setSelectedCategories(previous => [...previous].every(category => availableCategories.includes(category))
+            ? previous : new Set([...previous].filter(category => availableCategories.includes(category))));
+    }, [availableCategories]);
     const hasCategoryFilters = availableCategories.length > 1;
+    // The legend also holds the guests' show/dim/hide control, so a canvas with guests has one even with a single category.
+    const hasLegend = hasCategoryFilters || guestIds.size > 0;
+    const canvasFigures = useMemo(() => guestVisibility === 'hide' && guestIds.size ? figures.filter(figure => !guestIds.has(figure.id)) : figures,
+        [figures, guestIds, guestVisibility]);
+    // The saved connections each person is on, and one portrait lookup for all their ends (not one per card). `recent`
+    // changes whenever a connection is saved or deleted, also one that brought no one new.
+    const connectionsByFigure = useMemo(() => figureConnections(canvasStorage.current, figures), [figures, connection.recent]);
+    const connectionPortraits = useNetworkPortraits(useMemo(() => {
+        const ends = new Map<string, { id: string; name: string }>();
+        for (const entries of connectionsByFigure.values()) for (const entry of entries) for (const person of connectionEnds(entry)) {
+            if (!person.imageUrl) ends.set(person.id, { id: person.id, name: person.name });
+        }
+        return [...ends.values()];
+    }, [connectionsByFigure]));
+    const moveGuestToMain = useCallback((figure: HistoricalFigure) => {
+        setConfig(previous => moveToMain(previous, figure));
+        setToast({ message: `${figure.name} moved to the main canvas.`, type: 'success' });
+    }, []);
+    const moveBackToGuests = useCallback((figure: HistoricalFigure) => {
+        const next = moveBackToConnections(config, figure, figures);
+        const removed = (config.weaveContext?.activeCategories ?? []).filter(category => !next.weaveContext?.activeCategories.includes(category));
+        setConfig(next);
+        // A category that left the canvas also leaves the filter.
+        if (removed.length) setSelectedCategories(previous => removed.some(category => previous.has(category as FigureCategory))
+            ? new Set([...previous].filter(category => !removed.includes(category))) : previous);
+        setToast({ message: `${figure.name} moved back to From connections.`, type: 'success' });
+    }, [config, figures]);
 
     const toggleCategory = useCallback((category: FigureCategory) => {
         if (!availableCategories.includes(category)) return;
@@ -895,7 +943,7 @@ const App: React.FC = () => {
                 onOpenLauncher={openLauncher}
                 isBuilding={loading || launcherPhase !== 'idle'}
                 hasFigures={figures.length > 0}
-                hasCategoryFilters={hasCategoryFilters}
+                hasCategoryFilters={hasLegend}
                 selectedCategoryCount={selectedCategories.size}
                 onSearch={handleSearch}
                 searchResultCount={highlightedFigureIds.length}
@@ -904,21 +952,34 @@ const App: React.FC = () => {
                 onPrevResult={handlePrevSearchResult}
                 onOpenSettings={() => setIsSettingsOpen(true)}
                 onToggleLegend={() => setIsLegendOpen(prev => !prev)}
-                isLegendOpen={hasCategoryFilters && isLegendOpen}
+                isLegendOpen={hasLegend && isLegendOpen}
+                away={stageShown}
             />
 
-            {hasCategoryFilters && <Legend
+            {hasLegend && <Legend
                 selectedCategories={selectedCategories}
                 availableCategories={availableCategories}
                 onToggleCategory={toggleCategory}
                 isOpen={isLegendOpen}
                 onToggleOpen={() => setIsLegendOpen(prev => !prev)}
+                guestCount={guestIds.size}
+                guestVisibility={guestVisibility}
+                onGuestVisibility={setGuestVisibility}
+                away={stageShown}
             />}
 
             <div className="absolute inset-0 z-0" inert={stageShown}>
                 <CanvasComponent
                     key={canvasRevision}
-                    figures={figures}
+                    figures={canvasFigures}
+                    guestIds={guestIds}
+                    dimGuests={guestVisibility === 'dim'}
+                    onPromoteGuest={moveGuestToMain}
+                    onDemoteGuest={moveBackToGuests}
+                    movedToMainIds={movedToMainIds}
+                    connectionsByFigure={connectionsByFigure}
+                    connectionPortraits={connectionPortraits}
+                    onShowConnection={connection.replay}
                     startYear={config.start}
                     endYear={config.end}
                     onHoverYear={setHoverYear}
@@ -952,15 +1013,16 @@ const App: React.FC = () => {
                     onCanvasInteraction={handleCanvasInteraction}
                     isBusy={isBusy}
                     selectedCategories={selectedCategories}
-                    isLegendCollapsed={!hasCategoryFilters || !isLegendOpen}
+                    isLegendCollapsed={!hasLegend || !isLegendOpen}
                 />
             </div>
             {stageMounted && connection.active && connection.canvasConnection && <ConnectionStage key={connection.active.id} hidden={!stageShown}
                 connection={connection.canvasConnection} chain={connection.active.chain} links={connection.active.links}
                 currentIndex={connection.currentIndex} focus={connection.focusRequest}
-                inset={{ top: hasCategoryFilters && isLegendOpen ? 114 : 52, right: isConnectionSidebarOpen && !connection.canvasConnection.animate ? 544 : 0 }}
+                inset={{ right: isConnectionSidebarOpen && !connection.canvasConnection.animate ? 544 : 0 }}
                 canExit={!modalOpen && stageShown} onStep={connection.setCurrentIndex} onEnd={connection.endReveal} onExit={connection.close} onReplay={connection.replayActive}
-                onExplain={openConnectionExplanation} onInspect={handleInspectFigure} onOpenInfo={openSixDegreesInfo} />}
+                onExplain={openConnectionExplanation} onInspect={handleInspectFigure} onOpenInfo={openSixDegreesInfo}
+                onOpenExploration={connection.activeEntry ? connection.openActiveExploration : undefined} />}
 
             {loading && !isLauncherOpen && (
                 <ProgressOverlay title="CONSULTING THE ARCHIVES" />
@@ -972,7 +1034,7 @@ const App: React.FC = () => {
                     figures={figures}
                     error={connection.picking.error}
                     initialDraft={connection.picking.draft}
-                    topOffset={hasCategoryFilters && isLegendOpen ? 126 : 64}
+                    topOffset={hasLegend && isLegendOpen ? 126 : 64}
                     statusFor={connection.statusFor}
                     onPick={connection.pickFigure}
                     onSubmitName={connection.submitName}
@@ -999,9 +1061,9 @@ const App: React.FC = () => {
                     isVisible: connection.isTabVisible, tabRequest: connection.tabRequest,
                     // While it plays the stage shows who is current; the list does not follow it card by card.
                     connection: connection.active, currentIndex: connection.canvasConnection?.animate ? null : connection.currentIndex, recent: connection.recent,
-                    canvasIds, isBusy, onClose: connection.close, onReplay: connection.replay,
+                    canvasIds, isBusy, onClose: connection.close, onReplay: connection.replay, onDelete: connection.deleteConnection,
                     onFocusPerson: connection.focusPerson, onExplain: openConnectionExplanation,
-                    checkpoints: connection.checkpoints, onOpenCheckpoint: connection.openCheckpoint, onOpenExploration: connection.openSavedExploration, onOpenInfo: openSixDegreesInfo,
+                    checkpoints: connection.checkpoints, onOpenCheckpoint: connection.openCheckpoint, onDeleteCheckpoint: connection.deleteCheckpoint, onOpenExploration: connection.openSavedExploration, onOpenInfo: openSixDegreesInfo,
                 }}
                 activeTracingFigureId={relationshipState?.sourceFigure.id}
                 focusFigureId={focusFigure?.id}
@@ -1010,7 +1072,8 @@ const App: React.FC = () => {
                 isCollapsed={isSidebarCollapsed}
                 onToggleCollapse={() => setIsSidebarCollapsed(prev => !prev)}
                 selectedCategories={selectedCategories}
-                isLegendOpen={hasCategoryFilters && isLegendOpen}
+                isLegendOpen={hasLegend && isLegendOpen}
+                fullHeight={stageShown}
                 isGlobalView={selectedYear === null}
             />
 

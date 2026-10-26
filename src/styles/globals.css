@@ -69,6 +69,7 @@
 .canvas-header {
     position: fixed;
     inset: 0 0 auto;
+    transition: transform 400ms cubic-bezier(.4, 0, .2, 1), opacity 400ms ease, visibility 0s linear 0s;
     z-index: 50;
     height: 52px;
     display: grid;
@@ -81,6 +82,14 @@
     backdrop-filter: blur(24px);
 }
 .canvas-header-actions, .canvas-header-settings { display: flex; align-items: center; gap: 4px; }
+/* While a connection plays on the stage the header and the category filters step away, and the stage takes the whole height. They leave the tab order (visibility)
+   only once they are gone. */
+.canvas-header.is-away { transform: translateY(-100%); opacity: 0; visibility: hidden; pointer-events: none; transition-delay: 0s, 0s, 400ms; }
+#canvas-category-filters { transition: opacity 400ms ease, visibility 0s linear 0s; }
+#canvas-category-filters.is-away { opacity: 0; visibility: hidden; transition-delay: 0s, 400ms; }
+@media (prefers-reduced-motion: reduce) {
+    .canvas-header, #canvas-category-filters { transition: none; }
+}
 .canvas-header-settings { justify-self: end; }
 .canvas-control-button {
     display: grid;
@@ -299,6 +308,26 @@ input[type=number] {
 .relationship-row { display: flex; justify-content: center; align-items: stretch; gap: 32px; width: 100%; }
 .relationship-card { position: relative; z-index: 1; width: 100%; max-width: 320px; min-height: 116px; display: flex; align-items: center; gap: 12px; padding: 18px; overflow: hidden; text-align: left; background: rgb(var(--color-surface-card) / 96%); border: 1px solid rgb(var(--color-card-border)); border-radius: 12px; box-shadow: 0 8px 28px rgb(var(--color-shadow) / 0.1333333333); transition: box-shadow 150ms; }
 .figure-card-corner { position: absolute; top: 0; right: 0; width: 20px; height: 20px; clip-path: polygon(0 0, 100% 0, 100% 100%); pointer-events: none; }
+.figure-card--guest { background: rgb(var(--color-surface-muted) / 85%); border: 1.5px dashed rgb(var(--color-card-muted) / 0.7); box-shadow: 0 4px 16px rgb(var(--color-shadow) / 0.08); }
+.connection-pair { position: relative; display: inline-flex; align-items: center; flex: none; }
+.connection-pair-more { display: inline-grid; place-items: center; min-width: 20px; height: 18px; margin-left: 4px; padding: 0 5px; border-radius: 999px;
+  background: rgb(var(--color-connection)); color: rgb(var(--color-connection-contrast)); box-shadow: 0 0 0 2px rgb(var(--color-surface-card)); font: 800 11px/1 system-ui, sans-serif; letter-spacing: 0; pointer-events: none; }
+/* Centred on the card's bottom edge, half over it, so it never covers the portrait; the card lets it show past its edge. */
+.figure-card-connection { position: absolute; left: 50%; bottom: 0; z-index: 2; transform: translate(-50%, 50%); }
+.figure-card-has-connection { overflow: visible; }
+.figure-card-has-connection .figure-card-corner { border-top-right-radius: 11px; }
+.connection-pair.is-chip { cursor: pointer; border-radius: 9999px; transition: transform 150ms; }
+.connection-pair.is-chip:hover { transform: scale(1.08); }
+.connection-pair.is-chip .net-portrait { box-shadow: 0 0 0 2px rgb(var(--color-surface-card)); }
+.timeline-connection-pair { display: inline-flex; margin-left: 12px; }
+.figure-card-guest-mark { position: absolute; left: 5px; top: 5px; display: flex; color: rgb(var(--color-connection)); pointer-events: none; }
+/* The header above the guests of Six Degrees connections, on the gallery board and the timeline band. */
+.canvas-section-header { position: absolute; display: flex; align-items: center; gap: 16px; pointer-events: none; color: rgb(var(--color-card-muted)); }
+.canvas-section-header::before, .canvas-section-header::after { content: ''; flex: 1; border-top: 1.5px dashed rgb(var(--color-card-muted) / 0.5); }
+.canvas-section-header--start::before { flex: 0 0 24px; }
+.canvas-section-title { display: flex; align-items: center; gap: 8px; font-weight: 800; text-transform: uppercase; letter-spacing: .14em; white-space: nowrap; }
+.canvas-section-title svg { color: rgb(var(--color-connection)); }
+.canvas-section-count { font-family: monospace; font-weight: 600; letter-spacing: 0; opacity: .8; }
 .relationship-row > .relationship-card { width: calc((100% - (var(--relationship-columns) - 1) * 32px) / var(--relationship-columns)); }
 .relationship-card:hover { box-shadow: 0 8px 28px rgb(var(--color-shadow) / 0.2666666667); }
 .relationship-source { border-color: rgb(var(--color-accent-border-strong)); box-shadow: 0 0 0 1px rgb(var(--color-accent-border-strong)), 0 8px 28px rgb(var(--color-shadow) / 0.1333333333); }
@@ -480,7 +509,7 @@ input[type=number] {
 .net-pair { display: inline-flex; flex: none; }
 .net-pair .net-portrait + .net-portrait { margin-left: -11px; }
 
-.connection-link-body { flex: 1; min-width: 0; padding: 10px 0; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.connection-link-body { flex: 1; min-width: 0; padding: 30px 0; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
 .connection-link-evidence { font-size: 13px; line-height: 1.5; color: rgb(var(--color-content-body)); }
 /* An amber tint over the card colour, so the pill stays solid over the stage's blurred canvas as well as on the sidebar. */
 .connection-link-why { display: inline-flex; align-items: center; padding: 3px 12px; font-size: 12px; font-weight: 700; line-height: 1.35; letter-spacing: .01em; border-radius: 9999px; cursor: pointer;
@@ -500,9 +529,24 @@ input[type=number] {
 .connection-recent-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .connection-recent-main::after { content: ''; position: absolute; inset: 0; border-radius: 8px; }
 .connection-recent-main:disabled { cursor: default; }
-.connection-open-exploration { position: relative; z-index: 1; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; background: none; color: rgb(var(--color-card-muted)); cursor: pointer; transition: color 150ms; }
+.connection-open-exploration { position: relative; z-index: 1; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; background: none; color: rgb(var(--color-card-muted)); cursor: pointer; transition: color 150ms, opacity 150ms; }
 .connection-open-exploration:hover:not(:disabled) { color: rgb(var(--color-content-primary)); }
 .connection-open-exploration:disabled { cursor: default; }
+/* The icons of a finished connection and of a paused exploration (open the exploration, delete) show only while its card is hovered or has keyboard focus, so the list reads as names and degrees.
+   Their space is kept, so nothing shifts when they appear, and while hidden they take no clicks (a click there plays the connection). Touch screens have no hover: the icons stay.
+   The focus rule is separate on purpose: a browser without :has() would otherwise drop the hover rule with it. */
+@media (hover: hover) {
+  .connection-recent-entry.has-hover-actions .connection-open-exploration { opacity: 0; pointer-events: none; }
+  .connection-recent-entry.has-hover-actions:hover .connection-open-exploration { opacity: 1; pointer-events: auto; }
+  .connection-recent-entry.has-hover-actions:has(:focus-visible) .connection-open-exploration { opacity: 1; pointer-events: auto; }
+}
+.connection-delete-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; padding: 8px 12px; border-radius: 8px; font-size: 13px; color: rgb(var(--color-content-body)); background: rgb(var(--color-surface-muted) / 70%); border: 1px dashed rgb(var(--color-card-border)); }
+.connection-delete-confirm > span { flex: 1 1 100%; }
+.connection-delete-yes, .connection-delete-no { padding: 3px 12px; border-radius: 6px; font-size: 12px; font-weight: 700; border: 1px solid rgb(var(--color-card-border)); }
+.connection-delete-yes { color: rgb(var(--color-on-accent)); background: rgb(var(--color-danger-solid)); border-color: transparent; }
+.connection-delete-yes:hover:not(:disabled) { background: rgb(var(--color-danger-solid-hover)); }
+.connection-delete-no { color: rgb(var(--color-content-primary)); background: rgb(var(--color-surface-card)); }
+.connection-delete-yes:focus-visible, .connection-delete-no:focus-visible { outline: 2px solid rgb(var(--color-accent-focus)); outline-offset: 2px; }
 .connection-recent-names { flex: 1; min-width: 0; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
 /* The number of degrees is the point of an entry, so it gets the thread's amber as a pill. */
 .connection-recent-degrees { flex-shrink: 0; display: inline-flex; align-items: baseline; gap: 4px; padding: 2px 10px; border-radius: 9999px; font-size: 12px; font-weight: 700; color: rgb(var(--color-connection)); background: rgb(var(--color-connection) / 12%); border: 1px solid rgb(var(--color-connection) / 40%); }

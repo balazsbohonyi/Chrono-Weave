@@ -4,11 +4,15 @@ import { ViewState } from '../types';
 import { CATEGORY_COLORS, CATEGORY_BAR_TEXT_COLORS } from '../constants';
 import { formatYear } from '../utils/formatters';
 import ActionBar from './ActionBar';
+import ConnectionMenu from './ConnectionMenu';
 import CanvasToolbar from './CanvasToolbar';
 import { centerCameraOnBounds, fitCameraToBounds } from '../utils/canvasCamera';
 import { listenForCanvasWheel } from '../utils/canvasWheel';
 import { createWheelClassifier } from '../utils/wheelGesture';
-import { BASE_PIXELS_PER_YEAR, ROW_HEIGHT, calculateTextWidth, calculateTimelineLayout, timelineFigureBounds } from '../utils/timelineLayout';
+import { BASE_PIXELS_PER_YEAR, ROW_HEIGHT, calculateCanvasTimelineLayout, calculateTextWidth, timelineFigureBounds } from '../utils/timelineLayout';
+import GuestSectionHeader from './GuestSectionHeader';
+import ConnectionPair from './ConnectionPair';
+import { GUEST_SECTION_LABEL } from '../utils/galleryLayout';
 import { timelineThread } from '../utils/connectionThread';
 import { isRevealedAt, useConnectionReveal } from '../hooks/useConnectionReveal';
 import ConnectionThread from './ConnectionThread';
@@ -50,6 +54,14 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
   onCanvasInteraction,
   isBusy = false,
   selectedCategories,
+  guestIds,
+  dimGuests = false,
+  onPromoteGuest,
+  movedToMainIds,
+  onDemoteGuest,
+  connectionsByFigure,
+  connectionPortraits,
+  onShowConnection,
   isLegendCollapsed,
   isSidebarOpen = false,
   onConnect,
@@ -93,6 +105,8 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
   // Figure actions stay open until an action is selected, Escape, or a click away.
   const [actionFigureId, setActionFigureId] = useState<string | null>(null);
   const [actionBarCoords, setActionBarCoords] = useState<{top: number, left: number} | null>(null);
+  // A click on a guest's connection chip opens the menu of its connections instead of the actions.
+  const [actionMenu, setActionMenu] = useState<'actions' | 'connections'>('actions');
 
   useEffect(() => {
     if (!actionFigureId) return;
@@ -121,11 +135,17 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
     };
   }, [actionFigureId, modalActive]);
 
-  const { layoutData, totalRows } = useMemo(
-    () => initialLayout?.figures === figures && !clusters.length
-      ? initialLayout.result : calculateTimelineLayout(figures, clusters, clusterPlacements),
-    [figures, clusters, clusterPlacements, initialLayout]
+  const noGuests = useMemo(() => new Set<string>(), []);
+  const { layoutData, totalRows, guestRow } = useMemo(
+    () => initialLayout?.figures === figures && !clusters.length && !guestIds?.size
+      ? initialLayout.result : calculateCanvasTimelineLayout(figures, guestIds ?? noGuests, clusters, clusterPlacements),
+    [figures, guestIds, noGuests, clusters, clusterPlacements, initialLayout]
   );
+  // The band's header starts where its earliest guest does, so it is in view next to them.
+  const guestBand = useMemo(() => {
+    const guests = guestIds?.size ? layoutData.filter(item => guestIds.has(item.figure.id)) : [];
+    return guests.length ? { count: guests.length, start: Math.min(...guests.map(item => item.figure.birthYear)) } : null;
+  }, [layoutData, guestIds]);
 
   useEffect(() => {
     if (relationshipSourceId) {
@@ -418,8 +438,10 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
         
         if (figureId) {
              const figure = figures.find(f => f.id === figureId);
-             if (figure && onDiscover && onTrace && onInspect && !isDiscovering) {
+             const menu = hitElement?.closest('[data-connection-chip]') && connectionsByFigure?.get(figureId)?.length && onShowConnection ? 'connections' : 'actions';
+             if (figure && (menu === 'connections' || (onDiscover && onTrace && onInspect)) && !isDiscovering) {
                  const rect = containerRef.current!.getBoundingClientRect();
+                 setActionMenu(menu);
                  setActionFigureId(figureId);
                  setActionBarCoords({
                      left: Math.max(0, Math.min(e.clientX - rect.left, rect.width - 240)),
@@ -713,6 +735,10 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
           height: contentHeight
         }}
       >
+        {guestRow !== undefined && guestBand && (
+          <GuestSectionHeader label={GUEST_SECTION_LABEL} count={guestBand.count} align="start" top={guestRow * ROW_HEIGHT + 110} fontSize={22}
+            left={(guestBand.start - startYear) * BASE_PIXELS_PER_YEAR - 40} width={Math.max(600, contentWidth - (guestBand.start - startYear) * BASE_PIXELS_PER_YEAR + 40)} />
+        )}
         {layoutData.map((item) => {
           const { figure, level } = item;
           const duration = figure.deathYear - figure.birthYear;
@@ -748,6 +774,8 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
               if (chainIndex === undefined || !isRevealedAt(reveal.progress, chainIndex)) containerOpacityClass = "opacity-[0.07] grayscale";
           } else if (selectedCategories.size > 0 && !selectedCategories.has(figure.category)) {
               containerOpacityClass = "opacity-10 grayscale";
+          } else if (dimGuests && !pickingSource && guestIds?.has(figure.id)) {
+              containerOpacityClass = "opacity-40 grayscale";
           }
 
           if (pickingSource) {
@@ -845,6 +873,7 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
           }
 
           // Standard Rendering
+          const connectionPair = connectionsByFigure?.get(figure.id);
           return (
             <div
               key={figure.id}
@@ -859,9 +888,10 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
                 backfaceVisibility: 'hidden',
               }}
             >
-              <div className={`text-[22px] font-black text-timeline-label leading-tight mb-1 uppercase w-full text-left drop-shadow-sm whitespace-nowrap ${chainIndex !== undefined ? 'flex items-center' : ''}`}>
+              <div className={`text-[22px] font-black text-timeline-label leading-tight mb-1 uppercase w-full text-left drop-shadow-sm whitespace-nowrap ${chainIndex !== undefined || connectionPair ? 'flex items-center' : ''}`}>
                   {chainIndex !== undefined && <span className="connection-badge connection-badge-inline">{chainIndex + 1}</span>}
                   {figure.name}
+                  {connectionPair && <ConnectionPair entries={connectionPair} portraits={connectionPortraits} size={24} className="timeline-connection-pair" chip />}
               </div>
 
               <div className="relative w-full flex items-center">
@@ -1099,7 +1129,11 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
       )}
 
       {/* LAYER 5: Figure Actions */}
-      {actionLayoutItem && actionBarCoords && onDiscover && onTrace && onInspect && !isDiscovering && !isBusy && !pickingSource && (
+      {actionLayoutItem && actionBarCoords && actionMenu === 'connections' && onShowConnection && !isDiscovering && !isBusy && !pickingSource && (
+          <ConnectionMenu entries={connectionsByFigure?.get(actionLayoutItem.figure.id) ?? []} portraits={connectionPortraits} onShow={onShowConnection}
+              onDismiss={() => { setActionFigureId(null); setActionBarCoords(null); }} style={actionBarCoords} />
+      )}
+      {actionLayoutItem && actionBarCoords && actionMenu === 'actions' && onDiscover && onTrace && onInspect && !isDiscovering && !isBusy && !pickingSource && (
           <ActionBar
               figure={actionLayoutItem.figure}
               onDiscover={onDiscover}
@@ -1114,6 +1148,9 @@ const TimelineCanvas: React.FC<CanvasProps> = ({
               isFollowingFigure={isFollowingFigure}
               focusFigureId={seedFigureId}
               onRelationship={onRelationship}
+              isGuest={!!guestIds?.has(actionLayoutItem.figure.id)}
+              onPromote={guestIds?.has(actionLayoutItem.figure.id) ? onPromoteGuest : undefined}
+              onDemote={movedToMainIds?.has(actionLayoutItem.figure.id) ? onDemoteGuest : undefined}
               style={actionBarCoords}
           />
       )}

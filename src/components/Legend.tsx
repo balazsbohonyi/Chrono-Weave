@@ -3,6 +3,8 @@ import React from 'react';
 import { FigureCategory } from '../types';
 import { CATEGORY_COLORS, CATEGORY_LIST } from '../constants';
 import Tooltip from './Tooltip';
+import { GuestLinkIcon } from './GuestSectionHeader';
+import { GUEST_VISIBILITIES, type GuestVisibility } from '../utils/connectionGuests';
 
 interface LegendProps {
   selectedCategories: Set<FigureCategory>;
@@ -10,12 +12,21 @@ interface LegendProps {
   onToggleCategory: (category: FigureCategory) => void;
   isOpen: boolean;
   onToggleOpen?: () => void;
+  // People Six Degrees connections brought in: how many, and whether they are shown, dimmed or hidden.
+  guestCount?: number;
+  guestVisibility?: GuestVisibility;
+  onGuestVisibility?: (visibility: GuestVisibility) => void;
+  // Stepped away while a connection plays on the stage, which takes the whole height.
+  away?: boolean;
 }
 
-const Legend: React.FC<LegendProps> = ({ selectedCategories, availableCategories = CATEGORY_LIST, onToggleCategory, isOpen, onToggleOpen }) => {
+const GUEST_VISIBILITY_LABELS: Record<GuestVisibility, string> = { show: 'Show', dim: 'Dim', hide: 'Hide' };
+
+const Legend: React.FC<LegendProps> = ({ selectedCategories, availableCategories = CATEGORY_LIST, onToggleCategory, isOpen, onToggleOpen,
+  guestCount = 0, guestVisibility = 'show', onGuestVisibility, away = false }) => {
   return (
-    <div id="canvas-category-filters" data-canvas-controls aria-label="Category filters" aria-hidden={!isOpen} inert={!isOpen}
-      className="fixed top-[52px] left-0 w-full z-[45] flex flex-col items-center pointer-events-none">
+    <div id="canvas-category-filters" data-canvas-controls aria-label="Category filters" aria-hidden={!isOpen || away} inert={!isOpen || away}
+      className={`fixed top-[52px] left-0 w-full z-[45] flex flex-col items-center pointer-events-none${away ? ' is-away' : ''}`}>
       
       {/* Collapsible Content Area */}
       <div
@@ -27,7 +38,7 @@ const Legend: React.FC<LegendProps> = ({ selectedCategories, availableCategories
       >
         <div data-canvas-scroll className="legend-category-scroll px-6 py-4 overflow-x-auto no-scrollbar">
             <div className="flex items-center justify-start gap-4 min-w-max">
-                {availableCategories.map((category) => {
+                {availableCategories.length > 1 && availableCategories.map((category) => {
                     const isSelected = selectedCategories.has(category);
                     const isDimmed = selectedCategories.size > 0 && !isSelected;
                     const color = CATEGORY_COLORS[category];
@@ -36,7 +47,7 @@ const Legend: React.FC<LegendProps> = ({ selectedCategories, availableCategories
                     <button
                         key={category}
                         onClick={() => onToggleCategory(category)}
-                        className={`flex items-center gap-2 transition-all duration-300 group outline-none rounded-md p-1.5 border border-transparent ${isDimmed ? 'opacity-50 hover:opacity-70' : 'opacity-100 bg-surface/30 border-border/30'}`}
+                        className={`flex items-center gap-2 transition-all duration-300 group outline-none rounded-md p-1.5 border border-transparent ${isDimmed ? 'opacity-30 hover:opacity-60' : 'opacity-100 bg-surface/30 border-border/30'}`}
                     >
                         <div 
                         className="h-4 w-8 rounded-sm"
@@ -61,6 +72,26 @@ const Legend: React.FC<LegendProps> = ({ selectedCategories, availableCategories
                         </svg>
                         Reset
                     </button>
+                    </>
+                )}
+
+                {guestCount > 0 && onGuestVisibility && (
+                    <>
+                    {availableCategories.length > 1 && <div className="h-6 w-px bg-separator-muted/30 mx-2"></div>}
+                    <div role="group" aria-label="People from connections" className="flex items-center gap-2">
+                        <span className="flex items-center gap-1.5 text-[10px] font-bold tracking-widest text-content-heading uppercase whitespace-nowrap">
+                            <span style={{ color: 'rgb(var(--color-connection))' }}><GuestLinkIcon size={14} /></span>
+                            From connections <span className="font-mono tracking-normal opacity-70">{guestCount}</span>
+                        </span>
+                        <div className="flex rounded-md border border-border/40 overflow-hidden">
+                            {GUEST_VISIBILITIES.map(option => (
+                                <button key={option} type="button" aria-pressed={guestVisibility === option} onClick={() => onGuestVisibility(option)}
+                                    className={`px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider outline-none transition-colors ${guestVisibility === option ? 'bg-accent-soft text-accent-text' : 'text-content-muted hover:bg-surface/40'}`}>
+                                    {GUEST_VISIBILITY_LABELS[option]}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
                     </>
                 )}
             </div>
