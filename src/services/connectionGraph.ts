@@ -73,6 +73,18 @@ export interface ConnectionDiagnostics {
   // Whole session, instrumented segments only (an older session continued today starts counting here).
   total?: { segments: number; requests: Record<ConnectionRequestKind, number>; pairAsks: Record<PairAskReason, number>; elapsedMs: number };
 }
+// What the request in flight is about, for the explorer to show on the graph (see `ai-docs/guides/six-degrees-internals.md`). Set while a
+// model request runs and cleared when it ends; never saved (`recoverSession` builds the saved copy field by field, so it is left out).
+export interface SearchActivity {
+  kind: ConnectionRequestKind;
+  // Who is being asked about: the people whose contacts are sought (with the end of the chain they were chosen for, `a` is the first
+  // endpoint), the person of an identity check, or the two endpoints of a seed route.
+  people: Array<{ id: string; side?: 'a' | 'b' }>;
+  // The pairs being assessed.
+  pairs?: Array<[string, string]>;
+  // Set while the request waits to be tried again after a rate limit: when it will be.
+  waitUntil?: number;
+}
 export interface ConnectionSession {
   version: 2; key: string; canvasId: string; endpoints: [string, string]; people: ContactPerson[];
   candidates: CandidateContact[]; rounds: DiscoveryRound[];
@@ -87,6 +99,8 @@ export interface ConnectionSession {
   // Set by a running search (never saved): 'trimmed' when the saved copy had to leave out the least useful unverified contacts to fit,
   // 'failed' when the latest progress could not be saved although saving worked before.
   saveIssue?: 'trimmed' | 'failed';
+  // What the running search is asking the model right now.
+  activity?: SearchActivity;
 }
 
 export function validPerson(person: Pick<HistoricalFigure, 'name' | 'birthYear' | 'deathYear' | 'category'>): boolean {

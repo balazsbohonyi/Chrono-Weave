@@ -22,6 +22,10 @@ interface Props {
   stable: boolean;
   // Why the saved copy of the search is incomplete (shown as a warning icon only when there is one).
   saveWarning?: string;
+  clockBudget?: { tasks: number; startedAt?: number };
+  waiting?: boolean;
+  // The activity caption under the bar: when it is wider than the bar, the bar grows to just past it.
+  captionWidth?: number;
   panelOpen: boolean;
   onStop: () => void; onContinue: () => void; onFresh: () => void; onReveal: () => void;
   onTogglePanel: () => void; onRestore: () => void; onClose: () => void;
@@ -29,10 +33,12 @@ interface Props {
 
 // The full-screen explorer's header and footer in one floating bar: who is being connected and how many people each has gathered, the
 // degrees once connected, the clock, the buttons of the footer as icons (or Reveal), and the way out. The glass is the view controls'.
-const CompactBar: React.FC<Props> = ({ phase, busy, elapsedMs, statusText, sides, degrees, stable, saveWarning, panelOpen, onStop, onContinue, onFresh, onReveal, onTogglePanel, onRestore, onClose }) => {
+// How much wider than the caption the bar becomes.
+const CAPTION_MARGIN = 28;
+const CompactBar: React.FC<Props> = ({ phase, busy, elapsedMs, statusText, sides, degrees, stable, saveWarning, clockBudget, waiting, captionWidth = 0, panelOpen, onStop, onContinue, onFresh, onReveal, onTogglePanel, onRestore, onClose }) => {
   const hasSession = phase !== 'opening';
-  const clockTip = phase === 'paused' ? `${statusText} · No background search` : statusText;
-  return <div className="canvas-view-toolbar ce-bar" role="toolbar" aria-label="Contact exploration controls">
+  const clockTip = phase === 'paused' ? `${statusText} · No background search` : waiting ? `${statusText} · Waiting for the rate limit` : statusText;
+  return <div className="canvas-view-toolbar ce-bar" role="toolbar" aria-label="Contact exploration controls" style={captionWidth ? { minWidth: captionWidth + CAPTION_MARGIN } as React.CSSProperties : undefined}>
     <span className="sr-only" role="status" aria-live="polite">{statusText}</span>
     {saveWarning && <Tooltip text={saveWarning} multiline>
       <span className="ce-bar-warning" role="img" tabIndex={0} aria-label={saveWarning}>
@@ -48,7 +54,7 @@ const CompactBar: React.FC<Props> = ({ phase, busy, elapsedMs, statusText, sides
       <span className="canvas-toolbar-divider" aria-hidden="true" />
     </>}
     {degrees !== null && <span className="ce-degrees" aria-label={`${degrees} ${degrees === 1 ? 'degree' : 'degrees'} of separation`}><b>{degrees}</b> {degrees === 1 ? 'degree' : 'degrees'}</span>}
-    <Tooltip text={clockTip}><div className="ce-bar-clock" tabIndex={0}><ExplorerClock busy={busy} elapsedMs={elapsedMs} compact /></div></Tooltip>
+    <Tooltip text={clockTip}><div className="ce-bar-clock" tabIndex={0}><ExplorerClock busy={busy} elapsedMs={elapsedMs} compact budget={clockBudget} waiting={waiting} /></div></Tooltip>
     {phase === 'searching' && <ToolButton accent tip="Stop search" onClick={onStop}><rect x="6" y="6" width="12" height="12" rx="2" /></ToolButton>}
     {phase === 'paused' && <>
       <ToolButton accent tip={stable ? 'Continue searching' : 'Resume search'} onClick={onContinue}><path d="M7 4.5v15l12-7.5z" /></ToolButton>

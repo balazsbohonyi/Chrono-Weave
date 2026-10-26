@@ -7,6 +7,8 @@ import ConnectionExplorer, { SearchFailureNotice } from '../src/components/Conne
 import { LAYOUT_OPTIONS, LayoutIcon } from '../src/components/connectionNetwork/layoutOptions';
 import { figurePerson, identifyPerson, sessionKey, type ContactPerson, type ConnectionSession } from '../src/services/connectionGraph';
 import { A, B, M, N } from './connectionFixtures';
+import CompactBar from '../src/components/connectionNetwork/CompactBar';
+import { activityText } from '../src/components/connectionNetwork/activityText';
 
 const provenance = { provider: 'synthetic', model: 'synthetic', version: 2, assessedAt: 1 };
 function build(candidates: (people: ContactPerson[]) => ConnectionSession['candidates'], persistent?: boolean): ConnectionSession {
@@ -16,7 +18,7 @@ function build(candidates: (people: ContactPerson[]) => ConnectionSession['candi
     diagnostics: { tasks: 2, people: 1, pairs: 1, stopReason: 'work-budget' } };
 }
 const render = (session: ConnectionSession, extra: Partial<React.ComponentProps<typeof ConnectionExplorer>> = {}) => renderToStaticMarkup(
-  <ConnectionExplorer session={session} busy={false} onStop={() => {}} onContinue={() => {}} onFresh={() => {}} onClose={() => {}} {...extra} />);
+  <ConnectionExplorer session={session} busy={false} extendedAnimations={false} onStop={() => {}} onContinue={() => {}} onFresh={() => {}} onClose={() => {}} {...extra} />);
 
 test('explorer labels hypotheses, accessible selection, stopped states and storage fallback without showing unchecked biographies', () => {
   const session = build(people => [{ from: people[0].id, to: people[2].id, status: 'unresolved', claim: 'A proposed contact',
@@ -70,7 +72,7 @@ test('the status area warns when the latest progress was not saved or the saved 
   assert.match(trimmed, /class="ce-save-warning" role="status"[^>]*aria-label="This search is larger than a saved copy can hold in full[^"]*"[^>]*>Saved copy is trimmed</);
 });
 
-test('a solved connection reopens as a plain exploration: degrees between the endpoints, Reveal in the graph, no search buttons, the chain lime and nothing dimmed', () => {
+test('a solved connection reopens as a plain exploration: degrees between the endpoints, Reveal in the graph, no search buttons, the chain lime and everyone else dimmed', () => {
   const accepted = (people: ContactPerson[], from: number, to: number) => ({ from: people[from].id, to: people[to].id, status: 'accepted' as const, claim: '',
     assessment: { pair: [people[from].id, people[to].id] as [string, string], verdict: 'accepted' as const, interactionType: 'meeting' as const, evidence: 'They met.', provenance } });
   const session = build(people => [accepted(people, 0, 2), accepted(people, 2, 1), accepted(people, 0, 3)], true);
@@ -79,12 +81,12 @@ test('a solved connection reopens as a plain exploration: degrees between the en
   // The degrees stand where the arrow was, as a badge.
   assert.match(markup, /<span class="ce-degrees" aria-label="2 degrees of separation"><b>2<\/b> degrees<\/span>/);
   assert.doesNotMatch(markup, /ce-arrow/);
-  // Reveal is a prominent button in the header, in place of the phase text; the old centred banner is not shown, and nothing is lit or dimmed as in the just-found state.
+  // Reveal is a prominent button in the header, in place of the phase text; the old centred banner is not shown, and nothing is lit as in the just-found state.
   const header = markup.slice(markup.indexOf('<header'), markup.indexOf('</header>'));
   assert.match(header, /<button type="button" class="net-reveal net-reveal-header"[^>]*>.*?Reveal<\/button>/);
   assert.doesNotMatch(header, /Accepted chain found|Search budget reached|Paused/);
   assert.equal(markup.match(/net-reveal/g)?.length, 2, 'one Reveal button (its class appears twice), none inside the graph');
-  assert.doesNotMatch(markup, /net-success|is-success|Connected ·|is-dim/);
+  assert.doesNotMatch(markup, /net-success|is-success|Connected ·/);
   // The other lines step back through the stylesheet while the lines are shown.
   assert.match(markup, /class="net-graph  ?is-solved"/);
   // No way to search from here, and no invitation to resume.
@@ -94,6 +96,9 @@ test('a solved connection reopens as a plain exploration: degrees between the en
   assert.equal(markup.match(/class="net-edge[^"]*is-chain/g)?.length, 2);
   assert.equal(markup.match(/class="net-edge /g)?.length, 3);
   assert.equal(markup.match(/class="net-node[^"]*is-chain/g)?.length, 3);
+  // Everyone off the chain is dimmed (the fourth person, and the contact that is not on the chain).
+  assert.equal(markup.match(/class="net-node[^"]*is-dim/g)?.length, 1);
+  assert.equal(markup.match(/class="net-edge[^"]*is-dim/g)?.length, 1);
   // An ordinary exploration, and a search that has just found its chain, are unchanged.
   const plain = render(session);
   assert.match(plain, /ce-arrow/); assert.doesNotMatch(plain, /ce-degrees|net-reveal-header|is-chain|is-solved/);
@@ -157,7 +162,9 @@ test('a verified chain is announced in the graph and waits for the Reveal button
   ]);
   session.status = 'connected';
   const markup = render(session, { success: { degrees: 2 } });
-  assert.match(markup, /Connected · 2 degrees/);
+  assert.doesNotMatch(markup, /Connected ·|net-success"/);
+  assert.match(markup, /<span class="ce-degrees" aria-label="2 degrees of separation"><b>2<\/b> degrees<\/span>/);
+  assert.doesNotMatch(markup, /ce-arrow/);
   assert.match(markup, /<button[^>]*class="net-reveal"[^>]*>Reveal<\/button>/);
   assert.doesNotMatch(markup, /Opening the connection|click or press Esc to skip/);
   assert.match(markup, /is-chain/);
@@ -320,4 +327,57 @@ test('the AI-supported legend chip is a switch like the others; a solved connect
   const solved = legend(render(session, { solved: { degrees: 2 }, chain: [session.people[0].id, session.people[2].id, session.people[1].id], onReveal: () => {} }));
   assert.match(solved, /class="net-chip is-accepted is-neutral is-on"/);
   assert.match(solved, /<button type="button" aria-pressed="true" class="net-chip is-chain is-on"><i aria-hidden="true"><\/i>Connection<\/button>/);
+});
+test('what the search is asking is shown on the graph: ripples and a beam for contacts being sought, a caption, the budget, and a wait for a rate limit', () => {
+  const accepted = (people: ContactPerson[]) => ({ from: people[0].id, to: people[2].id, status: 'accepted' as const, claim: '',
+    assessment: { pair: [people[0].id, people[2].id] as [string, string], verdict: 'accepted' as const, interactionType: 'meeting' as const, evidence: 'They met.', provenance } });
+  const session = build(people => [accepted(people)]);
+  const [first, , middle] = session.people;
+  session.activity = { kind: 'discover', people: [{ id: middle.id, side: 'a' }] };
+  const markup = render(session, { busy: true, extendedAnimations: true });
+  assert.match(markup, /class="net-node[^"]*is-asked-a/); assert.match(markup, /class="net-ripple"/);
+  assert.match(markup, /class="net-edge net-beam is-beam-a"/);
+  assert.match(markup, /class="net-node[^"]*is-working-end/);
+  assert.match(markup, /class="net-activity"[^>]*>(?:(?!<\/div>).)*Asking who Middle knew…/);
+  assert.match(markup, /role="progressbar"[^>]*aria-valuenow="6"/);
+  assert.doesNotMatch(markup, /ce-clock is-waiting|Rate limit/);
+  // A request waiting for a rate limit says so, on the clock too.
+  session.activity = { ...session.activity, waitUntil: Date.now() + 6000 };
+  const waiting = render(session, { busy: true, extendedAnimations: true });
+  assert.match(waiting, /net-activity is-waiting"[^>]*>(?:(?!<\/div>).)*Rate limit reached · trying again in [56] s/); assert.match(waiting, /ce-clock is-waiting/); assert.match(waiting, />waiting</);
+  // A seed route is a comet between the endpoints; an identity check scans the person; a quiet search draws none of it.
+  session.activity = { kind: 'seed', people: [{ id: first.id, side: 'a' }, { id: session.people[1].id, side: 'b' }] };
+  assert.match(render(session, { busy: true, extendedAnimations: true }), /net-beam is-beam-seed/);
+  session.activity = { kind: 'identity', people: [{ id: middle.id }] };
+  assert.match(render(session, { busy: true, extendedAnimations: true }), /class="net-scan"/);
+  // Without the extended animations the pulsing marks stay, and so do the caption and the seed comet; the beams, breathing endpoint and line animations go.
+  session.activity = { kind: 'discover', people: [{ id: middle.id, side: 'a' }] };
+  const plain = render(session, { busy: true, extendedAnimations: false });
+  assert.match(plain, /class="net-ripple"/); assert.match(plain, /class="net-activity"/); assert.doesNotMatch(plain, /net-beam|is-working-end|is-extended/);
+  session.activity = { kind: 'seed', people: [{ id: first.id, side: 'a' }, { id: session.people[1].id, side: 'b' }] };
+  assert.match(render(session, { busy: true, extendedAnimations: false }), /net-beam is-beam-seed/);
+  session.activity = undefined;
+  assert.doesNotMatch(render(session, { busy: true, extendedAnimations: true }), /net-ripple|net-beam|net-scan|net-activity/);
+});
+
+test('the caption names who is asked about, pairs being checked, and the wait', () => {
+  const names: Record<string, string> = { a: 'Ada', b: 'Bo', c: 'Cy', d: 'Di' };
+  const nameOf = (id: string) => names[id] ?? id;
+  assert.equal(activityText({ kind: 'discover', people: [{ id: 'a', side: 'a' }] }, nameOf), 'Asking who Ada knew');
+  assert.equal(activityText({ kind: 'discover', people: ['a', 'b', 'c'].map(id => ({ id, side: 'a' as const })) }, nameOf), 'Asking who Ada, Bo and Cy knew');
+  assert.equal(activityText({ kind: 'discover', people: ['a', 'b', 'c', 'd'].map(id => ({ id })) }, nameOf), 'Asking who Ada, Bo and 2 others knew');
+  assert.equal(activityText({ kind: 'assess', people: [], pairs: [['a', 'b']] }, nameOf), 'Checking whether Ada and Bo knew each other');
+  assert.equal(activityText({ kind: 'assess', people: [], pairs: [['a', 'b'], ['c', 'd']] }, nameOf), 'Checking 2 pairs, such as Ada and Bo');
+  assert.equal(activityText({ kind: 'seed', people: [{ id: 'a' }, { id: 'b' }] }, nameOf), 'Asking for a likely route from Ada to Bo');
+  assert.equal(activityText({ kind: 'identity', people: [{ id: 'c' }] }, nameOf), 'Checking who Cy is');
+  assert.equal(activityText({ kind: 'discover', people: [{ id: 'a' }], waitUntil: 10_500 }, nameOf, 4_000), 'Rate limit reached · trying again in 7 s');
+});
+
+test('the full-screen bar grows to just past a wider caption and puts the spare room on both sides of the clock', () => {
+  const props = { phase: 'searching' as const, busy: true, elapsedMs: 1000, statusText: 'Searching', sides: [], degrees: null, stable: false, panelOpen: false,
+    onStop() {}, onContinue() {}, onFresh() {}, onReveal() {}, onTogglePanel() {}, onRestore() {}, onClose() {} };
+  assert.doesNotMatch(renderToStaticMarkup(<CompactBar {...props} />), /min-width/);
+  assert.match(renderToStaticMarkup(<CompactBar {...props} captionWidth={500} />), /style="min-width:528px"/);
+  const css = readFileSync(new URL('../src/styles/connectionExplorer.css', import.meta.url), 'utf8');
+  assert.match(css, /\.ce-bar-clock\s*\{[^}]*margin-inline:\s*auto/);
 });

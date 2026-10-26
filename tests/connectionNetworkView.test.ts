@@ -302,6 +302,31 @@ test('the lit chain can be switched off too: with the AI-supported contacts off 
   assert.ok(on.focus); assert.equal(off.focus, null); assert.equal(off.nodes.length, on.nodes.length);
 });
 
+test('a reopened connection dims everyone off its chain until something is selected, and the chain chip turns that off', () => {
+  const s = session([A, B, X, Y, Z], [link('a', 'x'), link('x', 'y'), link('y', 'b'), link('x', 'z')]);
+  const chain = ['a', 'x', 'y', 'b'];
+  const solved = buildNetworkView(s, { chain });
+  assert.deepEqual([...solved.focus!.nodes].sort(), chain.slice().sort()); assert.equal(solved.focus!.edges.size, 3);
+  assert.ok(buildNetworkView(s, { chain, selection: { person: 'z' } }).focus!.nodes.has('z'));
+  assert.equal(buildNetworkView(s, { chain, showChain: false }).focus, null);
+});
+
+test('the request in flight reaches the view: the people asked about are marked, and who is drawn never changes with it', () => {
+  const s = session([A, B, X, U, Z], [link('a', 'x'), link('u', 'z', 'checking')]);
+  assert.equal(buildNetworkView(s).activity, null); assert.deepEqual(ids(buildNetworkView(s)), ['a', 'b', 'x']);
+  // Pairs being checked are drawn only when the Proposed / checking chip is on, as before: the request adds nobody and removes nobody.
+  s.activity = { kind: 'assess', people: [], pairs: [['u', 'z']] };
+  assert.deepEqual(ids(buildNetworkView(s)), ['a', 'b', 'x']);
+  const chip = buildNetworkView(s, { filters: { ...NO_FILTERS, proposed: true } });
+  assert.deepEqual(ids(chip), ['a', 'b', 'u', 'x', 'z']); assert.ok(chip.nodes.find(node => node.id === 'u')!.active);
+  assert.deepEqual(ids(buildNetworkView({ ...s, activity: undefined }, { filters: { ...NO_FILTERS, proposed: true } })), ids(chip));
+  s.activity = { kind: 'discover', people: [{ id: 'x', side: 'a' }, { id: 'b', side: 'b' }] };
+  const asking = buildNetworkView(s);
+  assert.deepEqual(asking.nodes.filter(node => node.working).map(node => [node.id, node.working]), [['b', { kind: 'asked', side: 'b' }], ['x', { kind: 'asked', side: 'a' }]]);
+  s.activity = { kind: 'identity', people: [{ id: 'x' }] };
+  assert.deepEqual(buildNetworkView(s).nodes.find(node => node.id === 'x')!.working, { kind: 'identity' });
+});
+
 test('lines are drawn faded first, then the rest, the lit chain last of each: a click where lines cross lands on the one the reader is looking at', () => {
   const edges = ['e1', 'e2', 'e3', 'e4', 'e5', 'e6'].map(id => ({ id }));
   const focus = { edges: new Set(['e2', 'e5']) }, chain = new Set(['e3', 'e5']);

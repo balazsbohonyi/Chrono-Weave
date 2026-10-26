@@ -17,7 +17,7 @@ import { validateLocalUrl, type AppConfig } from '../utils/providerConfig';
 import { generateWeaveTimeline, getWeaveGenerationRange, parseWeaveFigures, suggestWeaveTopic, validateWeaveQuery } from './weaveService';
 import { noteValidationRetry, parseJsonResponse } from './jsonResponse';
 import { isWeaveCategoryAllowed } from '../utils/weave';
-import { withAbort } from './utils';
+import { waitToRetry, withAbort } from './utils';
 
 const RELAY = '/api/ollama/cloud';
 
@@ -52,15 +52,6 @@ function explanation(value: unknown): RelationshipExplanation {
       return { title: string(item.title, 'title'), content: string(item.content, 'content') };
     }),
   };
-}
-
-function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    signal?.throwIfAborted();
-    const abort = () => { clearTimeout(timer); reject(signal?.reason); };
-    const timer = setTimeout(() => { signal?.removeEventListener('abort', abort); resolve(); }, ms);
-    signal?.addEventListener('abort', abort, { once: true });
-  });
 }
 
 export class OllamaService implements IAIService {
@@ -166,7 +157,7 @@ export class OllamaService implements IAIService {
           } catch (error) {
             if (!(error instanceof OllamaHttpError) || ![429, 503].includes(error.status) || attempt >= 2 ||
                 /quota|usage limit|daily limit|weekly limit/i.test(error.message)) throw error;
-            await sleep(1000 * 2 ** attempt, signal);
+            await waitToRetry(1000 * 2 ** attempt, signal);
           }
         }
         try {

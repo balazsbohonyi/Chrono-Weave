@@ -1,4 +1,4 @@
-import { lifespanGapYears, type CandidateContact, type ConnectionSession, type ContactPerson } from './connectionGraph';
+import { lifespanGapYears, type CandidateContact, type ConnectionSession, type ContactPerson, type SearchActivity } from './connectionGraph';
 import { pairKey } from './pathService';
 
 // The pure view model behind the Six Degrees network: which people and contacts are drawn for a
@@ -35,6 +35,8 @@ export interface NetworkNode {
   supported: boolean;
   // Pairs involving this person are being assessed right now.
   active: boolean;
+  // The running request is about this person: their contacts are being sought (from the end of the chain `side` names), or their identity checked.
+  working: { kind: 'asked' | 'identity'; side?: 'a' | 'b' } | null;
   // Visible only because it is a contact of the selected person.
   contextual: boolean;
 }
@@ -63,7 +65,7 @@ export interface NetworkViewOptions {
   expanded?: ReadonlySet<string>;
   pinned?: ReadonlySet<string>;
   threshold?: number;
-  // The success hand-off: light the chain and keep all of its members unfolded.
+  // The success hand-off: light the chain and keep all of its members unfolded. (A reopened connection's `chain` also dims the rest, until something is selected.)
   highlightChain?: boolean;
   // The people of an already known chain, in order (shared identity ids): lit instead of whichever shortest accepted route is found first,
   // as long as every step is still an accepted contact. Without it the route is the shortest accepted one between the endpoints.
@@ -79,6 +81,8 @@ export interface NetworkView {
   // What stays at full strength; everything else dims. Null when nothing is selected.
   focus: { nodes: Set<string>; edges: Set<string> } | null;
   counts: NetworkCounts;
+  // What the running search is asking the model right now, for the graph to show (see `SearchActivity`).
+  activity: SearchActivity | null;
   // How many accepted-contact people (the endpoints not counted) are nearer to each endpoint, by the same rule as `NetworkNode.side`.
   // Complete: legend filters and folded "+n" leaves do not change it.
   sides: { a: number; b: number };
@@ -157,6 +161,9 @@ export function buildNetworkView(session: ConnectionSession, options: NetworkVie
     else if (touchesSelection) shown.set(edgeId(c), { candidate: c, contextual: true });
   }
 
+  // What the running search is asking only marks who is drawn already; it never adds or removes anybody (that would move the layout).
+  const activity = session.activity ?? null;
+
   const visible = new Set(showAccepted ? supported : [first, second].filter(id => byId.has(id)));
   if (!showAccepted) {
     for (const id of litChain?.nodeIds ?? []) visible.add(id);
@@ -217,6 +224,8 @@ export function buildNetworkView(session: ConnectionSession, options: NetworkVie
   };
   const sides = { a: 0, b: 0 };
   for (const id of supported) if (id !== first && id !== second) { const side = sideOf(id); if (side !== 'none') sides[side]++; }
+  const asked = new Map((activity?.kind === 'discover' || activity?.kind === 'identity' ? activity.people : []).map(person => [person.id, person]));
+  const workingOf = (id: string): NetworkNode['working'] => { const person = asked.get(id); return person ? { kind: activity!.kind === 'identity' ? 'identity' : 'asked', ...(person.side ? { side: person.side } : {}) } : null; };
   const nodes: NetworkNode[] = [...visible].filter(id => !hidden.has(id)).map(id => {
     const da = fromA.get(id), db = fromB.get(id);
     const side = sideOf(id);
@@ -224,7 +233,7 @@ export function buildNetworkView(session: ConnectionSession, options: NetworkVie
       id, person: byId.get(id)!, endpoint: id === first ? 0 : id === second ? 1 : null, side,
       distance: side === 'a' ? da! : side === 'b' ? db! : null,
       parent: (side === 'a' ? parents : side === 'b' ? parentsB : undefined)?.get(id) ?? null,
-      supported: supported.has(id), active: checking.has(id), contextual: !supported.has(id) && !chipPeople.has(id),
+      supported: supported.has(id), active: checking.has(id), working: workingOf(id), contextual: !supported.has(id) && !chipPeople.has(id),
     };
   });
   const nodeIds = new Set(nodes.map(node => node.id));
@@ -241,7 +250,7 @@ export function buildNetworkView(session: ConnectionSession, options: NetworkVie
     for (const edge of edges) if (edge.from === selection.person || edge.to === selection.person) {
       focus.edges.add(edge.id); focus.nodes.add(edge.from); focus.nodes.add(edge.to);
     }
-  }
+  } else if (litChain) focus = { nodes: new Set(litChain.nodeIds), edges: new Set(litChain.edgeIds) };
 
   const count = (filter: UnverifiedFilter) => known.filter(c => filterOf(c.status) === filter).length;
   const byName = (x: ContactPerson, y: ContactPerson) => x.name.localeCompare(y.name);
@@ -253,7 +262,7 @@ export function buildNetworkView(session: ConnectionSession, options: NetworkVie
   }
   for (const edge of edges) if (filterOf(edge.status)) contacts[filterOf(edge.status)!].push(edge);
   return {
-    nodes, edges, folds, closest, chain, focus, sides,
+    nodes, edges, folds, closest, chain, focus, sides, activity,
     counts: { people: supported.size, contacts: accepted.length, unresolved: count('unresolved'), proposed: count('proposed'), blocked: count('blocked') },
     list: {
       endpoints: [first, second].flatMap(id => byId.get(id) ?? []),

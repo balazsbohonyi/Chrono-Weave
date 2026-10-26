@@ -22,6 +22,15 @@ export function withAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise
   });
 }
 
+// Who wants to know that a request is waiting to be tried again (the Six Degrees search shows it); told when the wait starts and, with
+// null, when it ends.
+const retryWaitListeners = new Set<(until: number | null) => void>();
+export const onRetryWait = (listener: (until: number | null) => void): (() => void) => { retryWaitListeners.add(listener); return () => { retryWaitListeners.delete(listener); }; };
+export async function waitToRetry(ms: number, signal?: AbortSignal): Promise<void> {
+  for (const listener of retryWaitListeners) listener(Date.now() + ms);
+  try { await wait(ms, signal); } finally { for (const listener of retryWaitListeners) listener(null); }
+}
+
 // Global queue to ensure we don't fire parallel requests that trigger 429 errors
 let requestQueue: Promise<any> = Promise.resolve();
 
@@ -73,7 +82,7 @@ export async function runWithRetry<T>(fn: () => Promise<T>, retries = 5, backoff
 
     if (retries > 0 && isRateLimit) {
       console.warn(`API rate limit hit. Retrying in ${backoff}ms... (Attempts left: ${retries})`);
-      await wait(backoff, signal);
+      await waitToRetry(backoff, signal);
       return runWithRetry(fn, retries - 1, backoff * 2, signal);
     }
     throw err;

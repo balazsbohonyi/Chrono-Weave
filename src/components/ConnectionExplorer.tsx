@@ -15,6 +15,7 @@ import { pushStep, type DetailMemory, type Step } from './connectionNetwork/sele
 import NetworkLegend from './connectionNetwork/NetworkLegend';
 import NetworkPortrait from './connectionNetwork/NetworkPortrait';
 import ExplorerClock from './connectionNetwork/ExplorerClock';
+import { GRAPH_PERF_EXTENDED_ANIMATIONS } from './connectionNetwork/performance';
 import SideCount from './connectionNetwork/SideCount';
 import CompactBar, { type BarSide } from './connectionNetwork/CompactBar';
 import { barPhase, phaseText } from './connectionNetwork/barPhase';
@@ -39,6 +40,8 @@ interface Props {
   // Opens the explanation of Six Degrees of Separation. While it is open the overlay stands back: it is inert and its Escape is the dialog's.
   onOpenInfo?: () => void;
   suspended?: boolean;
+  // The extended search animations (see `GRAPH_PERF_EXTENDED_ANIMATIONS`); the switch's value unless a test says otherwise.
+  extendedAnimations?: boolean;
 }
 const NO_SELECTION: NetworkSelection = {};
 const SAVE_ISSUE_TEXT = {
@@ -65,12 +68,13 @@ export const SearchFailureNotice: React.FC<{ message: string; onResume: () => vo
   </div>;
 
 // HERO: two endpoint anchors frame the growing contact network, separate from the timeline.
-const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onContinue, onFresh, onClose, success = null, chain = null, solved = null, onReveal = NO_REVEAL, onOpenInfo, suspended = false }) => {
+const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onContinue, onFresh, onClose, success = null, chain = null, solved = null, onReveal = NO_REVEAL, onOpenInfo, suspended = false, extendedAnimations = GRAPH_PERF_EXTENDED_ANIMATIONS }) => {
   const dialog = useRef<HTMLDivElement>(null);
   const narrow = useMediaQuery(NARROW_QUERY);
   const reducedMotion = useMediaQuery(REDUCED_MOTION_QUERY);
   const [selection, setSelection] = useState<NetworkSelection>(NO_SELECTION);
   const [filters, setFilters] = useState<NetworkFilters>(NO_FILTERS);
+  const [captionWidth, setCaptionWidth] = useState(0);
   const [showAccepted, setShowAccepted] = useState(true);
   // The lit chain of a found or solved connection; switching it off shows the graph as an ordinary exploration.
   const [showChain, setShowChain] = useState(true);
@@ -244,6 +248,8 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
   const resume = useMemo(() => !busy && !success && !solved && session && stable && !session.error ? { onResume: onContinue, reason: stopReason === 'time-budget' ? 'time' as const : 'work' as const } : null,
     [busy, success, solved, !!session, stable, session?.error, onContinue, stopReason]);
 
+  const clockBudget = useMemo(() => session ? { tasks: session.diagnostics.tasks, startedAt: session.runStartedAt } : undefined, [session?.diagnostics.tasks, session?.runStartedAt]);
+
   const endpoint = (index: 0 | 1) => {
     const person: ContactPerson | undefined = endpointPerson(index);
     return <div className={`ce-endpoint is-${index === 0 ? 'a' : 'b'}`}>
@@ -279,18 +285,18 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
           {solved
             ? <button type="button" className="net-reveal net-reveal-header" onClick={onReveal}>
               <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l12-7.5z" /></svg>Reveal</button>
-            : <strong>{statusText}</strong>}
+            : success ? <strong className="sr-only">{statusText}</strong> : <strong>{statusText}</strong>}
           {!busy && !success && !solved && <span>No background search</span>}
           {session?.saveIssue && <Tooltip text={SAVE_ISSUE_TEXT[session.saveIssue]} multiline>
             <span className="ce-save-warning" role="status" tabIndex={0} aria-label={SAVE_ISSUE_TEXT[session.saveIssue]}>
               {session.saveIssue === 'failed' ? 'Latest progress not saved' : 'Saved copy is trimmed'}</span>
           </Tooltip>}
         </div>
-        {session ? <div className="ce-endpoints">{endpoint(0)}{solved
-          ? <span className="ce-degrees" aria-label={`${solved.degrees} ${solved.degrees === 1 ? 'degree' : 'degrees'} of separation`}><b>{solved.degrees}</b> {solved.degrees === 1 ? 'degree' : 'degrees'}</span>
+        {session ? <div className="ce-endpoints">{endpoint(0)}{solved || success
+          ? <span className="ce-degrees" aria-label={`${(solved ?? success)!.degrees} ${(solved ?? success)!.degrees === 1 ? 'degree' : 'degrees'} of separation`}><b>{(solved ?? success)!.degrees}</b> {(solved ?? success)!.degrees === 1 ? 'degree' : 'degrees'}</span>
           : <span className="ce-arrow" aria-hidden="true">→</span>}{endpoint(1)}</div>
           : <p className="ce-opening">Opening contact exploration</p>}
-        <ExplorerClock busy={busy} elapsedMs={session?.elapsedMs ?? 0} />
+        <ExplorerClock busy={busy} elapsedMs={session?.elapsedMs ?? 0} budget={clockBudget} waiting={!!session?.activity?.waitUntil} />
       </div>
     </header>}
     <div className={['connection-explorer-body', maximized && 'is-maximized', maximized && panelOpen && 'has-panel'].filter(Boolean).join(' ')}>
@@ -298,12 +304,12 @@ const ConnectionExplorer: React.FC<Props> = ({ session, phase, busy, onStop, onC
         {/* Before the graph, whose people and lines are all tab stops: the bar is the first thing Tab reaches, and where the dialog's focus starts. */}
         {maximized && <CompactBar phase={barPhase({ hasSession: !!session, busy, success: !!success, solved: !!solved })} busy={busy} elapsedMs={session?.elapsedMs ?? 0} statusText={statusText}
           sides={sides} degrees={solved?.degrees ?? success?.degrees ?? null} stable={stable} saveWarning={session?.saveIssue ? SAVE_ISSUE_TEXT[session.saveIssue] : undefined}
-          panelOpen={panelOpen} onStop={onStop} onContinue={onContinue} onFresh={onFresh} onReveal={onReveal} onTogglePanel={togglePanel} onRestore={restore} onClose={onClose} />}
+          clockBudget={clockBudget} waiting={!!session?.activity?.waitUntil} captionWidth={captionWidth} panelOpen={panelOpen} onStop={onStop} onContinue={onContinue} onFresh={onFresh} onReveal={onReveal} onTogglePanel={togglePanel} onRestore={restore} onClose={onClose} />}
         {view
           ? <NetworkGraph view={view} endpointNames={endpointNames} nameOf={name} layout={layout} kick={kick} pinned={pinned} mode={mode} onModeChange={setMode}
             size={size} onSize={resize} selection={selection} onSelect={select} portraits={portraits} narrow={narrow} reducedMotion={reducedMotion}
             success={success} solved={solved} showChain={showChain} onReveal={onReveal} resume={resume} reveal={reveal} onPinsChange={syncPins} onToggleFold={toggleFold} legend={legend}
-            maximized={maximized} onToggleMaximize={narrow ? undefined : toggleMaximized} inset={maximized && panelOpen ? FLOATING_PANEL_INSET : 0} onOpenLayoutInfo={openLayoutInfo} />
+            maximized={maximized} onToggleMaximize={narrow ? undefined : toggleMaximized} inset={maximized && panelOpen ? FLOATING_PANEL_INSET : 0} onOpenLayoutInfo={openLayoutInfo} extendedAnimations={extendedAnimations} onCaptionWidth={setCaptionWidth} />
           : <div className="net-graph"><p className="net-empty">Preparing the contact network…</p></div>}
         {failure && <SearchFailureNotice message={failure} onResume={onContinue} onDismiss={() => setDismissedError(failureKey)} />}
       </section>

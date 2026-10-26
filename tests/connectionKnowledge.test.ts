@@ -161,3 +161,28 @@ test('a running search reports when its latest progress could not be saved, but 
   const repository = new Storage(false, true), session = await run(repository);
   assert.equal('saveIssue' in (await repository.loadSession(session.key))!, false);
 });
+
+// A minimal IndexedDB: one store, `get`/`put` by key, and a transaction that completes on the next tick.
+function fakeIndexedDb() {
+  const stored = new Map<string, unknown>(); const writes: unknown[] = [];
+  const db = { onversionchange: null as unknown, close() {}, createObjectStore() {}, transaction() {
+    const tx: Record<string, any> = { error: null, oncomplete: null, onerror: null, onabort: null, abort() {},
+      objectStore: () => ({
+        get: (key: string) => { const request: Record<string, any> = { result: stored.get(key), onsuccess: null }; setTimeout(() => { request.onsuccess?.(); tx.oncomplete?.(); }, 0); return request; },
+        put: (value: unknown, key: string) => { stored.set(key, structuredClone(value)); writes.push(key); setTimeout(() => tx.oncomplete?.(), 0); },
+      }) };
+    return tx;
+  } };
+  const factory = { open() { const request: Record<string, any> = { result: db, onupgradeneeded: null, onsuccess: null, onerror: null, onblocked: null }; setTimeout(() => request.onsuccess?.(), 0); return request; } };
+  return { factory: factory as unknown as IDBFactory, writes };
+}
+test('a checkpoint inside a search is written once, a moment later; one that ends a run is written before it settles', async () => {
+  const { factory, writes } = fakeIndexedDb(); const repo = new IndexedConnectionRepository(factory); const session = fixture();
+  assert.equal(await repo.checkpoint({ people: session.people, contacts: [] }, session, { deferWrite: true }), true);
+  await repo.checkpoint({ people: session.people, contacts: [] }, { ...session, phase: 'Second' }, { deferWrite: true });
+  assert.equal(writes.length, 0, 'nothing is written while the search is running');
+  assert.equal((await repo.loadSession(session.key))!.phase, 'Second', 'this page already has the progress');
+  await repo.checkpoint({ people: session.people, contacts: [] }, { ...session, phase: 'Done' });
+  assert.equal(writes.length, 1, 'the final checkpoint wrote everything');
+  assert.equal((await new IndexedConnectionRepository(factory).loadSession(session.key))!.phase, 'Done');
+});

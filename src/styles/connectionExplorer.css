@@ -45,6 +45,15 @@
 @keyframes ce-timer-ripple { 0% { transform: scale(.3); opacity: .9; } 100% { transform: scale(1.15); opacity: 0; } }
 @keyframes ce-timer-pulse { 0%, 100% { transform: scale(1); opacity: .85; } 50% { transform: scale(1.09); opacity: 1; } }
 
+/* How much of the round's request and time limits is used: a thin bar under the time, in the colour of the work. */
+.ce-budget { position: absolute; left: 0; right: 0; bottom: -9px; height: 3px; border-radius: 2px; background: rgb(var(--color-content-muted) / .25); overflow: hidden; }
+.ce-budget i { display: block; height: 100%; border-radius: inherit; background: rgb(var(--color-connection)); transition: width 600ms linear; }
+.ce-clock.is-compact .ce-budget { bottom: -7px; }
+/* A request held back by a rate limit: the glass stops sweeping, the time and its caption go quiet. */
+.ce-clock.is-waiting .ce-working.is-working .ce-working-glass, .ce-clock.is-waiting .ce-timer.is-running .ce-timer-value { animation: none; }
+.ce-clock.is-waiting .ce-timer-caption { color: rgb(var(--color-connection-text)); }
+.ce-clock.is-waiting .ce-budget i { background: rgb(var(--color-connection-text)); }
+
 /* A magnifying glass that sweeps about as if looking for something, shown while the search runs. Its space is
    always kept, so the clock does not move when the search stops. */
 .ce-working { position: relative; flex: none; width: 38px; height: 38px; color: rgb(var(--color-connection)); opacity: 0; transition: opacity 300ms; }
@@ -87,14 +96,14 @@
 .connection-explorer .canvas-view-toolbar { background: rgb(var(--color-surface-muted)); border-color: rgb(var(--color-border-strong)); backdrop-filter: none; -webkit-backdrop-filter: none; }
 /* The compact bar: the view controls (.canvas-view-toolbar, from globals.css, with its fixed position replaced) at the top centre. */
 .canvas-view-toolbar.ce-bar { position: absolute; top: 34px; left: 50%; bottom: auto; transform: translateX(-50%); z-index: 4; gap: 10px; padding: 6px 10px; max-width: calc(100% - 28px);
-  overflow-x: auto; scrollbar-width: none; transition: left 180ms ease; }
+  overflow-x: auto; scrollbar-width: none; transition: left 180ms ease, min-width 220ms ease; }
 .ce-bar::-webkit-scrollbar { display: none; }
 .ce-bar > * { flex: none; }
 .connection-explorer-body.has-panel .ce-bar { left: calc((100% - var(--panel-inset)) / 2); max-width: calc(100% - var(--panel-inset) - 28px); }
 .ce-bar-sides { display: flex; align-items: center; gap: 14px; padding: 0 4px; }
 .ce-bar .ce-degrees { padding: 2px 12px; font-size: 12px; }
 .ce-bar .ce-degrees b { font-size: 16px; }
-.ce-bar-clock { display: inline-flex; align-items: center; padding: 0 6px; border-radius: 10px; cursor: help; }
+.ce-bar-clock { display: inline-flex; align-items: center; margin-inline: auto; padding: 0 6px; border-radius: 10px; cursor: help; }
 .ce-bar-warning { display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 8px; color: rgb(var(--color-danger-text)); cursor: help; }
 .ce-bar-clock:focus-visible, .ce-bar-warning:focus-visible { outline: 2px solid rgb(var(--color-accent-focus)); outline-offset: 2px; }
 /* The action of the phase (Stop, Continue, Reveal) is filled in the connection colour; the rest are plain icons. */
@@ -133,7 +142,7 @@
 .net-graph:not(.is-large) .net-node, .net-graph:not(.is-large) .net-edge { transition: opacity .2s; }
 /* Zoomed far out in a big network (`isFarZoom`), people lose their name, pulse and "+n" fold badge, which are unreadable at that size (and, when GRAPH_PERF_HIDE_PORTRAITS is on, their portrait or initials,
    the bulk of the image decoding). The endpoints and whoever is selected or on the lit chain keep theirs. */
-.net-graph.is-far .net-node:not(.is-endpoint):not(.is-selected):not(.is-edge-end):not(.is-chain) :is(.net-name, .net-pulse, .net-fold) { display: none; }
+.net-graph.is-far .net-node:not(.is-endpoint):not(.is-selected):not(.is-edge-end):not(.is-chain) :is(.net-name, .net-fold) { display: none; }
 .net-graph.is-far-portraits .net-node:not(.is-endpoint):not(.is-selected):not(.is-edge-end):not(.is-chain) :is(image, .net-initials) { display: none; }
 
 /* Year strips: thin opaque bars, so the years stay readable over the graph. */
@@ -222,8 +231,39 @@
 .net-select-ring { fill: none; stroke: rgb(var(--color-selection)); stroke-width: 3.5; opacity: 0; }
 .net-node.is-selected .net-select-ring, .net-node.is-edge-end .net-select-ring { opacity: 1; }
 .net-node:focus-visible .net-select-ring { opacity: 1; stroke-dasharray: 5 4; }
-.net-pulse { fill: none; stroke: rgb(var(--color-connection)); stroke-width: 2; stroke-dasharray: 2 3; opacity: .8; transform-box: fill-box; transform-origin: center; animation: net-pulse 1.4s ease-out infinite; }
-@keyframes net-pulse { from { transform: scale(.85); opacity: .9; } to { transform: scale(1.25); opacity: 0; } }
+/* A person being checked: a steady glowing ring (what stays when motion is reduced) and three solid rings that leave the portrait one after
+   the other and fade as they widen. The stroke keeps its width while the ring scales, and the rings stay visible at any level of detail. */
+.net-pulse-halo { fill: none; stroke: rgb(var(--color-connection)); stroke-width: 4; opacity: .55; }
+.net-pulse { fill: none; stroke: rgb(var(--color-connection)); stroke-width: 3; vector-effect: non-scaling-stroke; opacity: 0; transform-box: fill-box; transform-origin: center; animation: net-pulse 2.1s cubic-bezier(.2, .6, .4, 1) infinite; }
+.net-pulse:nth-of-type(3) { animation-delay: .7s; }
+.net-pulse:nth-of-type(4) { animation-delay: 1.4s; }
+@keyframes net-pulse { 0% { transform: scale(1); opacity: .95; } 100% { transform: scale(2.1); opacity: 0; } }
+
+/* What else the search is doing, each in a motion of its own (the amber rings above are a pair being assessed):
+   ripples leave a person whose contacts are being sought, in the colour of the end of the chain they were chosen for;
+   a beam flows from each of them toward the far end, and a comet runs between the endpoints while a seed route is asked for;
+   a turning dashed ring marks a person whose identity is being checked; the endpoint of the side being worked breathes. */
+.net-ripple { fill: none; stroke: rgb(var(--color-side-a)); stroke-width: 3; vector-effect: non-scaling-stroke; opacity: 0; transform-box: fill-box; transform-origin: center; animation: net-ripple 2.4s cubic-bezier(.2, .6, .4, 1) infinite; }
+.net-node.is-asked-b .net-ripple { stroke: rgb(var(--color-side-b)); }
+.net-ripple:nth-child(2) { animation-delay: .8s; }
+.net-ripple:nth-child(3) { animation-delay: 1.6s; }
+@keyframes net-ripple { 0% { transform: scale(1); opacity: .9; } 100% { transform: scale(2.6); opacity: 0; } }
+.net-scan { fill: none; stroke: rgb(var(--color-connection)); stroke-width: 3; stroke-dasharray: 9 7; stroke-linecap: round; transform-box: fill-box; transform-origin: center; animation: net-scan 1.8s linear infinite; }
+@keyframes net-scan { to { transform: rotate(360deg); } }
+.net-beam { pointer-events: none; }
+.net-beam :is(.net-edge-hit, .net-edge-halo) { display: none; }
+.net-beam .net-edge-line { stroke: rgb(var(--color-side-a)); stroke-width: 3; stroke-dasharray: 4 10; stroke-linecap: round; opacity: .85; animation: net-flow .9s linear infinite; }
+.net-beam.is-beam-b .net-edge-line { stroke: rgb(var(--color-side-b)); }
+.net-beam.is-beam-seed .net-edge-line { stroke: rgb(var(--color-connection)); stroke-width: 5; stroke-dasharray: 14 86; opacity: 1; animation: net-comet 2.2s ease-in-out infinite; }
+@keyframes net-flow { to { stroke-dashoffset: -28; } }
+@keyframes net-comet { from { stroke-dashoffset: 14; } to { stroke-dashoffset: -100; } }
+.net-graph.is-extended .net-node.is-working-end .net-halo-ring, .net-graph.is-extended .net-node.is-working-end .net-halo { transform-box: fill-box; transform-origin: center; animation: net-breathe 1.8s ease-in-out infinite; }
+@keyframes net-breathe { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.22); opacity: .5; } }
+/* A pair being assessed: a light runs along its line. Once it is decided the line's halo flashes (opacity only, no filter or width animation: those made panning stutter), lit when accepted, grey when not. */
+.net-graph.is-extended .net-edge.is-checking .net-edge-line { stroke: rgb(var(--color-connection)); stroke-width: 3; stroke-dasharray: 6 8; animation: net-flow .9s linear infinite; }
+.net-graph.is-extended .net-edge.just-accepted .net-edge-halo { stroke: rgb(var(--color-connection)); animation: net-decided 1.4s ease-out; }
+.net-graph.is-extended .net-edge.just-unresolved .net-edge-halo { stroke: rgb(var(--color-content-muted)); animation: net-decided 1.4s ease-out; }
+@keyframes net-decided { 0% { opacity: .85; } 100% { opacity: 0; } }
 .net-node.is-chain .net-ring { stroke: rgb(var(--color-chain-path)); stroke-width: 5.5; }
 .net-fold rect { fill: rgb(var(--color-surface)); stroke: rgb(var(--color-border-strong)); stroke-width: 1.5; }
 .net-fold text { fill: rgb(var(--color-content-primary)); font-size: 11px; font-weight: 700; pointer-events: none; }
@@ -263,10 +303,8 @@
 .net-node.is-dim .net-ring { stroke: rgb(var(--color-content-muted)); }
 .net-node.is-dim .net-name { fill: rgb(var(--color-content-muted)); }
 
-/* The lit chain's announcement and the Reveal button under it. Only the button takes clicks; the graph underneath stays explorable. */
+/* The Reveal button of a lit chain (the degrees are in the header badge or the full-screen bar). Only the button takes clicks; the graph underneath stays explorable. */
 .net-success-wrap { position: absolute; top: 76px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 10px; pointer-events: none; z-index: 3; }
-.net-success { background: rgb(var(--color-connection)); color: rgb(var(--color-connection-contrast)); padding: 8px 18px; border-radius: 999px; font-weight: 700; font-size: 15px; text-align: center; box-shadow: 0 6px 20px rgb(0 0 0 / .25); }
-.net-success small { display: block; font-size: 10px; font-weight: 500; opacity: .85; }
 .connection-explorer button.net-reveal { pointer-events: auto; background: rgb(var(--color-connection)); color: rgb(var(--color-connection-contrast)); border-color: rgb(var(--color-connection)); border-radius: 999px; padding: 10px 34px; font-size: 15px; font-weight: 800; letter-spacing: .04em; box-shadow: 0 6px 20px rgb(0 0 0 / .25); transition: transform 150ms, box-shadow 150ms, filter 150ms; }
 .connection-explorer button.net-reveal:hover { background: rgb(var(--color-connection)); filter: brightness(1.08); transform: translateY(-1px); box-shadow: 0 8px 24px rgb(0 0 0 / .3); }
 .connection-explorer button.net-reveal:active { transform: translateY(0); }
@@ -274,6 +312,19 @@
 .connection-explorer button.net-reveal-header { display: inline-flex; align-items: center; gap: 8px; padding: 8px 22px; font-size: 14px; }
 
 /* The paused search's invitation: it drops in like the Reveal announcement, then the button breathes until it is pressed. */
+/* What the search is asking, in a card that slides out from under the top edge of the graph: under the year strip when there is one, under the
+   full-screen bar there. The wrap clips it at that edge, so it looks pulled out from behind it. */
+.net-activity-wrap { position: absolute; top: 0; left: 50%; transform: translateX(-50%); max-width: calc(100% - 32px); padding: 0 24px 24px; overflow: hidden; pointer-events: none; z-index: 1; }
+.net-activity-wrap.is-below-strip { top: 24px; }
+.connection-explorer.is-fullscreen .net-activity-wrap { top: 83px; z-index: 3; }
+.connection-explorer-body.has-panel .net-activity-wrap { left: calc((100% - var(--panel-inset)) / 2); max-width: calc(100% - var(--panel-inset) - 32px); }
+.net-activity { display: flex; align-items: center; gap: 10px; padding: 8px 18px 9px; border-radius: 0 0 14px 14px; font-size: 13px; font-weight: 600; color: rgb(var(--color-content-primary)); background: rgb(var(--color-surface-muted)); border: 1px solid rgb(var(--color-border-strong)); border-top-width: 0; box-shadow: 0 6px 16px rgb(0 0 0 / .16); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; animation: net-activity-in 380ms cubic-bezier(.2, .9, .3, 1) both; transition: transform 350ms cubic-bezier(.5, 0, .75, 0); }
+.net-activity.is-leaving { transform: translateY(-115%); }
+@keyframes net-activity-in { from { transform: translateY(-115%); } to { transform: none; } }
+.net-activity i { flex: none; width: 9px; height: 9px; border-radius: 50%; background: rgb(var(--color-connection)); animation: net-activity-dot 1.2s ease-in-out infinite; }
+.net-activity.is-waiting { color: rgb(var(--color-connection-text)); }
+.net-activity.is-waiting i { animation: none; opacity: .6; }
+@keyframes net-activity-dot { 0%, 100% { transform: scale(.7); opacity: .6; } 50% { transform: scale(1.15); opacity: 1; } }
 .net-resume-wrap { position: absolute; top: 76px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 12px; pointer-events: none; z-index: 3; width: min(420px, calc(100% - 32px)); }
 .net-resume { background: rgb(var(--color-connection)); color: rgb(var(--color-connection-contrast)); padding: 9px 20px; border-radius: 18px; font-weight: 700; font-size: 15px; text-align: center; box-shadow: 0 6px 20px rgb(0 0 0 / .25); animation: net-resume-drop 520ms cubic-bezier(.2, 1.3, .4, 1) both; }
 .net-resume small { display: block; margin-top: 2px; font-size: 11px; font-weight: 500; line-height: 1.35; opacity: .9; }
@@ -443,13 +494,17 @@
   .connection-explorer-footer { padding: 8px 10px; flex-direction: column; align-items: flex-start; gap: 8px; }
   .connection-explorer-footer p { flex: none; text-align: left; }
   .net-success-wrap { top: 54px; }
-  .net-success { font-size: 13px; }
   .net-resume-wrap { top: 54px; }
   .net-alert-wrap { top: 54px; }
   .net-resume { font-size: 13px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .connection-explorer *, .connection-explorer *::before { animation: none !important; transition: none !important; }
+  /* Without motion, the search's activity stays as still marks: one ring on the people asked about, lines in the colour of the work. */
+  .net-ripple:nth-child(1) { opacity: .8; transform: scale(1.5); }
+  .net-ripple:nth-child(n+2) { display: none; }
+  .net-edge.is-checking .net-edge-line { stroke-dasharray: 6 8; }
+  .net-beam.is-beam-seed .net-edge-line { stroke-dasharray: none; stroke-width: 3; }
 }
 
 /* The kicker with the “?” that explains Six Degrees of Separation. */

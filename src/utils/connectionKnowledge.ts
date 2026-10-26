@@ -14,11 +14,18 @@ export interface ConnectionRepository {
   loadKnowledge(): Promise<ContactKnowledge>;
   loadSession(key: string): Promise<ConnectionSession | null>;
   listSessions(canvasId: string): Promise<ConnectionSession[]>;
-  checkpoint(knowledge: ContactKnowledge, session: ConnectionSession): Promise<boolean>;
+  // `deferWrite`: the progress is kept for this page at once but may reach storage a moment later (a search saves after every request, and
+  // writing everything each time is what a large search cannot afford). Without it the save is complete when the promise settles.
+  checkpoint(knowledge: ContactKnowledge, session: ConnectionSession, options?: { deferWrite?: boolean }): Promise<boolean>;
   // Forgets a saved search (a paused exploration). The shared knowledge stays: the people and contacts it checked are reused by later searches.
   deleteSession(key: string): Promise<boolean>;
 }
 const clone = <T>(value: T): T => structuredClone(value);
+// Lets the page paint and answer input between the parts of a save, which together can take a while with a large search.
+// How long a save inside a search waits, so that the requests that follow share one write.
+// A big state takes long to write, so it is written less often: at most a tenth of the time goes to saving.
+const DEFERRED_WRITE_MS = 2500, DEFERRED_WRITE_MAX_MS = 20_000;
+const idle = () => new Promise<void>(resolve => setTimeout(resolve, 0));
 const empty = (): State => ({ version: 2, knowledge: { people: [], contacts: [] }, sessions: [] });
 const contactKey = (contact: ContactAssessment) => `${pairKey(...contact.pair)}:${contact.verdict === 'accepted' ? 'accepted' : `${contact.provenance.provider}:${contact.provenance.model}`}`;
 
@@ -159,7 +166,8 @@ export class MemoryConnectionRepository implements ConnectionRepository {
   async loadKnowledge() { return clone(this.state.knowledge); }
   async loadSession(key: string) { return clone(this.state.sessions.find(s => s.key === key) ?? null); }
   async listSessions(canvasId: string) { return clone(this.state.sessions.filter(s => s.canvasId === canvasId && s.status !== 'connected')); }
-  protected merge(knowledge: ContactKnowledge, session: ConnectionSession) {
+  // `checkpoint` is the session as it is kept: recovered and fitted to the limits, once per save.
+  protected merge(knowledge: ContactKnowledge, checkpoint: ConnectionSession | null) {
     const incoming = recoverKnowledge(knowledge);
     const people = new Map([...this.state.knowledge.people, ...incoming.people].map(p => [p.id, p]));
     const contacts = new Map(this.state.knowledge.contacts.map(c => [contactKey(c), c]));
@@ -169,12 +177,11 @@ export class MemoryConnectionRepository implements ConnectionRepository {
     const retainedPeople = [...people.values()].sort((a, b) => Number(important.has(b.id)) - Number(important.has(a.id))).slice(0, KNOWLEDGE_LIMITS.people);
     const retainedIds = new Set(retainedPeople.map(p => p.id));
     this.state.knowledge = { people: retainedPeople, contacts: keep.filter(c => c.pair.every(id => retainedIds.has(id))) };
-    const checkpoint = recoverSession(fitSession(session));
     const newer = this.state.sessions.find(s => s.key === checkpoint?.key && (s.runStartedAt ?? 0) > (checkpoint?.runStartedAt ?? 0));
     if (checkpoint && !newer) this.state.sessions = [checkpoint, ...this.state.sessions.filter(s => s.key !== checkpoint.key && !checkpoint.retiredKeys?.includes(s.key))]
       .filter(s => s.updatedAt >= Date.now() - KNOWLEDGE_LIMITS.checkpointAgeMs).slice(0, KNOWLEDGE_LIMITS.sessions);
   }
-  async checkpoint(knowledge: ContactKnowledge, session: ConnectionSession) { this.merge(knowledge, session); return this.persistent; }
+  async checkpoint(knowledge: ContactKnowledge, session: ConnectionSession) { this.merge(knowledge, recoverSession(fitSession(session))); return this.persistent; }
   protected removeSession(key: string) { this.state.sessions = this.state.sessions.filter(s => s.key !== key); }
   async deleteSession(key: string) { this.removeSession(key); return this.persistent; }
 }
@@ -184,9 +191,15 @@ export class IndexedConnectionRepository extends MemoryConnectionRepository {
   private available = false;
   private ready: Promise<void>;
   private writes: Promise<unknown> = Promise.resolve();
+  // Progress kept in memory that storage has not seen yet, and the timer that writes it.
+  private dirty = false;
+  private writeTimer: ReturnType<typeof setTimeout> | null = null;
+  private writeCost = 0;
   get persistent() { return this.available; }
   constructor(factory: IDBFactory | undefined = globalThis.indexedDB) {
     super();
+    // A page that is going away writes what is waiting, on a best-effort basis.
+    globalThis.addEventListener?.('pagehide', () => { if (this.dirty) void this.persist(); });
     this.ready = new Promise(resolve => {
       if (!factory) { resolve(); return; }
       let settled = false;
@@ -222,6 +235,8 @@ export class IndexedConnectionRepository extends MemoryConnectionRepository {
   // Writes the whole state; called only from inside the `writes` queue.
   private async persist(): Promise<boolean> {
     if (!this.available || !this.db) return false;
+    this.dirty = false;
+    const began = Date.now();
     try {
       await new Promise<void>((resolve, reject) => {
         const tx = this.db!.transaction(STORE, 'readwrite');
@@ -229,17 +244,31 @@ export class IndexedConnectionRepository extends MemoryConnectionRepository {
         tx.oncomplete = () => { clearTimeout(timer); resolve(); };
         tx.onerror = () => { clearTimeout(timer); reject(tx.error); };
         tx.onabort = () => { clearTimeout(timer); reject(tx.error); };
-        try { tx.objectStore(STORE).put(clone(this.state), 'state'); }
+        try { tx.objectStore(STORE).put(this.state, 'state'); } // `put` copies the state before it returns
         catch (error) { clearTimeout(timer); try { tx.abort(); } catch {} reject(error); }
       });
+      this.writeCost = Date.now() - began;
       return true;
     } catch { this.available = false; return false; }
   }
-  async checkpoint(knowledge: ContactKnowledge, session: ConnectionSession): Promise<boolean> {
+  private scheduleWrite() {
+    this.dirty = true;
+    if (this.writeTimer) return;
+    this.writeTimer = setTimeout(() => {
+      this.writeTimer = null;
+      this.writes = this.writes.then(async () => { if (!this.dirty) return; await idle(); await this.persist(); }).catch(() => {});
+    }, Math.min(DEFERRED_WRITE_MAX_MS, Math.max(DEFERRED_WRITE_MS, this.writeCost * 10)));
+    (this.writeTimer as { unref?: () => void }).unref?.();
+  }
+  async checkpoint(knowledge: ContactKnowledge, session: ConnectionSession, options?: { deferWrite?: boolean }): Promise<boolean> {
     await this.ready;
     const write = this.writes.then(async () => {
-      if (!recoverSession(fitSession(session))) return false;
-      this.merge(knowledge, session);
+      const checkpoint = recoverSession(fitSession(session));
+      if (!checkpoint) return false;
+      await idle();
+      this.merge(knowledge, checkpoint);
+      await idle();
+      if (options?.deferWrite && this.available) { this.scheduleWrite(); return true; }
       return this.persist();
     });
     this.writes = write.catch(() => {});

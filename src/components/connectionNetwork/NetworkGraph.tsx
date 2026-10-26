@@ -9,8 +9,9 @@ import {
 import { formatYear } from '../../utils/formatters';
 import { createWheelClassifier } from '../../utils/wheelGesture';
 import ToolButton from './ToolButton';
+import ActivityCaption from './ActivityCaption';
 import { fitCamera as fitPoints, isFarZoom, previewTransform, rectHasPoint, rectHasRect, rectHasSegment, viewRect, type Camera, type CameraPoint, type Rect } from './camera';
-import { GRAPH_PERF_CULLING, GRAPH_PERF_HIDE_PORTRAITS, GRAPH_PERF_LEVEL_OF_DETAIL, GRAPH_PERF_ZOOM_PREVIEW } from './performance';
+import { GRAPH_PERF_CULLING, GRAPH_PERF_EXTENDED_ANIMATIONS, GRAPH_PERF_HIDE_PORTRAITS, GRAPH_PERF_LEVEL_OF_DETAIL, GRAPH_PERF_ZOOM_PREVIEW } from './performance';
 import LayoutMenu from './LayoutMenu';
 import { layoutInfoLabel } from '../LayoutInfo';
 import { labelLimit, nodeRadius } from './metrics';
@@ -41,7 +42,7 @@ interface Props {
   narrow: boolean;
   reducedMotion: boolean;
   success: { degrees: number } | null;
-  // A connection that was already made, reopened to explore: nothing is dimmed or framed and its chain is lime, lines on or off (Reveal is in the header).
+  // A connection that was already made, reopened to explore: nothing is framed, everyone off the chain is dimmed until something is selected, and its chain is lime, lines on or off (Reveal is in the header).
   solved?: { degrees: number } | null;
   // Whether the chain of a found or solved connection is lit (lime); off, it looks like any other AI-supported contacts.
   showChain?: boolean;
@@ -61,6 +62,10 @@ interface Props {
   inset?: number;
   // Opens the explanation of the current layout (absent: no help button in the toolbar).
   onOpenLayoutInfo?: () => void;
+  // Whether the search is also drawn along lines and in a caption (see `GRAPH_PERF_EXTENDED_ANIMATIONS`).
+  extendedAnimations?: boolean;
+  // Hears how wide the activity caption is while it is shown (0 when not), for the full-screen bar to make room for.
+  onCaptionWidth?: (width: number) => void;
 }
 
 const sideClass = (node: NetworkNode) => node.endpoint !== null ? `is-endpoint is-end-${node.endpoint === 0 ? 'a' : 'b'}` : `is-side-${node.side}`;
@@ -119,12 +124,21 @@ const EdgeLayer = memo(function EdgeLayer({ edges, selection, focus, chainEdges,
   })}</>;
 });
 
+// What the search is doing, drawn as lines of its own between two people (they are painted like any other line, from their data-from / data-to):
+// a beam from each person whose contacts are sought toward the other end of the chain, or a comet between the endpoints while a seed route is asked for.
+interface Beam { id: string; from: string; to: string; kind: 'a' | 'b' | 'seed' }
+const BeamLayer = memo(function BeamLayer({ beams }: { beams: readonly Beam[] }) {
+  return <>{beams.map(beam => <g key={beam.id} data-edge={beam.id} data-from={beam.from} data-to={beam.to} className={`net-edge net-beam is-beam-${beam.kind}`} aria-hidden="true">
+    <path className="net-edge-halo" /><path className="net-edge-line" pathLength={beam.kind === 'seed' ? 100 : undefined} /><path className="net-edge-hit" />
+  </g>)}</>;
+});
+
 interface NodeItemProps {
   id: string; name: string; years: string; category: NetworkNode['person']['category']; endpoint: 0 | 1 | null; label: string; className: string;
-  selected: boolean; r: number; url?: string; clip: string; pinned: boolean; active: boolean; shownName: string; foldCount: number; foldExpanded: boolean;
+  selected: boolean; r: number; url?: string; clip: string; pinned: boolean; active: boolean; working: string; shownName: string; foldCount: number; foldExpanded: boolean;
   handlers: NodeHandlers; onSelect: (selection: NetworkSelection) => void; onToggleFold: (hostId: string) => void;
 }
-const NodeItem = memo(function NodeItem({ id, name, years, category, endpoint, label, className, selected, r, url, clip, pinned, active, shownName, foldCount, foldExpanded, handlers, onSelect, onToggleFold }: NodeItemProps) {
+const NodeItem = memo(function NodeItem({ id, name, years, category, endpoint, label, className, selected, r, url, clip, pinned, active, working, shownName, foldCount, foldExpanded, handlers, onSelect, onToggleFold }: NodeItemProps) {
   const isEndpoint = endpoint !== null;
   const select = () => onSelect({ person: id });
   return <g data-net-interactive data-node={id} role="button" tabIndex={0} aria-label={label} aria-pressed={selected}
@@ -133,7 +147,9 @@ const NodeItem = memo(function NodeItem({ id, name, years, category, endpoint, l
     <title>{`${name} (${years})`}</title>
     <g className="net-node-body">
       {isEndpoint && <g className="net-beacon" aria-hidden="true"><circle className="net-halo" r={r + 28} /><circle className="net-halo-ring" r={r + 14} /></g>}
-      {active && <circle className="net-pulse" r={r + 9} />}
+      {working.startsWith('asked') && <g className="net-ripple-set" aria-hidden="true"><circle className="net-ripple" r={r + 3} /><circle className="net-ripple" r={r + 3} /><circle className="net-ripple" r={r + 3} /></g>}
+      {working === 'identity' && <circle className="net-scan" r={r + 8} aria-hidden="true" />}
+      {active && <g className="net-pulse-set" aria-hidden="true"><circle className="net-pulse-halo" r={r + 6} /><circle className="net-pulse" r={r + 6} /><circle className="net-pulse" r={r + 6} /><circle className="net-pulse" r={r + 6} /></g>}
       <circle className="net-select-ring" r={r + 8} />
       <circle className="net-ring" r={r + 3} />
       <circle className="net-disc" r={r} fill={CATEGORY_COLORS[category]} />
@@ -153,8 +169,8 @@ const NodeItem = memo(function NodeItem({ id, name, years, category, endpoint, l
   </g>;
 });
 
-const NodeLayer = memo(function NodeLayer({ nodes, folds, selection, focus, chainNodes, narrow, portraits, failed, pinned, endpointNames, clips, handlers, onSelect, onToggleFold }: {
-  nodes: NetworkNode[]; folds: NetworkFold[]; selection: NetworkSelection; focus: Focus; chainNodes: ReadonlySet<string> | null; narrow: boolean;
+const NodeLayer = memo(function NodeLayer({ nodes, folds, selection, focus, chainNodes, workingEnds, narrow, portraits, failed, pinned, endpointNames, clips, handlers, onSelect, onToggleFold }: {
+  nodes: NetworkNode[]; folds: NetworkFold[]; selection: NetworkSelection; focus: Focus; chainNodes: ReadonlySet<string> | null; workingEnds: string; narrow: boolean;
   portraits: Map<string, string>; failed: ReadonlyMap<string, string>; pinned: ReadonlySet<string>; endpointNames: [string, string];
   clips: { endpoint: string; person: string }; handlers: NodeHandlers; onSelect: (selection: NetworkSelection) => void; onToggleFold: (hostId: string) => void;
 }) {
@@ -162,11 +178,11 @@ const NodeLayer = memo(function NodeLayer({ nodes, folds, selection, focus, chai
   return <>{nodes.map(node => {
     const isEndpoint = node.endpoint !== null, fold = foldOf.get(node.id), isPinned = pinned.has(node.id), name = node.person.name;
     const selected = selection.person === node.id, onEdge = !!selection.edge && !!focus?.nodes.has(node.id);
-    const className = `net-node ${sideClass(node)} ${node.supported ? 'is-supported' : 'is-tentative'} ${selected ? 'is-selected' : ''} ${onEdge ? 'is-edge-end' : ''} ${focus && !focus.nodes.has(node.id) ? 'is-dim' : ''} ${chainNodes?.has(node.id) ? 'is-chain' : ''} ${node.active ? 'is-active' : ''}`;
+    const className = `net-node ${sideClass(node)} ${node.supported ? 'is-supported' : 'is-tentative'} ${selected ? 'is-selected' : ''} ${onEdge ? 'is-edge-end' : ''} ${focus && !focus.nodes.has(node.id) ? 'is-dim' : ''} ${chainNodes?.has(node.id) ? 'is-chain' : ''} ${node.active ? 'is-active' : ''} ${isEndpoint && workingEnds.includes(node.endpoint === 0 ? 'a' : 'b') ? 'is-working-end' : ''} ${node.working ? `is-${node.working.kind}${node.working.side ? `-${node.working.side}` : ''}` : ''}`;
     return <NodeItem key={node.id} id={node.id} name={name} years={`${node.person.birthYear}–${node.person.deathYear}`} category={node.person.category}
       endpoint={node.endpoint} label={`${name}, ${describeSide(node, endpointNames)}${isPinned ? ', pinned' : ''}`} className={className} selected={selected}
       r={nodeRadius(isEndpoint, narrow)} url={failed.get(node.id) !== portraits.get(node.id) ? portraits.get(node.id) : undefined} clip={isEndpoint ? clips.endpoint : clips.person}
-      pinned={isPinned} active={node.active} shownName={isEndpoint ? truncateName(name, ENDPOINT_NAME_LIMIT) : truncateName(name, labelLimit(narrow))}
+      pinned={isPinned} active={node.active} working={node.working ? `${node.working.kind}${node.working.side ? `-${node.working.side}` : ''}` : ''} shownName={isEndpoint ? truncateName(name, ENDPOINT_NAME_LIMIT) : truncateName(name, labelLimit(narrow))}
       foldCount={fold?.ids.length ?? 0} foldExpanded={!!fold?.expanded} handlers={handlers} onSelect={onSelect} onToggleFold={onToggleFold} />;
   })}</>;
 });
@@ -197,12 +213,14 @@ const PREVIEW_OVERSCAN = 0.5;
 const AXIS_PREVIEW_REACH = 3;
 // From this many drawn people and lines, dimming is immediate instead of fading (see the stylesheet).
 const LARGE_DRAWING = 250;
+// How long a line flashes after its contact is decided (the stylesheet's `net-decided` animations last about as long).
+const DECIDED_FLASH_MS = 1600;
 
 // The drawing: an SVG whose structure React renders and whose positions the layout paints directly,
 // so the simulation never re-renders the explorer. The camera is a transform over screen-sized content.
 const NetworkGraph: React.FC<Props> = ({
   view, endpointNames, nameOf, layout, kick, pinned, mode, onModeChange, size, onSize, selection, onSelect, portraits, narrow, reducedMotion,
-  success, solved = null, showChain = true, onReveal, resume = null, reveal, onPinsChange, onToggleFold, legend, maximized, onToggleMaximize, inset = 0, onOpenLayoutInfo,
+  success, solved = null, showChain = true, onReveal, resume = null, reveal, onPinsChange, onToggleFold, legend, maximized, onToggleMaximize, inset = 0, onOpenLayoutInfo, extendedAnimations = GRAPH_PERF_EXTENDED_ANIMATIONS, onCaptionWidth,
 }) => {
   const uid = useId().replace(/:/g, '');
   const svg = useRef<SVGSVGElement>(null);
@@ -541,6 +559,42 @@ const NetworkGraph: React.FC<Props> = ({
   }, [view.edges, view.focus, showLines, selection.edge, chainEdges]);
   // The endpoints are drawn last, on top of everybody else, so a crowd never covers them.
   const drawnNodes = useMemo(() => [...view.nodes].sort((x, y) => Number(x.endpoint !== null) - Number(y.endpoint !== null)), [view.nodes]);
+  // The lines the search itself draws: from each person whose contacts are asked about toward the far end of the chain (the beams), or between
+  // the endpoints while a seed route is asked for (the comet).
+  const beams = useMemo<Beam[]>(() => {
+    const activity = view.activity; if (!activity || (!extendedAnimations && activity.kind !== 'seed')) return [];
+    const ends = [0, 1].map(index => view.nodes.find(node => node.endpoint === index)?.id);
+    if (!ends[0] || !ends[1]) return [];
+    if (activity.kind === 'seed') return [{ id: 'beam:seed', from: ends[0], to: ends[1], kind: 'seed' }];
+    if (activity.kind !== 'discover') return [];
+    const present = new Set(view.nodes.map(node => node.id));
+    return activity.people.flatMap(({ id, side }): Beam[] => {
+      const goal = side === 'a' ? ends[1]! : ends[0]!;
+      return side && id !== goal && present.has(id) ? [{ id: `beam:${id}`, from: id, to: goal, kind: side }] : [];
+    });
+  }, [view.activity, view.nodes, extendedAnimations]);
+  // Which end of the chain the search is working outward from right now ('a', 'b', both, or none), for the endpoints' halos to breathe.
+  const workingEnds = !extendedAnimations ? '' : view.activity?.kind === 'seed' ? 'ab' : view.activity?.kind === 'discover' ? ['a', 'b'].filter(side => view.activity!.people.some(person => person.side === side)).join('') : '';
+  // A line whose contact has just been decided flashes for a moment: accepted lights up, unresolved flickers grey. The class is set on the
+  // line itself and removed when the flash ends, so no render of the graph is needed for it.
+  const lastStatus = useRef(new Map<string, string>());
+  const flashTimers = useRef(new Set<number>());
+  useEffect(() => {
+    const now = new Map<string, string>(), fresh: Array<[string, string]> = [];
+    for (const edge of view.edges) {
+      now.set(edge.id, edge.status);
+      if (lastStatus.current.get(edge.id) === 'checking' && (edge.status === 'accepted' || edge.status === 'unresolved')) fresh.push([edge.id, `just-${edge.status}`]);
+    }
+    lastStatus.current = now;
+    if (!extendedAnimations || reducedMotion) return;
+    for (const [id, flash] of fresh) {
+      const el = edgeEls.current.get(id)?.el; if (!el) continue;
+      el.classList.add(flash);
+      const timer = window.setTimeout(() => { flashTimers.current.delete(timer); el.classList.remove(flash); }, DECIDED_FLASH_MS);
+      flashTimers.current.add(timer);
+    }
+  }, [view.edges, reducedMotion, extendedAnimations]);
+  useEffect(() => () => { for (const timer of flashTimers.current) window.clearTimeout(timer); }, []);
   const pinnedCount = pinned.size;
   const farRef = useRef(false);
   const far = GRAPH_PERF_LEVEL_OF_DETAIL && drawnNodes.length >= LOD_MIN_PEOPLE && isFarZoom(camera.k, farRef.current);
@@ -566,10 +620,10 @@ const NetworkGraph: React.FC<Props> = ({
     }
     nodeEls.current = nodes; edgeEls.current = edges;
     paint();
-  }, [drawnNodes, drawnEdges, rings, columns, corridor, closestVisible, mode, paint]);
+  }, [drawnNodes, drawnEdges, beams, rings, columns, corridor, closestVisible, mode, paint]);
 
   // With a solved connection's lines on, every other line steps back (see the stylesheet) so the lime chain stands out.
-  return <div className={['net-graph', success && 'is-success', solved && showChain && showLines && view.chain && 'is-solved', drawnNodes.length + drawnEdges.length >= LARGE_DRAWING && 'is-large', far && 'is-far', far && GRAPH_PERF_HIDE_PORTRAITS && 'is-far-portraits'].filter(Boolean).join(' ')}>
+  return <div className={['net-graph', success && 'is-success', extendedAnimations && 'is-extended', solved && showChain && showLines && view.chain && 'is-solved', drawnNodes.length + drawnEdges.length >= LARGE_DRAWING && 'is-large', far && 'is-far', far && GRAPH_PERF_HIDE_PORTRAITS && 'is-far-portraits'].filter(Boolean).join(' ')}>
     <div className="net-stage">
     <svg ref={svg} className="net-svg" role="group" aria-label="Live contact graph"
       onPointerDown={onBackgroundDown} onPointerMove={onBackgroundMove} onPointerUp={onBackgroundUp} onPointerCancel={onBackgroundUp}>
@@ -615,12 +669,13 @@ const NetworkGraph: React.FC<Props> = ({
           })}
         </g>}
         {corridored && corridor && <g className="net-corridor" aria-hidden="true" ref={el => { corridorEl.current = el; }} data-a={corridor.from} data-b={corridor.to}><path /></g>}
+        <BeamLayer beams={beams} />
         <EdgeLayer edges={drawnEdges} selection={selection} focus={view.focus} chainEdges={chainEdges} nameOf={nameOf} onSelect={onSelect} />
         {closestVisible && <g className="net-gap" ref={el => { gapEl.current = el; }} data-a={closest.a} data-b={closest.b}>
           <title>{closestApproachLabel(closest, nameOf)}</title>
           <path className="net-gap-line" /><path className="net-gap-hit" />
         </g>}
-        <NodeLayer nodes={drawnNodes} folds={view.folds} selection={selection} focus={view.focus} chainNodes={chainNodes} narrow={narrow} portraits={portraits}
+        <NodeLayer nodes={drawnNodes} folds={view.folds} selection={selection} focus={view.focus} chainNodes={chainNodes} workingEnds={workingEnds} narrow={narrow} portraits={portraits}
           failed={failed} pinned={pinned} endpointNames={endpointNames} clips={clips} handlers={handlers} onSelect={onSelect} onToggleFold={onToggleFold} />
       </g>
     </svg>
@@ -656,8 +711,8 @@ const NetworkGraph: React.FC<Props> = ({
     </div>
     <div className="net-menu-host" ref={setMenuHost} />
     </div>
+    {!success && !resume && <ActivityCaption activity={view.activity} nameOf={nameOf} belowStrip={mode === 'time'} onWidth={onCaptionWidth} />}
     {success && <div className="net-success-wrap">
-      <div className="net-success" role="status">Connected · {success.degrees} {success.degrees === 1 ? 'degree' : 'degrees'}<small>Look the chain over, then press Reveal to play it</small></div>
       <button type="button" className="net-reveal" onClick={onReveal} autoFocus>Reveal</button>
     </div>}
     {resume && !success && <div className="net-resume-wrap">
